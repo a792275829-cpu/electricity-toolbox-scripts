@@ -1,0 +1,10 @@
+{
+  "username": "your-username",
+  "password": "your-password",
+  "headless": true,
+  "unitIdsMode": "all",
+  "skipExisting": true,
+  "requestDelaySeconds": 1,
+  "exportTimeoutSeconds": 60,
+  "downloadDir": "~/Desktop/downloads"
+}

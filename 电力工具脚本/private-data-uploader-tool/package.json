@@ -1,0 +1,14 @@
+{
+  "name": "private-data-uploader",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "plan": "node scripts/upload-private-data.mjs --plan",
+    "upload": "node scripts/upload-private-data.mjs --execute",
+    "login": "node scripts/upload-private-data.mjs --login"
+  },
+  "dependencies": {
+    "playwright": "^1.54.2"
+  }
+}

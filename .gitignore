@@ -1,0 +1,38 @@
+# Local secrets and browser login state
+**/config.json
+**/auth_state.json
+**/auth_state.json.lock
+**/upload.config.json
+**/wps_excel_to_kdocs_config.json
+**/.browser-profile/
+**/.browser-profile-uploader/
+
+# Runtime caches and dependencies
+.codegraph/
+**/__pycache__/
+**/*.py[cod]
+**/node_modules/
+**/.pytest_cache/
+**/.mypy_cache/
+
+# Logs and debug artifacts
+**/logs/
+**/*.log
+**/debug/
+
+# Generated business data and reports
+**/输出/
+集团每日上传/*.xlsx
+每日生产经营情况汇报自动生成工具/输出/
+上网电量抓取/输出/
+
+# Local office temp files
+~$*
+*.tmp
+*.bak
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
