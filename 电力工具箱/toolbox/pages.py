@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import threading
 import tkinter as tk
 from collections.abc import Mapping
@@ -23,7 +24,12 @@ from .widgets import ToolPage
 
 def _open_directory(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
-    os.startfile(str(path))
+    if sys.platform == "win32":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.run(["open", str(path)], check=False)
+    else:
+        subprocess.run(["xdg-open", str(path)], check=False)
 
 
 def default_review_root() -> Path:

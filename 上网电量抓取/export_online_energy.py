@@ -215,20 +215,33 @@ def save_auth_state(context) -> None:
     AUTH_STATE_PATH.write_text(json.dumps(context.storage_state(), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def playwright_proxy() -> dict[str, str] | None:
+    for name in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy"):
+        value = os.environ.get(name)
+        if value:
+            return {"server": value}
+    return None
+
+
 def launch_context(playwright, *, headless: bool):
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    launch_options = {
+        "headless": headless,
+        "accept_downloads": True,
+    }
+    proxy = playwright_proxy()
+    if proxy is not None:
+        launch_options["proxy"] = proxy
     try:
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_DIR),
             channel="chrome",
-            headless=headless,
-            accept_downloads=True,
+            **launch_options,
         )
     except PlaywrightError:
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_DIR),
-            headless=headless,
-            accept_downloads=True,
+            **launch_options,
         )
     load_saved_auth_state(context)
     return context

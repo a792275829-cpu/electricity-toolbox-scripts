@@ -117,6 +117,29 @@ async function pathExists(filePath) {
   }
 }
 
+async function defaultChromeExecutablePath() {
+  const candidates = [];
+  if (process.platform === 'darwin') {
+    candidates.push(
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      path.join(process.env.HOME ?? '', 'Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
+    );
+  } else if (process.platform === 'win32') {
+    const roots = [
+      process.env.PROGRAMFILES,
+      process.env['PROGRAMFILES(X86)'],
+      process.env.LOCALAPPDATA,
+    ].filter(Boolean);
+    for (const root of roots) {
+      candidates.push(path.join(root, 'Google/Chrome/Application/chrome.exe'));
+    }
+  }
+  for (const candidate of candidates) {
+    if (candidate && await pathExists(candidate)) return candidate;
+  }
+  return undefined;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -247,8 +270,16 @@ async function launchContext(config) {
     headless: config.headless,
     viewport: { width: 1600, height: 950 },
   };
-  if (config.chromeExecutablePath && await pathExists(config.chromeExecutablePath)) {
-    launchOptions.executablePath = config.chromeExecutablePath;
+  const proxyServer = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY
+    || process.env.https_proxy || process.env.http_proxy || process.env.all_proxy;
+  if (proxyServer) {
+    launchOptions.proxy = { server: proxyServer };
+  }
+  const chromeExecutablePath = config.chromeExecutablePath && await pathExists(config.chromeExecutablePath)
+    ? config.chromeExecutablePath
+    : await defaultChromeExecutablePath();
+  if (chromeExecutablePath) {
+    launchOptions.executablePath = chromeExecutablePath;
   }
 
   const storageState = await pathExists(config.authStatePath) ? config.authStatePath : undefined;

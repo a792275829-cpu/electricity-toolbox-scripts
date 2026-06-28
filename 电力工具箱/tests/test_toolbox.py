@@ -12,6 +12,7 @@ import shutil
 from datetime import date
 from datetime import timedelta
 from pathlib import Path
+from unittest import mock
 
 
 def destroy_tk(root: tk.Misc) -> None:
@@ -33,11 +34,11 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(paths.workspace, workspace.resolve())
             self.assertEqual(
                 paths.online_energy,
-                workspace / "上网电量抓取" / "export_online_energy.py",
+                workspace.resolve() / "上网电量抓取" / "export_online_energy.py",
             )
             self.assertEqual(
                 paths.private_uploader,
-                workspace
+                workspace.resolve()
                 / "电力工具脚本"
                 / "private-data-uploader-tool"
                 / "scripts"
@@ -45,7 +46,7 @@ class RuntimeTests(unittest.TestCase):
             )
             self.assertEqual(
                 paths.wps_writer,
-                workspace / "wps自动" / "wps_excel_to_kdocs_gui.py",
+                workspace.resolve() / "wps自动" / "wps_excel_to_kdocs_gui.py",
             )
 
     def test_load_module_rejects_missing_file(self) -> None:
@@ -63,6 +64,23 @@ class RuntimeTests(unittest.TestCase):
 
         self.assertEqual(environment["PYTHONUTF8"], "1")
         self.assertEqual(environment["PYTHONIOENCODING"], "utf-8")
+
+    def test_python_executable_uses_current_interpreter_on_macos(self) -> None:
+        if sys.platform != "darwin":
+            self.skipTest("macOS-specific runtime expectation")
+
+        from toolbox.runtime import python_executable, pythonw_executable
+
+        self.assertEqual(Path(python_executable()).resolve(), Path(sys.executable).resolve())
+        self.assertEqual(Path(pythonw_executable()).resolve(), Path(sys.executable).resolve())
+
+    def test_node_executable_uses_plain_node_on_macos(self) -> None:
+        if sys.platform != "darwin":
+            self.skipTest("macOS-specific runtime expectation")
+
+        from toolbox.runtime import node_executable
+
+        self.assertEqual(node_executable(), "node")
 
     def test_task_registry_tracks_and_terminates_owned_process(self) -> None:
         from toolbox.runtime import TaskRegistry
@@ -299,6 +317,20 @@ class PageAdapterTests(unittest.TestCase):
         self.assertFalse(hasattr(page, "open_button"))
         self.assertFalse(hasattr(page, "build_open_command"))
 
+    def test_open_directory_uses_macos_open_command(self) -> None:
+        if sys.platform != "darwin":
+            self.skipTest("macOS-specific directory opener")
+
+        from toolbox.pages import _open_directory
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "output"
+            with mock.patch("subprocess.run") as run:
+                _open_directory(target)
+
+            self.assertTrue(target.is_dir())
+            run.assert_called_once_with(["open", str(target)], check=False)
+
     def test_group_upload_auto_selects_latest_d_minus_two_energy_file(self) -> None:
         from toolbox.pages import GroupUploadPage
 
@@ -402,6 +434,8 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue((workspace / "wps自动" / "wps_excel_to_kdocs_gui.py").is_file())
 
     def test_root_keeps_only_hidden_vbs_launcher_as_file(self) -> None:
+        if sys.platform != "win32":
+            self.skipTest("Windows launcher layout expectation")
         root_files = [item for item in self.script_root.iterdir() if item.is_file()]
         self.assertEqual(1, len(root_files), [item.name for item in root_files])
         self.assertEqual(".vbs", root_files[0].suffix.lower())
@@ -410,6 +444,8 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue((self.workspace / "toolbox_launcher.pyw").is_file())
         self.assertTrue((self.workspace / "toolbox" / "app.py").is_file())
     def test_vbs_launcher_runs_powershell_hidden_and_can_move(self) -> None:
+        if sys.platform != "win32":
+            self.skipTest("Windows launcher smoke test")
         source = next(item for item in self.script_root.iterdir() if item.is_file() and item.suffix.lower() == ".vbs")
         content = source.read_text(encoding="utf-8")
 
@@ -423,6 +459,36 @@ class LauncherTests(unittest.TestCase):
             shutil.copy2(source, copied)
             result = subprocess.run(
                 ["cscript.exe", "//nologo", str(copied)],
+                cwd=directory,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env={**os.environ, "TOOLBOX_SMOKE": "1"},
+                timeout=30,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("TOOLBOX_SCRIPT=", result.stdout)
+        self.assertIn("toolbox_launcher.pyw", result.stdout)
+
+    def test_macos_command_launcher_runs_from_moved_copy(self) -> None:
+        if sys.platform != "darwin":
+            self.skipTest("macOS launcher smoke test")
+
+        source = self.script_root / "电力工具箱.command"
+        self.assertTrue(source.is_file())
+        content = source.read_text(encoding="utf-8")
+        self.assertIn("TOOLBOX_SMOKE", content)
+        self.assertNotIn("C:\\Users\\lllg", content)
+
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "moved-toolbox.command"
+            shutil.copy2(source, copied)
+            copied.chmod(0o755)
+            result = subprocess.run(
+                [str(copied)],
                 cwd=directory,
                 text=True,
                 encoding="utf-8",
