@@ -6,6 +6,7 @@
 **/wps_excel_to_kdocs_config.json
 **/.browser-profile/
 **/.browser-profile-uploader/
+**/wps-browser-profile/
 
 # Runtime caches and dependencies
 .codegraph/

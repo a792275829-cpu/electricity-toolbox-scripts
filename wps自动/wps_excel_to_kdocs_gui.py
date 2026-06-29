@@ -39,6 +39,9 @@ CONFIG_PATH = BASE_DIR / "wps_excel_to_kdocs_config.json"
 PROFILE_DIR = BASE_DIR / "wps-browser-profile"
 LOG_DIR = BASE_DIR / "logs"
 MAX_RECENT_URLS = 10
+DOCUMENT_CONFIGS_MIN_HEIGHT = 220
+CONFIG_EXPORT_SCHEMA = "wps_excel_to_kdocs_config_export"
+CONFIG_EXPORT_VERSION = 1
 
 
 def center_window(window: tk.Toplevel | tk.Tk, width: int | None = None, height: int | None = None) -> None:
@@ -217,6 +220,94 @@ def load_config() -> dict[str, Any]:
 
 def save_config(data: dict[str, Any]) -> None:
     CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def _region_config_from_dict(row: dict[str, Any]) -> dict[str, str]:
+    return {
+        "source_sheet": str(row.get("source_sheet", "")),
+        "source_start": str(row.get("source_start", "")),
+        "source_end": str(row.get("source_end", "")),
+        "target_sheet": str(row.get("target_sheet", "")),
+        "target_start": str(row.get("target_start", "")),
+        "target_end": str(row.get("target_end", "")),
+    }
+
+
+def _document_config_from_dict(row: dict[str, Any]) -> dict[str, Any]:
+    regions = [
+        _region_config_from_dict(region)
+        for region in row.get("regions", [])
+        if isinstance(region, dict)
+    ]
+    name = str(row.get("name", "")).strip() or Path(str(row.get("local_file", ""))).stem or "Config"
+    source_type = str(row.get("source_type", "excel")).strip() or "excel"
+    if source_type not in {"excel", "kdocs"}:
+        source_type = "excel"
+    return {
+        "name": name,
+        "source_type": source_type,
+        "source_url": str(row.get("source_url", "")),
+        "kdocs_url": str(row.get("kdocs_url", "")),
+        "local_file": str(row.get("local_file", "")),
+        "regions": regions,
+    }
+
+
+def normalize_runtime_config(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "recent_urls": _string_list(data.get("recent_urls", [])),
+        "browser_mode": str(data.get("browser_mode", "persistent") or "persistent"),
+        "cdp_url": str(data.get("cdp_url", "http://127.0.0.1:9222") or "http://127.0.0.1:9222"),
+        "configs": [
+            _document_config_from_dict(row)
+            for row in data.get("configs", [])
+            if isinstance(row, dict)
+        ],
+    }
+
+
+def build_config_export(runtime_config: dict[str, Any], exported_at: str | None = None) -> dict[str, Any]:
+    export_time = exported_at or datetime.now().replace(microsecond=0).isoformat()
+    return {
+        "schema": CONFIG_EXPORT_SCHEMA,
+        "version": CONFIG_EXPORT_VERSION,
+        "exported_at": export_time,
+        **normalize_runtime_config(runtime_config),
+    }
+
+
+def runtime_config_from_export_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("schema") != CONFIG_EXPORT_SCHEMA:
+        raise ValueError(f"Unsupported config export schema: {payload.get('schema')!r}")
+    if payload.get("version") != CONFIG_EXPORT_VERSION:
+        raise ValueError(f"Unsupported config export version: {payload.get('version')!r}")
+    runtime_config = normalize_runtime_config(payload)
+    if not runtime_config["configs"]:
+        raise ValueError("Config export does not contain any document configs.")
+    return runtime_config
+
+
+def load_config_export(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON config export: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Config export must be a JSON object.")
+    return runtime_config_from_export_payload(payload)
+
+
+def save_config_export(path: Path, runtime_config: dict[str, Any]) -> None:
+    path.write_text(
+        json.dumps(build_config_export(runtime_config), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def update_recent_urls(urls: list[str], url: str) -> list[str]:
@@ -1345,7 +1436,7 @@ class WpsWriterFrame(ttk.Frame):
         root = ttk.Frame(self, padding=10)
         root.pack(fill="both", expand=True)
         root.columnconfigure(0, weight=1)
-        root.rowconfigure(1, weight=2)
+        root.rowconfigure(1, weight=3, minsize=DOCUMENT_CONFIGS_MIN_HEIGHT)
         root.rowconfigure(2, weight=1)
 
         file_frame = ttk.LabelFrame(root, text="Browser")
@@ -1382,6 +1473,8 @@ class WpsWriterFrame(ttk.Frame):
         ttk.Button(mapping_toolbar, text="Remove", command=self.remove_config).pack(side="left", padx=8)
         ttk.Button(mapping_toolbar, text="Move up", command=self.move_config_up).pack(side="left")
         ttk.Button(mapping_toolbar, text="Move down", command=self.move_config_down).pack(side="left", padx=8)
+        ttk.Button(mapping_toolbar, text="Import", command=self.import_config).pack(side="left")
+        ttk.Button(mapping_toolbar, text="Export", command=self.export_config).pack(side="left", padx=8)
         ttk.Button(mapping_toolbar, text="Write to WPS", command=self.write).pack(side="right")
         ttk.Button(mapping_toolbar, text="Preview", command=self.preview).pack(side="right", padx=8)
 
@@ -1791,7 +1884,10 @@ class WpsWriterFrame(ttk.Frame):
 
     def save_current_config(self) -> None:
         self.remember_mapping_urls()
-        save_config(
+        save_config(self.current_runtime_config())
+
+    def current_runtime_config(self) -> dict[str, Any]:
+        return normalize_runtime_config(
             {
                 "recent_urls": self.recent_urls,
                 "browser_mode": self.browser_mode.get(),
@@ -1809,6 +1905,54 @@ class WpsWriterFrame(ttk.Frame):
                 ],
             }
         )
+
+    def apply_runtime_config(self, config: dict[str, Any]) -> None:
+        runtime_config = normalize_runtime_config(config)
+        self.recent_urls = runtime_config["recent_urls"]
+        self.browser_mode.set(runtime_config["browser_mode"])
+        self.cdp_url.set(runtime_config["cdp_url"])
+        self.configs = [self.document_config_from_config(row) for row in runtime_config["configs"]]
+        self.remember_mapping_urls()
+        self.refresh_tree()
+        self.save_current_config()
+
+    def import_config(self) -> None:
+        path_text = filedialog.askopenfilename(
+            parent=self,
+            title="Import WPS writer config",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path_text:
+            return
+        try:
+            runtime_config = load_config_export(Path(path_text))
+            self.apply_runtime_config(runtime_config)
+        except Exception as exc:
+            messagebox.showerror("Import config failed", str(exc), parent=self)
+            self.log(f"ERROR: Import config failed: {exc}")
+            return
+        self.log(f"Imported config: {Path(path_text).name}")
+        messagebox.showinfo("Import config", "Config imported and saved.", parent=self)
+
+    def export_config(self) -> None:
+        default_name = f"wps_writer_config_export_{datetime.now().strftime('%Y%m%d')}.json"
+        path_text = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export WPS writer config",
+            defaultextension=".json",
+            initialfile=default_name,
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path_text:
+            return
+        try:
+            save_config_export(Path(path_text), self.current_runtime_config())
+        except Exception as exc:
+            messagebox.showerror("Export config failed", str(exc), parent=self)
+            self.log(f"ERROR: Export config failed: {exc}")
+            return
+        self.log(f"Exported config: {path_text}")
+        messagebox.showinfo("Export config", "Config exported.", parent=self)
 
     def selected_config_indexes(self) -> list[int]:
         selected = self.tree.selection()

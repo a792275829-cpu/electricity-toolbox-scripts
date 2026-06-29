@@ -317,6 +317,94 @@ class PageAdapterTests(unittest.TestCase):
         self.assertFalse(hasattr(page, "open_button"))
         self.assertFalse(hasattr(page, "build_open_command"))
 
+    def test_wps_writer_keeps_document_configs_visible_when_resized(self) -> None:
+        from toolbox.runtime import load_module
+
+        module = load_module("toolbox_wps_writer_layout_test", self.paths.wps_writer)
+        frame = module.WpsWriterFrame(self.root)
+        frame.pack(fill="both", expand=True)
+        self.root.geometry("520x360")
+        self.root.update_idletasks()
+
+        content_root = frame.winfo_children()[0]
+        self.assertGreaterEqual(content_root.grid_rowconfigure(1)["minsize"], 220)
+
+    def test_wps_writer_imports_exported_config_payload(self) -> None:
+        from toolbox.runtime import load_module
+
+        module = load_module("toolbox_wps_writer_import_test", self.paths.wps_writer)
+        payload = {
+            "schema": "wps_excel_to_kdocs_config_export",
+            "version": 1,
+            "exported_at": "2026-06-29T16:45:11",
+            "recent_urls": ["https://www.kdocs.cn/l/target"],
+            "browser_mode": "cdp",
+            "cdp_url": "http://127.0.0.1:9222",
+            "configs": [
+                {
+                    "name": "上网电量写入",
+                    "source_type": "excel",
+                    "source_url": "",
+                    "kdocs_url": "https://www.kdocs.cn/l/target",
+                    "local_file": "C:/Users/lllg/Desktop/source.xlsx",
+                    "regions": [
+                        {
+                            "source_sheet": "汇总",
+                            "source_start": "A3",
+                            "source_end": "C26",
+                            "target_sheet": "汕头",
+                            "target_start": "T3",
+                            "target_end": "V26",
+                        }
+                    ],
+                }
+            ],
+        }
+
+        runtime_config = module.runtime_config_from_export_payload(payload)
+
+        self.assertEqual(runtime_config["browser_mode"], "cdp")
+        self.assertEqual(runtime_config["cdp_url"], "http://127.0.0.1:9222")
+        self.assertEqual(runtime_config["configs"][0]["name"], "上网电量写入")
+        self.assertEqual(runtime_config["configs"][0]["regions"][0]["target_sheet"], "汕头")
+
+    def test_wps_writer_exports_runtime_config_with_schema(self) -> None:
+        from toolbox.runtime import load_module
+
+        module = load_module("toolbox_wps_writer_export_test", self.paths.wps_writer)
+        runtime_config = {
+            "recent_urls": ["https://www.kdocs.cn/l/target"],
+            "browser_mode": "persistent",
+            "cdp_url": "http://127.0.0.1:9222",
+            "configs": [
+                {
+                    "name": "Config",
+                    "source_type": "kdocs",
+                    "source_url": "https://www.kdocs.cn/l/source",
+                    "kdocs_url": "https://www.kdocs.cn/l/target",
+                    "local_file": "",
+                    "regions": [
+                        {
+                            "source_sheet": "Sheet1",
+                            "source_start": "B4",
+                            "source_end": "C27",
+                            "target_sheet": "Sheet2",
+                            "target_start": "B3",
+                            "target_end": "C26",
+                        }
+                    ],
+                }
+            ],
+        }
+
+        exported = module.build_config_export(runtime_config, exported_at="2026-06-29T16:45:11")
+
+        self.assertEqual(exported["schema"], "wps_excel_to_kdocs_config_export")
+        self.assertEqual(exported["version"], 1)
+        self.assertEqual(exported["exported_at"], "2026-06-29T16:45:11")
+        self.assertEqual(exported["configs"][0]["source_type"], "kdocs")
+        self.assertEqual(module.runtime_config_from_export_payload(exported), runtime_config)
+
     def test_open_directory_uses_macos_open_command(self) -> None:
         if sys.platform != "darwin":
             self.skipTest("macOS-specific directory opener")
