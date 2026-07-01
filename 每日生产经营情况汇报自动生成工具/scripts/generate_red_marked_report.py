@@ -178,6 +178,15 @@ def parse_float(value: Any) -> float:
     return float(value)
 
 
+def find_first_column_row(sheet, labels: tuple[str, ...]) -> int:
+    wanted = {label.strip() for label in labels}
+    for row in range(1, sheet.max_row + 1):
+        value = sheet.cell(row, 1).value
+        if isinstance(value, str) and value.strip() in wanted:
+            return row
+    raise KeyError(f"{sheet.title} 中未找到行：{'/'.join(labels)}")
+
+
 def find_clearing_workbook(date_text: str, workbook_dir: Path = CLEARING_WORKBOOK_DIR) -> Path:
     dt = datetime.strptime(date_text, "%Y-%m-%d")
     date_token = f"{dt.year}.{dt.month}.{dt.day}"
@@ -214,9 +223,9 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
         "\u6c55\u5934": 8,
         "\u6d77\u95e8": 13,
         "\u4e1c\u839e": 19,
-        "\u6d77\u4e0a\u98ce\u7535": 29,
-        "\u9b80\u83b2": 30,
-        "\u5f52\u6e56": 31,
+        "\u6d77\u4e0a\u98ce\u7535": find_first_column_row(sheet, ("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535")),
+        "\u9b80\u83b2": find_first_column_row(sheet, ("\u9b80\u83b2\u5149\u4f0f", "\u9b80\u83b2")),
+        "\u5f52\u6e56": find_first_column_row(sheet, ("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56")),
     }
     return {
         "workbook": str(workbook_path),
@@ -267,6 +276,11 @@ def load_online_price_summary(date_text: str, workbook_path: Path | None = None)
     if sheet_name is None:
         raise KeyError(f"{workbook_path} 中未找到快报（日前）工作表")
     sheet = workbook[sheet_name]
+    renewable_rows = {
+        "\u6d77\u4e0a\u98ce\u7535": find_first_column_row(sheet, ("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535")),
+        "\u9b80\u83b2": find_first_column_row(sheet, ("\u9b80\u83b2\u5149\u4f0f", "\u9b80\u83b2")),
+        "\u5f52\u6e56": find_first_column_row(sheet, ("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56")),
+    }
     return {
         "workbook": str(workbook_path),
         "sheet": sheet_name,
@@ -275,9 +289,9 @@ def load_online_price_summary(date_text: str, workbook_path: Path | None = None)
             "\u6c55\u5934": parse_float(sheet["G8"].value),
             "\u6d77\u95e8": parse_float(sheet["G13"].value),
             "\u4e1c\u839e": parse_float(sheet["G19"].value),
-            "\u6d77\u4e0a\u98ce\u7535": parse_float(sheet["H29"].value),
-            "\u9b80\u83b2": parse_float(sheet["H30"].value),
-            "\u5f52\u6e56": parse_float(sheet["H31"].value),
+            "\u6d77\u4e0a\u98ce\u7535": parse_float(sheet.cell(renewable_rows["\u6d77\u4e0a\u98ce\u7535"], 8).value),
+            "\u9b80\u83b2": parse_float(sheet.cell(renewable_rows["\u9b80\u83b2"], 8).value),
+            "\u5f52\u6e56": parse_float(sheet.cell(renewable_rows["\u5f52\u6e56"], 8).value),
         },
     }
 
@@ -519,6 +533,17 @@ def build_energy_text(date_text: str, energy: dict[str, Any], kind: str) -> str:
     )
 
 
+def ensure_qingyuan_online_energy_text(text: str) -> str:
+    if "\u6e05\u8fdc" in text:
+        return text
+    return re.sub(
+        r"(\u5176\u4e2d\uff0c.*?\u5343\u74e6\u65f6)(\uff1b\u5206\u516c\u53f8\u65e5\u524d\u5747\u4ef7)",
+        lambda match: f"{match.group(1)}\u3001\u6e05\u8fdc0\u4e07\u5343\u74e6\u65f6{match.group(2)}",
+        text,
+        count=1,
+    )
+
+
 def build_day_ahead_clearing_text(date_text: str, summary: dict[str, Any]) -> str:
     companies = summary["companies"]
     shantou = companies["\u6c55\u5934"]
@@ -534,7 +559,7 @@ def build_day_ahead_clearing_text(date_text: str, summary: dict[str, Any]) -> st
         f"\u4e1c\u839e{fmt_number(dongguan['energy'])}\u4e07\u3001"
         f"\u6d77\u4e0a\u98ce\u7535{fmt_number(offshore['energy'])}\u4e07\u3001"
         f"\u9b80\u83b2{fmt_number(tuolian['energy'])}\u4e07\u3001"
-        f"\u5f52\u6e56{fmt_number(guihu['energy'])}\u4e07\u5343\u74e6\u65f6\uff1b"
+        f"\u5f52\u6e56{fmt_number(guihu['energy'])}\u4e07\u5343\u74e6\u65f6\u3001\u6e05\u8fdc\uff08\u8ba1\u5212\uff090\u4e07\u5343\u74e6\u65f6\uff1b"
         f"\u5206\u516c\u53f8\u65e5\u524d\u5747\u4ef7{fmt_number(summary['averagePrice'])}\u5398/\u5343\u74e6\u65f6\uff0c"
         f"\u5176\u4e2d\u6c55\u5934{fmt_number(shantou['price'])}\u5398\u3001"
         f"\u6d77\u95e8{fmt_number(haimen['price'])}\u5398\u3001"
@@ -613,6 +638,7 @@ def generate(
     replace_paragraph(doc.paragraphs[6], f"{day_number(report_date)}\u65e5\uff1a")
     # P13 is left unchanged until the online energy table source is confirmed.
     replace_leading_date(doc.paragraphs[12], plan["actualOnlineEnergyDate"])
+    replace_paragraph(doc.paragraphs[12], ensure_qingyuan_online_energy_text(doc.paragraphs[12].text))
     replace_online_price_text(doc.paragraphs[12], online_prices)
     clear_paragraph_red(doc.paragraphs[12])
     replace_paragraph(doc.paragraphs[13], build_day_ahead_clearing_text(plan["dayAheadDate"], day_ahead_clearing))

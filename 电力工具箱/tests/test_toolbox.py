@@ -57,6 +57,101 @@ class RuntimeTests(unittest.TestCase):
             with self.assertRaisesRegex(FileNotFoundError, "missing.py"):
                 load_module("missing_tool", missing)
 
+    def test_report_export_proxy_reads_environment(self) -> None:
+        from toolbox.runtime import ToolPaths, load_module
+
+        paths = ToolPaths(Path(__file__).resolve().parents[2])
+        module = load_module("report_export_online_energy_test", paths.report_scripts_dir / "export_online_energy.py")
+
+        with mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:7890"}, clear=True):
+            self.assertEqual(module.playwright_proxy(), {"server": "http://127.0.0.1:7890"})
+
+    def test_report_summary_reads_shifted_renewable_rows(self) -> None:
+        from openpyxl import Workbook
+        from toolbox.runtime import ToolPaths, load_module
+
+        paths = ToolPaths(Path(__file__).resolve().parents[2])
+        sys.path.insert(0, str(paths.report_scripts_dir))
+        self.addCleanup(lambda: sys.path.remove(str(paths.report_scripts_dir)))
+        module = load_module(
+            "report_generate_red_marked_shifted_renewables_test",
+            paths.report_scripts_dir / "generate_red_marked_report.py",
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            workbook_path = Path(directory) / "出清情况（分公司2026.7.2).xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "快报  (日前)"
+            for cell, value in {
+                "F7": 10116.2898,
+                "G7": 422.0653,
+                "F8": 1317.6129,
+                "G8": 379.0106,
+                "F13": 8042.6026,
+                "G13": 419.1546,
+                "F19": 756.0743,
+                "G19": 528.0599,
+            }.items():
+                sheet[cell] = value
+            sheet["A28"] = "新能源"
+            sheet["G29"] = "日前出清"
+            sheet["G30"] = "电量"
+            sheet["H30"] = "电价"
+            for row, name, energy, price in [
+                (31, "分公司", 247.5663, 332.4490),
+                (32, "汕头海风", 189.3145, 285.4164),
+                (33, "鮀莲光伏", 24.4543, 512.7376),
+                (34, "归湖光伏", 33.7975, 465.4510),
+            ]:
+                sheet.cell(row, 1).value = name
+                sheet.cell(row, 7).value = energy
+                sheet.cell(row, 8).value = price
+            workbook.save(workbook_path)
+
+            clearing = module.load_day_ahead_clearing_summary("2026-07-02", workbook_path)
+            prices = module.load_online_price_summary("2026-07-02", workbook_path)
+
+        self.assertEqual(clearing["companies"]["海上风电"]["energy"], 189.3145)
+        self.assertEqual(clearing["companies"]["鮀莲"]["price"], 512.7376)
+        self.assertEqual(clearing["companies"]["归湖"]["energy"], 33.7975)
+        self.assertEqual(prices["companies"]["海上风电"], 285.4164)
+
+    def test_report_energy_text_includes_qingyuan_descriptions(self) -> None:
+        from toolbox.runtime import ToolPaths, load_module
+
+        paths = ToolPaths(Path(__file__).resolve().parents[2])
+        sys.path.insert(0, str(paths.report_scripts_dir))
+        self.addCleanup(lambda: sys.path.remove(str(paths.report_scripts_dir)))
+        module = load_module(
+            "report_generate_red_marked_qingyuan_text_test",
+            paths.report_scripts_dir / "generate_red_marked_report.py",
+        )
+
+        online_text = module.ensure_qingyuan_online_energy_text(
+            "7月1日分公司上网电量9003万千瓦时，其中，汕头1526万、海门6120万、"
+            "东莞1232万、海上风电58万、光伏67万千瓦时；分公司日前均价404厘/千瓦时，"
+            "其中汕头387厘、海门406厘、东莞411厘、海上风电347厘、鮀莲361厘、归湖358厘/千瓦时。"
+        )
+        self.assertIn("光伏67万千瓦时、清远0万千瓦时；", online_text)
+
+        clearing_text = module.build_day_ahead_clearing_text(
+            "2026-07-02",
+            {
+                "totalEnergy": 10116.2898,
+                "averagePrice": 422.0653,
+                "companies": {
+                    "汕头": {"energy": 1317.6129, "price": 379.0106},
+                    "海门": {"energy": 8042.6026, "price": 419.1546},
+                    "东莞": {"energy": 756.0743, "price": 528.0599},
+                    "海上风电": {"energy": 189.3145, "price": 285.4164},
+                    "鮀莲": {"energy": 24.4543, "price": 512.7376},
+                    "归湖": {"energy": 33.7975, "price": 465.4510},
+                },
+            },
+        )
+        self.assertIn("归湖34万千瓦时、清远（计划）0万千瓦时；", clearing_text)
+
     def test_utf8_environment_sets_python_encoding(self) -> None:
         from toolbox.runtime import utf8_environment
 
