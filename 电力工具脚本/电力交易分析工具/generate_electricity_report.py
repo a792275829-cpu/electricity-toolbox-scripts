@@ -2,6 +2,8 @@ import argparse
 import html
 import math
 import pathlib
+import subprocess
+import sys
 import threading
 import tkinter as tk
 import datetime
@@ -16,6 +18,19 @@ RENEWABLE_UNITS = ["海风", "鮀莲", "归湖"]
 POINT_TYPE_ORDER = ["高价欠发亏损", "高价超发收益", "低价欠发收益", "低价超发亏损"]
 DEFAULT_OUTPUT_NAME = "electricity_clearing_report.html"
 DEFAULT_OUTPUT_DIR = pathlib.Path.home() / "Downloads"
+
+
+def open_directory(path):
+    path = pathlib.Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "darwin":
+        subprocess.run(["open", str(path)], check=False)
+    elif sys.platform.startswith("win"):
+        import os
+
+        os.startfile(path)
+    else:
+        subprocess.run(["xdg-open", str(path)], check=False)
 
 
 def num(value, default=0.0):
@@ -940,11 +955,7 @@ class ReportApp:
 
     def open_output_dir(self):
         path = pathlib.Path(self.output_dir.get())
-        path.mkdir(parents=True, exist_ok=True)
-        self.root.after(0, lambda: path.resolve())
-        import os
-
-        os.startfile(path)
+        open_directory(path)
 
     def append_log(self, text):
         self.log_text.configure(state="normal")

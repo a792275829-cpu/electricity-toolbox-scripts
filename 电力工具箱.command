@@ -60,9 +60,31 @@ fi
 toolbox_root=${script_path:h}
 workspace_root=${toolbox_root:h}
 venv_python="$workspace_root/.venv/bin/python"
+setup_script="$workspace_root/setup_macos.command"
 
 cd "$toolbox_root"
-if [[ -x "$venv_python" ]]; then
+
+dependencies_ready() {
+  local python_bin=$1
+  "$python_bin" - <<'PY' >/dev/null 2>&1
+import cryptography
+import docx
+import openpyxl
+import playwright
+PY
+}
+
+if [[ ! -x "$venv_python" ]] || ! dependencies_ready "$venv_python"; then
+  if [[ -x "$setup_script" ]]; then
+    print -r -- "Preparing portable macOS runtime..."
+    "$setup_script"
+  elif command -v zsh >/dev/null 2>&1 && [[ -f "$setup_script" ]]; then
+    print -r -- "Preparing portable macOS runtime..."
+    zsh "$setup_script"
+  fi
+fi
+
+if [[ -x "$venv_python" ]] && dependencies_ready "$venv_python"; then
   exec "$venv_python" "$script_path"
 fi
 

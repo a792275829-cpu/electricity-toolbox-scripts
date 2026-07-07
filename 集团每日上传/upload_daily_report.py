@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,14 +29,17 @@ LOGIN_SOURCE_DIR = WORKSPACE_DIR / "上网电量抓取"
 BASE_URL = "https://xhxt.chng.com.cn"
 HUANENG_GROUP_URL = f"{BASE_URL}/huaneng/group"
 REPORT_URL = f"{BASE_URL}/huaneng/dataManagement/Report"
+DAY_REPORT_URL = f"{BASE_URL}/huaneng/report/dayReport"
 LOGIN_URL = f"{BASE_URL}/usercenter/#/login"
 USERCENTER_URL = f"{BASE_URL}/usercenter/#/"
 DEFAULT_PROVINCE_ID = "44"
 DEFAULT_PROVINCE_NAME = "广东省"
 DEFAULT_PUBLIC_PROVINCE_AREA_ID = "044"
+DEFAULT_DAILY_REPORT_TEMPLATE = "广东模板（修改）"
+DAY_REPORT_TENANT_NAMES = ("广东分公司", "中国华能集团有限公司广东分公司", "华能广东分公司")
 
-PROFILE_DIR = LOGIN_SOURCE_DIR / ".browser-profile"
-AUTH_STATE_PATH = LOGIN_SOURCE_DIR / "auth_state.json"
+PROFILE_DIR = SCRIPT_DIR / ".browser-profile"
+AUTH_STATE_PATH = SCRIPT_DIR / "auth_state.json"
 AUTH_LOCK_PATH = Path(str(AUTH_STATE_PATH) + ".lock")
 CONFIG_PATH = SCRIPT_DIR / "config.json"
 FALLBACK_CONFIG_PATH = LOGIN_SOURCE_DIR / "config.json"
@@ -88,6 +91,14 @@ def short_error(exc: BaseException) -> str:
 def process_is_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
     try:
         import ctypes
 
@@ -166,6 +177,10 @@ class AuthStateLock:
             self.path.unlink()
         except FileNotFoundError:
             pass
+        except PermissionError as cleanup_error:
+            if exc_type is None:
+                raise
+            log(f"清理登录态锁失败，将保留原始错误：{cleanup_error}")
         self.acquired = False
 
 
@@ -187,6 +202,12 @@ def validate_date(value: str) -> str:
         raise ValueError("日期格式应为 YYYY-MM-DD")
     datetime.strptime(value, "%Y-%m-%d")
     return value
+
+
+def daily_report_name(run_date: str) -> str:
+    validated = validate_date(run_date)
+    compact_date = validated.replace("-", "")
+    return f"广东电力现货市场监测评估日报（{compact_date}）"
 
 
 def extract_date_from_name(path: Path) -> str:
@@ -240,11 +261,29 @@ def choose_files_interactively() -> list[Path]:
     return [Path(item) for item in selected]
 
 
-def find_province_template(folder: Path) -> UploadFile:
+def probe_standard_province_templates(folder: Path, target_date: str, *, days: int = 45) -> list[Path]:
+    center = datetime.strptime(target_date, "%Y-%m-%d").date()
+    candidates: list[Path] = []
+    for offset in range(days + 1):
+        offsets = [0] if offset == 0 else [-offset, offset]
+        for day_offset in offsets:
+            day = center + timedelta(days=day_offset)
+            path = folder / f"广东-省内数据-{day:%Y%m%d}.xlsx"
+            if path.exists() and not path.name.startswith("~$") and "自动更新" not in path.stem:
+                candidates.append(path)
+    return candidates
+
+
+def find_province_template(folder: Path, target_date: str) -> UploadFile:
     candidates: list[UploadFile] = []
-    for path in folder.glob("*.xlsx"):
+    visible_excel_files: list[str] = []
+    paths = list(folder.glob("*.xlsx"))
+    if not paths:
+        paths = probe_standard_province_templates(folder, target_date)
+    for path in paths:
         if path.name.startswith("~$") or "自动更新" in path.stem:
             continue
+        visible_excel_files.append(path.name)
         if "省内" not in path.name:
             continue
         try:
@@ -259,8 +298,20 @@ def find_province_template(folder: Path) -> UploadFile:
         except ValueError:
             continue
     if not candidates:
-        raise ValueError(f"没有在 {folder} 找到可作为模板的省内数据 .xlsx 文件。")
-    selected = max(candidates, key=lambda item: (item.date, item.path.stat().st_mtime))
+        visible = "、".join(sorted(visible_excel_files)) or "无"
+        raise ValueError(
+            f"没有在 {folder} 找到可作为模板的省内数据 .xlsx 文件。"
+            f"实际看到的 Excel 文件：{visible}"
+        )
+    target_day = datetime.strptime(target_date, "%Y-%m-%d").date()
+    selected = min(
+        candidates,
+        key=lambda item: (
+            abs((datetime.strptime(item.date, "%Y-%m-%d").date() - target_day).days),
+            datetime.strptime(item.date, "%Y-%m-%d").date() > target_day,
+            -item.path.stat().st_mtime,
+        ),
+    )
     log(f"自动选择省内模板：{selected.path.name}")
     return selected
 
@@ -285,7 +336,7 @@ def prepare_upload_files(paths: list[Path]) -> tuple[str, list[UploadFile]]:
         only_upload = uploads[0]
         if only_upload.kind != "能销":
             raise ValueError("只选择一个文件时必须选择能销数据文件，省内数据会自动从同目录模板生成。")
-        uploads.append(find_province_template(only_upload.path.parent))
+        uploads.append(find_province_template(only_upload.path.parent, only_upload.date))
         seen.add("省内")
 
     missing = set(UPLOAD_TYPES) - seen
@@ -539,6 +590,57 @@ def find_report_page(context, fallback: Page) -> Page:
     return fallback
 
 
+def select_day_report_tenant(tenants: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for target_name in DAY_REPORT_TENANT_NAMES:
+        for tenant in tenants:
+            if str(tenant.get("name") or "").strip() == target_name and tenant.get("tenantId"):
+                return tenant
+    for tenant in tenants:
+        name = str(tenant.get("name") or "").strip()
+        if "广东分公司" in name and tenant.get("tenantId"):
+            return tenant
+    return None
+
+
+def load_day_report_application_tenants(context) -> list[dict[str, Any]]:
+    response = context.request.get(
+        f"{BASE_URL}/usercenter/web/pf/tenant/user/application",
+        timeout=20000,
+    )
+    data = parse_json_response(response, "读取应用大厅授权")
+    tenants = data.get("data") or []
+    if not isinstance(tenants, list):
+        raise RuntimeError("读取应用大厅授权返回格式不正确。")
+    return tenants
+
+
+def switch_to_day_report_tenant(context) -> None:
+    tenant = select_day_report_tenant(load_day_report_application_tenants(context))
+    if not tenant:
+        response = context.request.get(
+            f"{BASE_URL}/gdfire/api/pf/tenant/user/tenant/grantApplication",
+            timeout=20000,
+        )
+        data = parse_json_response(response, "读取授权单位")
+        tenants = data.get("data") or []
+        if not isinstance(tenants, list):
+            raise RuntimeError("读取授权单位返回格式不正确。")
+        tenant = select_day_report_tenant(tenants)
+    if not tenant:
+        log("应用大厅授权和授权单位里都没有找到“广东分公司”，跳过租户切换。")
+        return
+    tenant_id = str(tenant["tenantId"])
+    tenant_name = str(tenant.get("name") or tenant_id)
+    log(f"正在切换到日报管理单位：{tenant_name}")
+    switch_response = context.request.get(
+        f"{BASE_URL}/usercenter/web/switchTenant",
+        params={"tenantId": tenant_id},
+        timeout=20000,
+    )
+    if switch_response.status >= 400:
+        raise RuntimeError(f"切换日报管理单位失败 HTTP {switch_response.status}")
+
+
 def open_report_page(context, *, allow_manual: bool) -> Page:
     page = context.new_page()
     log(f"正在打开日报数据管理页面：{REPORT_URL}")
@@ -559,6 +661,318 @@ def open_report_page(context, *, allow_manual: bool) -> Page:
             raise RuntimeError("仍未进入可访问的“日报数据管理”页面，无法继续上传。")
 
     return page
+
+
+def enter_huaneng_marketing_platform(page: Page) -> None:
+    log(f"正在打开应用大厅：{USERCENTER_URL}")
+    page.goto(USERCENTER_URL, wait_until="domcontentloaded", timeout=60000)
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except PlaywrightTimeoutError:
+        pass
+
+    clicked = page.evaluate(
+        """
+        () => {
+          const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+          const compact = s => String(s || '').replace(/\\s+/g, '').trim();
+          const targetText = '华能集团电力营销管控平台';
+          const nodes = [...document.querySelectorAll('a,button,[role="button"],div,span,li')].filter(visible);
+          const target = nodes.find(el => compact(el.innerText || el.textContent || '').includes(targetText));
+          if (!target) return false;
+          let clickable = target;
+          for (let node = target; node && node !== document.body; node = node.parentElement) {
+            const style = window.getComputedStyle(node);
+            if (
+              node.tagName === 'A' ||
+              node.tagName === 'BUTTON' ||
+              node.getAttribute('role') === 'button' ||
+              typeof node.onclick === 'function' ||
+              style.cursor === 'pointer'
+            ) {
+              clickable = node;
+              break;
+            }
+          }
+          clickable.click();
+          return true;
+        }
+        """
+    )
+    if not clicked:
+        raise RuntimeError("应用大厅里没有找到“华能集团电力营销管控平台”入口。")
+    try:
+        page.wait_for_load_state("networkidle", timeout=20000)
+    except PlaywrightTimeoutError:
+        pass
+    page.wait_for_timeout(1000)
+
+
+def open_day_report_page(context, *, allow_manual: bool) -> Page:
+    page = context.new_page()
+    try:
+        switch_to_day_report_tenant(context)
+    except Exception as exc:
+        log(f"切换日报管理单位失败，将继续尝试直接打开页面：{short_error(exc)}")
+    log(f"正在打开日报管理页面：{DAY_REPORT_URL}")
+    page.goto(DAY_REPORT_URL, wait_until="domcontentloaded", timeout=60000)
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except PlaywrightTimeoutError:
+        pass
+
+    if page_needs_manual_navigation(page):
+        log("直接进入日报管理失败，从应用大厅进入华能集团电力营销管控平台后重试。")
+        try:
+            enter_huaneng_marketing_platform(page)
+            log(f"正在重新打开日报管理页面：{DAY_REPORT_URL}")
+            page.goto(DAY_REPORT_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except (PlaywrightTimeoutError, PlaywrightError):
+            pass
+        except RuntimeError as exc:
+            log(str(exc))
+    if page_needs_manual_navigation(page):
+        if not allow_manual:
+            text = body_text(page)
+            raise RuntimeError(
+                "已进入同站点日报数据管理，但未能切换到“日报管理”页面。"
+                f"当前URL：{page.url}；页面标题：{page.title()}；页面文本片段：{text[:300]}"
+            )
+        log("\n当前页面未直接进入日报管理。")
+        log("请在打开的浏览器窗口中登录，或手动进入“日报管理”页面；完成后回到这里按 Enter。")
+        input()
+        for candidate in context.pages:
+            if "/huaneng/report/dayReport" in candidate.url and not page_needs_manual_navigation(candidate):
+                return candidate
+        if page_needs_manual_navigation(page):
+            raise RuntimeError("仍未进入可访问的“日报管理”页面，无法继续新建报表。")
+
+    return page
+
+
+def click_button_by_text(page: Page, text: str, *, timeout: int = 15000) -> None:
+    locators = [
+        page.get_by_role("button", name=re.compile(rf"^\s*{re.escape(text)}\s*$")),
+        page.locator(f"button:has-text('{text}')"),
+        page.locator(f"text={text}"),
+    ]
+    last_error: BaseException | None = None
+    for locator in locators:
+        try:
+            locator.first.click(timeout=timeout)
+            return
+        except (PlaywrightTimeoutError, PlaywrightError) as exc:
+            last_error = exc
+    raise RuntimeError(f"没有找到“{text}”按钮。") from last_error
+
+
+def set_form_input_by_label(page: Page, label: str, value: str) -> None:
+    updated = page.evaluate(
+        """
+        ({ label, value }) => {
+          const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+          const compact = s => String(s || '').replace(/\\s+/g, ' ').trim();
+          const normalize = s => compact(s).replace(/模版/g, '模板').replace(/[：:*\\s]/g, '');
+          const target = normalize(label);
+          const labels = [...document.querySelectorAll('label,.el-form-item__label,.ant-form-item-label,[class*="form-item-label"]')]
+            .filter(el => visible(el) && normalize(el.innerText || el.textContent).includes(target))
+            .sort((a, b) => {
+              const aText = normalize(a.innerText || a.textContent);
+              const bText = normalize(b.innerText || b.textContent);
+              return (aText === target ? 0 : 1) - (bText === target ? 0 : 1) || aText.length - bText.length;
+            });
+          for (const labelEl of labels) {
+            let node = labelEl;
+            for (let depth = 0; node && depth < 5; depth++, node = node.parentElement) {
+              const input = [...node.querySelectorAll('input,textarea')]
+                .find(el => visible(el) && !el.disabled && !el.readOnly);
+              if (!input) continue;
+              const setter = Object.getOwnPropertyDescriptor(
+                input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+                'value'
+              ).set;
+              setter.call(input, value);
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+              input.blur();
+              return true;
+            }
+          }
+          return false;
+        }
+        """,
+        {"label": label, "value": value},
+    )
+    if not updated:
+        raise RuntimeError(f"没有找到“{label}”输入框。")
+    page.wait_for_timeout(300)
+
+
+def select_form_option_by_label(page: Page, label: str, option_text: str) -> None:
+    marked = page.evaluate(
+        """
+        ({ label }) => {
+          const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+          const compact = s => String(s || '').replace(/\\s+/g, ' ').trim();
+          const normalize = s => compact(s).replace(/模版/g, '模板').replace(/[：:*\\s]/g, '');
+          const target = normalize(label);
+          document.querySelectorAll('[data-codex-form-select]').forEach(el => el.removeAttribute('data-codex-form-select'));
+          const labels = [...document.querySelectorAll('label,.el-form-item__label,.ant-form-item-label,[class*="form-item-label"]')]
+            .filter(el => visible(el) && normalize(el.innerText || el.textContent).includes(target))
+            .sort((a, b) => {
+              const aText = normalize(a.innerText || a.textContent);
+              const bText = normalize(b.innerText || b.textContent);
+              return (aText === target ? 0 : 1) - (bText === target ? 0 : 1) || aText.length - bText.length;
+            });
+          for (const labelEl of labels) {
+            let node = labelEl;
+            for (let depth = 0; node && depth < 5; depth++, node = node.parentElement) {
+              const field = [...node.querySelectorAll('input,[role="combobox"],.el-select,.ant-select,[class*="select"]')]
+                .find(el => visible(el) && !el.disabled);
+              if (!field) continue;
+              const selectRoot = field.closest('.ant-select,.el-select') || field;
+              selectRoot.setAttribute('data-codex-form-select', 'true');
+              return compact(selectRoot.value || selectRoot.innerText || selectRoot.textContent || field.value || '');
+            }
+          }
+          return null;
+        }
+        """,
+        {"label": label},
+    )
+    if marked is None:
+        raise RuntimeError(f"没有找到“{label}”下拉框。")
+    if option_text in str(marked):
+        return
+    select_locator = page.locator('[data-codex-form-select="true"]').first
+    select_locator.click(timeout=10000)
+    search_input = page.locator(
+        '[data-codex-form-select="true"] input[role="combobox"], '
+        '[data-codex-form-select="true"] input, '
+        '[data-codex-form-select="true"][role="combobox"], '
+        '[data-codex-form-select="true"]'
+    ).first
+    try:
+        search_input.fill(option_text, timeout=5000, force=True)
+    except (PlaywrightTimeoutError, PlaywrightError):
+        pass
+    page.wait_for_timeout(500)
+    visible_dropdown_option = page.locator(
+        ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option"
+    ).filter(has_text=option_text)
+    try:
+        visible_dropdown_option.last.click(timeout=10000)
+    except (PlaywrightTimeoutError, PlaywrightError):
+        try:
+            search_input.press("Enter", timeout=5000)
+        except (PlaywrightTimeoutError, PlaywrightError) as exc:
+            raise RuntimeError(f"没有找到“{option_text}”选项。") from exc
+    page.wait_for_timeout(300)
+
+
+def find_daily_report_template_id(context, template_name: str = DEFAULT_DAILY_REPORT_TEMPLATE) -> str:
+    response = context.request.get(
+        f"{BASE_URL}/huaneng/group/api/report/queryTemplates",
+        timeout=20000,
+    )
+    data = parse_json_response(response, "读取日报模板列表")
+    templates = data.get("data") or []
+    if not isinstance(templates, list):
+        raise RuntimeError("读取日报模板列表返回格式不正确。")
+    for template in templates:
+        if str(template.get("name") or "").strip() == template_name and template.get("id"):
+            return str(template["id"])
+    available = "、".join(str(item.get("name") or "") for item in templates if "广东" in str(item.get("name") or ""))[:300]
+    raise RuntimeError(f"日报模板里没有找到“{template_name}”。可见广东模板：{available or '无'}")
+
+
+def daily_report_exists(context, report_name: str, report_date: str) -> bool:
+    response = context.request.get(
+        f"{BASE_URL}/huaneng/group/api/report",
+        params={
+            "startDate": report_date,
+            "endDate": report_date,
+            "keyword": report_name,
+            "numPerPage": 10,
+            "pageNum": 1,
+        },
+        timeout=20000,
+    )
+    data = parse_json_response(response, "查询已有集团日报")
+    payload = data.get("data") or {}
+    rows = payload.get("datas") or []
+    if not isinstance(rows, list):
+        return False
+    return any(str(row.get("reportName") or "") == report_name for row in rows)
+
+
+def create_daily_report(context, run_date: str, *, headless: bool) -> None:
+    report_date = validate_date(run_date)
+    report_name = daily_report_name(report_date)
+    page = open_day_report_page(context, allow_manual=not headless)
+    log(f"正在新建集团日报：{report_name}")
+    if daily_report_exists(context, report_name, report_date):
+        log(f"集团日报已存在，跳过新建：{report_name}")
+        return
+    template_id = find_daily_report_template_id(context)
+    response = context.request.post(
+        f"{BASE_URL}/huaneng/group/api/report",
+        data={
+            "reportName": report_name,
+            "startDate": report_date,
+            "endDate": report_date,
+            "templateId": template_id,
+            "provinceId": None,
+        },
+        timeout=120000,
+    )
+    parse_json_response(response, "新建集团日报")
+    log("集团日报新建操作已提交。")
+
+
+def dump_page_diagnostics(page: Page, prefix: str) -> str:
+    safe_prefix = re.sub(r"[^A-Za-z0-9_.-]+", "_", prefix).strip("_") or "page"
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_path = SCRIPT_DIR / f"{safe_prefix}_{stamp}"
+    data: dict[str, Any] = {"url": page.url, "title": "", "bodyText": ""}
+    try:
+        data["title"] = page.title()
+    except PlaywrightError:
+        pass
+    try:
+        data["bodyText"] = body_text(page)[:3000]
+    except PlaywrightError:
+        pass
+    json_path = base_path.with_suffix(".json")
+    json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        page.screenshot(path=str(base_path.with_suffix(".png")), full_page=True, timeout=10000)
+    except PlaywrightError:
+        pass
+    return str(json_path)
+
+
+def smoke_daily_report_page(*, headless: bool = True) -> None:
+    config = load_config()
+    config.headless = headless
+    with AuthStateLock():
+        with sync_playwright() as playwright:
+            context = launch_context(playwright, headless=config.headless)
+            try:
+                ensure_login(context, config)
+                page = open_day_report_page(context, allow_manual=not headless)
+                try:
+                    count = page.get_by_text("新建报表", exact=True).count()
+                except PlaywrightError:
+                    count = 0
+                if count <= 0:
+                    diagnostics = dump_page_diagnostics(page, "daily_report_smoke_failed")
+                    raise RuntimeError(f"已打开页面但没有找到“新建报表”入口。诊断已保存：{diagnostics}")
+                save_auth_state(context)
+                log("日报管理页面自检通过：已找到“新建报表”。")
+            finally:
+                context.close()
 
 
 def current_date_inputs(page: Page) -> list[dict[str, Any]]:
@@ -994,24 +1408,29 @@ def update_province_excel_for_upload(
         worksheet["B2"].value = startup_max
         current_formula = worksheet["C2"].value
         if not isinstance(current_formula, str) or not current_formula.startswith("="):
-            raise RuntimeError(f"C2 不是公式，无法按模板更新：{current_formula!r}")
-        updated_formula = replace_capacity_in_formula(current_formula, capacity_average)
-        formula_result = evaluate_simple_excel_formula(updated_formula)
-        worksheet["C2"].value = updated_formula
-        if hasattr(workbook, "calculation"):
-            workbook.calculation.fullCalcOnLoad = True
-            workbook.calculation.forceFullCalc = True
+            formula_result = number_or_none(current_formula)
+            if formula_result is None:
+                raise RuntimeError(f"C2 不是公式，无法按模板更新：{current_formula!r}")
+            log(f"C2 已是数值，保留现有结果：{current_formula}")
+        else:
+            updated_formula = replace_capacity_in_formula(current_formula, capacity_average)
+            formula_result = evaluate_simple_excel_formula(updated_formula)
+            worksheet["C2"].value = updated_formula
+            if hasattr(workbook, "calculation"):
+                workbook.calculation.fullCalcOnLoad = True
+                workbook.calculation.forceFullCalc = True
         workbook.save(target_path)
     finally:
         workbook.close()
 
-    if recalculate_with_excel(target_path):
-        cached_value = cached_cell_value(target_path, worksheet.title, "C2")
-        if cached_value is None:
-            log("Excel 已重算但 C2 缓存仍为空，将改写 C2 为数值。")
+    if isinstance(current_formula, str) and current_formula.startswith("="):
+        if recalculate_with_excel(target_path):
+            cached_value = cached_cell_value(target_path, worksheet.title, "C2")
+            if cached_value is None:
+                log("Excel 已重算但 C2 缓存仍为空，将改写 C2 为数值。")
+                write_formula_result_as_value(target_path, worksheet.title, "C2", formula_result)
+        else:
             write_formula_result_as_value(target_path, worksheet.title, "C2", formula_result)
-    else:
-        write_formula_result_as_value(target_path, worksheet.title, "C2", formula_result)
 
     log(f"省内数据已更新：{target_path}")
     return [
@@ -1058,7 +1477,13 @@ def import_daily_file(context, upload: UploadFile, run_date: str, province_id: s
     return parse_api_payload(response, f"导入{spec['name']}")
 
 
-def run_api_upload(paths: list[Path], *, force: bool = False, province_id: str = DEFAULT_PROVINCE_ID) -> None:
+def run_api_upload(
+    paths: list[Path],
+    *,
+    force: bool = False,
+    province_id: str = DEFAULT_PROVINCE_ID,
+    create_report: bool = True,
+) -> None:
     target_date, uploads = prepare_upload_files(paths)
     log(f"本次上传日期：{target_date}")
     log(f"目标省份：{DEFAULT_PROVINCE_NAME}（provinceId={province_id}）")
@@ -1112,6 +1537,8 @@ def run_api_upload(paths: list[Path], *, force: bool = False, province_id: str =
                     if errors:
                         raise RuntimeError(f"{spec['name']} 导入返回校验信息：{json.dumps(errors, ensure_ascii=False)[:1000]}")
                     log(f"{spec['name']} 导入成功。")
+                if create_report:
+                    create_daily_report(context, target_date, headless=config.headless)
                 save_auth_state(context)
             finally:
                 context.close()
@@ -1119,7 +1546,7 @@ def run_api_upload(paths: list[Path], *, force: bool = False, province_id: str =
     log("\n处理完成。")
 
 
-def run_browser_upload(paths: list[Path], *, headless: bool) -> None:
+def run_browser_upload(paths: list[Path], *, headless: bool, create_report: bool = True) -> None:
     target_date, uploads = prepare_upload_files(paths)
     log(f"本次上传日期：{target_date}")
 
@@ -1138,6 +1565,8 @@ def run_browser_upload(paths: list[Path], *, headless: bool) -> None:
                 set_report_date(page, target_date)
                 for upload in uploads:
                     upload_one_file(page, upload)
+                if create_report:
+                    create_daily_report(context, target_date, headless=headless)
                 save_auth_state(context)
                 log("\n两个文件处理完成，请在网页上确认上传结果。")
                 if not headless:
@@ -1321,7 +1750,7 @@ def run_gui() -> None:
     log_box.pack(side="left", fill="both", expand=True)
     log_scroll.pack(side="right", fill="y")
 
-    append_log("操作：选择两个 Excel 文件 -> 开始上传。默认已上传数据会跳过。")
+    append_log("操作：选择能销 Excel -> 开始上传。上传完成后会自动新建集团日报。")
     poll_log_events()
     root.mainloop()
 
@@ -1333,6 +1762,8 @@ def main() -> int:
     parser.add_argument("--headless", action="store_true", help="无界面运行")
     parser.add_argument("--browser", action="store_true", help="使用浏览器页面上传模式")
     parser.add_argument("--force", action="store_true", help="接口模式下即使当天已上传也重新导入")
+    parser.add_argument("--skip-report", action="store_true", help="只上传数据，不自动新建集团日报")
+    parser.add_argument("--smoke-report", action="store_true", help="只测试能否进入日报管理页面，不上传也不新建报表")
     parser.add_argument("--cli", action="store_true", help="不打开图形界面，使用命令行/文件选择模式")
     args = parser.parse_args()
 
@@ -1348,15 +1779,19 @@ def main() -> int:
                         context.close()
             return 0
 
+        if args.smoke_report:
+            smoke_daily_report_page(headless=args.headless)
+            return 0
+
         if not args.files and not args.cli and not args.browser and not args.headless:
             run_gui()
             return 0
 
         paths = [Path(item) for item in args.files] if args.files else choose_files_interactively()
         if args.browser:
-            run_browser_upload(paths, headless=args.headless)
+            run_browser_upload(paths, headless=args.headless, create_report=not args.skip_report)
         else:
-            run_api_upload(paths, force=args.force)
+            run_api_upload(paths, force=args.force, create_report=not args.skip_report)
         return 0
     except KeyboardInterrupt:
         print("\n已取消。")

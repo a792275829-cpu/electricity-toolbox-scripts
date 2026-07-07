@@ -9,20 +9,37 @@
 - Google Chrome（用于 Playwright 登录和上传流程）
 - Node.js（仅“私有数据上传”需要）
 
-首次使用建议在仓库根目录执行：
+## 迁移到另一台 Mac
+
+把整个项目文件夹复制到另一台 Mac 后，在项目根目录运行一次：
+
+```bash
+./setup_macos.command
+```
+
+这个脚本会在项目目录内创建 `.venv`、安装根目录 `requirements.txt` 中的 Python 依赖、安装 Playwright Chromium，并在本机有 Node.js/npm 时自动安装“私有数据上传”子工具的 Node 依赖。
+
+如果是从网页下载的压缩包，macOS 可能会阻止首次运行。可以在项目根目录执行：
+
+```bash
+xattr -dr com.apple.quarantine .
+chmod +x setup_macos.command "电力工具箱.command" "00_启动/电力工具箱.command"
+```
+
+也可以不手动运行 `setup_macos.command`：双击 `电力工具箱.command` 时，如果本地 `.venv` 或关键依赖缺失，启动器会自动执行同一套初始化流程。
+
+手动排障时可按下面的等价命令执行：
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install openpyxl playwright
+python -m pip install -r requirements.txt
 python -m playwright install chromium
 
 cd "电力工具脚本/private-data-uploader-tool"
 npm install
 ```
-
-如果已经有可用的 `.venv`，可以跳过创建虚拟环境。
 
 ## 启动工具箱
 
@@ -45,7 +62,7 @@ chmod +x "电力工具箱.command" "00_启动/电力工具箱.command"
 ./电力工具箱.command
 ```
 
-启动脚本会优先使用仓库根目录下的 `.venv/bin/python`，否则使用系统 `python3`。
+启动脚本会优先使用仓库根目录下的 `.venv/bin/python`。如果 `.venv` 缺失或缺少关键依赖，会先运行 `setup_macos.command`；如果仍不可用，才回退到系统 `python3`。
 
 ## 功能说明
 
@@ -68,13 +85,16 @@ cp "上网电量抓取/config.example.json" "上网电量抓取/config.json"
 cp "每日生产经营情况汇报自动生成工具/scripts/config.example.json" "每日生产经营情况汇报自动生成工具/scripts/config.json"
 ```
 
-然后编辑 `config.json`，填写 `username`、`password` 等字段。登录态会保存到：
+然后编辑 `config.json`，填写 `username`、`password` 等字段。为支持多个工具并行运行，浏览器 profile 和登录态按工具分别保存：
 
 ```text
 上网电量抓取/auth_state.json
+市场表更新/auth_state.json
+集团每日上传/auth_state.json
+每日生产经营情况汇报自动生成工具/scripts/auth_state.json
 ```
 
-集团每日上传默认复用 `上网电量抓取/config.json` 和 `上网电量抓取/auth_state.json`，也可以单独创建：
+集团每日上传默认复用 `上网电量抓取/config.json` 里的账号密码，但会保存自己的登录态；也可以单独创建：
 
 ```text
 集团每日上传/config.json
@@ -127,6 +147,12 @@ export HTTP_PROXY=http://127.0.0.1:7897
 
 ```bash
 TOOLBOX_SMOKE=1 ./电力工具箱.command
+```
+
+初始化脚本自检：
+
+```bash
+./setup_macos.command
 ```
 
 运行工具箱测试：

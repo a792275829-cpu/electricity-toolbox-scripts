@@ -798,7 +798,7 @@ class GroupUploadPage(ToolPage):
             parent,
             registry=registry,
             title="上传集团每日数据",
-            description="上传能销和省内日报数据；只选择能销文件时沿用原脚本的省内模板自动生成规则。",
+            description="上传能销和省内日报数据；上传完成后自动新建集团日报。",
         )
         self.paths = paths
         self.selected_paths: list[Path] = []
@@ -865,7 +865,7 @@ class GroupUploadPage(ToolPage):
             self.selection_var.set("\n".join(path.name for path in paths))
             self.summary_var.set(f"文件校验失败：{exc}")
             raise
-        self.selected_paths = paths
+        self.selected_paths = [item.path for item in uploads]
         self.selection_var.set(
             "\n".join(
                 f"{module.UPLOAD_TYPES[item.kind]['name']}：{item.path.name}"
@@ -940,6 +940,174 @@ class GroupUploadPage(ToolPage):
         )
 
 
+class MarketTableUpdatePage(ToolPage):
+    def __init__(
+        self,
+        parent: tk.Misc,
+        paths: ToolPaths,
+        registry: TaskRegistry,
+        *,
+        today: date | None = None,
+    ) -> None:
+        super().__init__(
+            parent,
+            registry=registry,
+            title="市场表更新",
+            description="按一个基准运行日期抓取网页数据并写入指定市场 Excel。",
+        )
+        self.paths = paths
+        self.run_date = tk.StringVar(
+            master=self, value=(today or date.today()).isoformat()
+        )
+        self.workbook = tk.StringVar(
+            master=self,
+            value=str(
+                Path.home()
+                / "Desktop"
+                / "日常工作"
+                / "现货统调市场出清、结算数据2026.xlsx"
+            ),
+        )
+
+        form = ttk.LabelFrame(self.content, text="更新设置", padding=12)
+        form.grid(row=0, column=0, sticky="ew")
+        form.columnconfigure(1, weight=1)
+        ttk.Label(form, text="基准运行日期").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Entry(form, textvariable=self.run_date, width=18).grid(
+            row=0, column=1, sticky="w", pady=5
+        )
+        ttk.Label(form, text="格式：YYYY-MM-DD", style="Muted.TLabel").grid(
+            row=0, column=2, sticky="w", padx=(8, 0), pady=5
+        )
+        browse = _add_path_row(
+            form,
+            row=1,
+            label="市场 Excel",
+            variable=self.workbook,
+            command=self.choose_workbook,
+            button_text="选择文件",
+        )
+
+        mapping = ttk.LabelFrame(self.content, text="当前已实现映射", padding=12)
+        mapping.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        ttk.Label(
+            mapping,
+            text="现货运行日报 > 市场负荷信息 > 日前：来源日期为基准日期 D；写入 2026年市场情况 工作表对应日期行 B:U。",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).pack(anchor="w")
+        ttk.Label(
+            mapping,
+            text="现货运行日报 > 日前市场 > 发电侧申报均价起 12 项：来源日期为基准日期 D-1；写入 2026年市场情况 工作表对应日期行 V:AG。",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).pack(anchor="w", pady=(4, 0))
+        ttk.Label(
+            mapping,
+            text="现货运行日报 > 市场负荷信息 > 实际：来源日期为基准日期 D-2；写入 2026年市场情况 工作表对应日期行 AH:BA。",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).pack(anchor="w", pady=(4, 0))
+        ttk.Label(
+            mapping,
+            text="现货运行日报 > 实时市场 > 发电侧成交电量、发电侧加权均价、燃煤平均成交电价、燃气平均成交电价：来源日期为基准日期 D-2；写入 2026年市场情况 工作表对应日期行 BB:BE。",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).pack(anchor="w", pady=(4, 0))
+        ttk.Label(
+            mapping,
+            text="现货运行日报 > 发电侧结算 > 12 项：来源日期为基准日期 D-6；写入 2026年市场情况 工作表对应日期行 BF:BQ。",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).pack(anchor="w", pady=(4, 0))
+        ttk.Label(
+            mapping,
+            text="现货运行日报 > 用电侧结算 > 7 项：来源日期为基准日期 D-6；写入 2026年市场情况 工作表对应日期行 BR:BX。",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).pack(anchor="w", pady=(4, 0))
+        ttk.Label(
+            mapping,
+            text="现货基础信息报送 > 机组成本信息 > 单位变动成本对应电价：来源日期为基准日期 D；写入 2026年运行方式及成本 工作表对应日期行 N:X。",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).pack(anchor="w", pady=(4, 0))
+        ttk.Label(
+            mapping,
+            text="2026年运行方式及成本 > 机组运行方式：来源日期为基准日期 D-1；复制 B:M 到基准日期 D 对应日期行 B:M。",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).pack(anchor="w", pady=(4, 0))
+
+        actions = self.actions
+        self.update_button = ttk.Button(
+            actions, text="开始更新", command=self.start_update
+        )
+        self.update_button.pack(side="left")
+        self.login_button = ttk.Button(
+            actions, text="登录/刷新登录状态", command=self.start_login
+        )
+        self.login_button.pack(side="left", padx=(8, 0))
+        self.register_busy_widgets(browse, self.update_button, self.login_button)
+        self.append_log("请选择日期和市场 Excel 后开始更新。")
+
+    def build_update_command(self, run_date: date, workbook: Path) -> list[str]:
+        return [
+            python_executable(),
+            str(self.paths.market_table_update),
+            "--date",
+            run_date.isoformat(),
+            "--workbook",
+            str(workbook),
+        ]
+
+    def choose_workbook(self) -> None:
+        selected = filedialog.askopenfilename(
+            title="选择市场 Excel",
+            initialdir=str(Path(self.workbook.get()).expanduser().parent),
+            filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
+            parent=self,
+        )
+        if selected:
+            self.workbook.set(selected)
+
+    def start_update(self) -> None:
+        try:
+            run_date = datetime.strptime(self.run_date.get().strip(), "%Y-%m-%d").date()
+        except ValueError:
+            messagebox.showerror(
+                "日期格式错误", "请输入 YYYY-MM-DD 格式日期。", parent=self
+            )
+            return
+        workbook = Path(self.workbook.get().strip()).expanduser()
+        if not workbook.is_file():
+            messagebox.showerror(
+                "文件无效", f"请选择有效 Excel 文件：\n{workbook}", parent=self
+            )
+            return
+        self.clear_log()
+        self.run_process(
+            self.build_update_command(run_date, workbook),
+            cwd=self.paths.market_table_update_dir,
+            status="正在更新市场表...",
+            on_success=lambda _code: messagebox.showinfo(
+                "完成", "市场表更新完成。", parent=self
+            ),
+        )
+
+    def start_login(self) -> None:
+        self.run_process(
+            [
+                python_executable(),
+                str(self.paths.market_table_update),
+                "--login",
+                "--headed",
+            ],
+            cwd=self.paths.market_table_update_dir,
+            status="正在打开登录窗口...",
+        )
+
+
 class WpsWriterPage(ToolPage):
     def __init__(
         self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry
@@ -993,5 +1161,6 @@ def page_factories() -> Mapping[str, object]:
         "生成报告": ReportPage,
         "私有数据上传": PrivateUploadPage,
         "上传集团每日数据": GroupUploadPage,
+        "市场表更新": MarketTableUpdatePage,
         "WPS写入工具": WpsWriterPage,
     }

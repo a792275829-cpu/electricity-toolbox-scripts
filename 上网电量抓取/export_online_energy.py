@@ -68,6 +68,14 @@ def log(message: str) -> None:
 def process_is_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
     try:
         import ctypes
 
@@ -146,6 +154,10 @@ class AuthStateLock:
             self.path.unlink()
         except FileNotFoundError:
             pass
+        except PermissionError as cleanup_error:
+            if exc_type is None:
+                raise
+            log(f"清理登录态锁失败，将保留原始错误：{cleanup_error}")
         self.acquired = False
 
 

@@ -18,6 +18,16 @@ DOWNLOADS_DIR = Path.home() / "Downloads"
 PREFERRED_PYTHON = Path(r"C:\Users\lllg\AppData\Local\Programs\Python\Python311\python.exe")
 
 
+def open_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "darwin":
+        subprocess.run(["open", str(path)], check=False)
+    elif sys.platform.startswith("win"):
+        os.startfile(path)
+    else:
+        subprocess.run(["xdg-open", str(path)], check=False)
+
+
 def python_executable() -> str:
     return str(PREFERRED_PYTHON) if PREFERRED_PYTHON.exists() else sys.executable
 
@@ -168,8 +178,7 @@ class ReportTool(tk.Tk):
 
     def open_exports(self) -> None:
         path = APP_ROOT / "\u8f93\u51fa"
-        path.mkdir(exist_ok=True)
-        subprocess.Popen(["explorer", str(path)])
+        open_directory(path)
 
     def start(self) -> None:
         if self.worker and self.worker.is_alive():

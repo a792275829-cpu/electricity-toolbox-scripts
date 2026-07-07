@@ -110,6 +110,14 @@ class ToolPaths:
     def wps_writer_logs_dir(self) -> Path:
         return self.wps_writer_dir / "logs"
 
+    @property
+    def market_table_update(self) -> Path:
+        return self.workspace / "市场表更新" / "update_market_table.py"
+
+    @property
+    def market_table_update_dir(self) -> Path:
+        return self.market_table_update.parent
+
 
 def load_module(name: str, path: Path) -> ModuleType:
     path = Path(path)
