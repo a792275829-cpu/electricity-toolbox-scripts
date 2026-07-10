@@ -85,7 +85,7 @@ class ToolboxApp(tk.Tk):
         self.page_host.grid(row=0, column=1, sticky="nsew")
         self.page_host.rowconfigure(0, weight=1)
         self.page_host.columnconfigure(0, weight=1)
-        self.dashboard = DashboardPage(self.page_host, self.registry, self.show_page)
+        self.dashboard = DashboardPage(self.page_host, self.registry, self.show_page, self.paths)
         self.dashboard.grid(row=0, column=0, sticky="nsew")
 
         self.task_center = TaskCenter(self, self.registry)

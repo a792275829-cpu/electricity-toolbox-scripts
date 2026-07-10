@@ -17,6 +17,30 @@ class CatalogTests(unittest.TestCase):
             {item.category for item in catalog},
         )
 
+    def test_adapter_registry_matches_catalog_and_marks_side_effects(self) -> None:
+        from toolbox.adapters import default_adapters
+        from toolbox.catalog import default_catalog
+
+        adapters = default_adapters()
+        self.assertEqual(
+            {item.tool_id for item in default_catalog()},
+            set(adapters),
+        )
+        self.assertFalse(adapters["trade-analysis"].destructive)
+        self.assertTrue(adapters["group-upload"].destructive)
+
+
+class DiagnosticTests(unittest.TestCase):
+    def test_diagnostics_report_missing_tool_files_without_raising(self) -> None:
+        import tempfile
+        from toolbox.diagnostics import diagnose_environment
+        from toolbox.runtime import ToolPaths
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = diagnose_environment(ToolPaths(Path(directory)))
+        self.assertFalse(report.ok)
+        self.assertTrue(any("找不到" in item.detail for item in report.checks))
+
 
 class WorkbenchTests(unittest.TestCase):
     def setUp(self) -> None:

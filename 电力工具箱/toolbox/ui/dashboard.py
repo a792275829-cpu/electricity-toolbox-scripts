@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import Callable
 
 from ..runtime import TaskRegistry
 from ..tasks import TaskState
+from ..diagnostics import diagnose_environment
 
 
 class DashboardPage(ttk.Frame):
-    def __init__(self, parent: tk.Misc, registry: TaskRegistry, navigate: Callable[[str], None]) -> None:
+    def __init__(self, parent: tk.Misc, registry: TaskRegistry, navigate: Callable[[str], None], paths=None) -> None:
         super().__init__(parent, padding=22)
         self.registry = registry
         self.navigate = navigate
         self.columnconfigure(0, weight=1)
         ttk.Label(self, text="今日工作", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(self, text="查看任务状态，或从常用操作开始。", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 16))
+        if paths is not None:
+            ttk.Button(self, text="运行环境诊断", command=lambda: messagebox.showinfo("环境诊断", diagnose_environment(paths).summary(), parent=self)).grid(row=0, column=0, sticky="e")
         self.metrics = ttk.Frame(self)
         self.metrics.grid(row=2, column=0, sticky="ew")
         self.metric_vars = {key: tk.StringVar(self, "0") for key in ("运行中", "已完成", "失败")}
