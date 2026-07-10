@@ -11,6 +11,8 @@ from types import ModuleType
 
 from .tasks import ProcessRunner, TaskEngine
 
+_MODULE_CACHE: dict[tuple[str, Path], tuple[int, ModuleType]] = {}
+
 
 PREFERRED_PYTHON = Path(
     r"C:\Users\lllg\AppData\Local\Programs\Python\Python311\python.exe"
@@ -122,20 +124,32 @@ class ToolPaths:
 
 
 def load_module(name: str, path: Path) -> ModuleType:
-    path = Path(path)
+    path = Path(path).resolve()
     if not path.is_file():
         raise FileNotFoundError(f"找不到模块文件：{path}")
+    modified = path.stat().st_mtime_ns
+    cached = _MODULE_CACHE.get((name, path))
+    if cached is not None and cached[0] == modified:
+        return cached[1]
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"无法加载模块：{path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     try:
-        spec.loader.exec_module(module)
+        source = path.read_bytes()
+        exec(compile(source, str(path), "exec"), module.__dict__)
     except Exception:
         sys.modules.pop(name, None)
         raise
+    _MODULE_CACHE[(name, path)] = (modified, module)
     return module
+
+
+def clear_module_cache() -> None:
+    for name, _path in tuple(_MODULE_CACHE):
+        sys.modules.pop(name, None)
+    _MODULE_CACHE.clear()
 
 
 def utf8_environment() -> dict[str, str]:

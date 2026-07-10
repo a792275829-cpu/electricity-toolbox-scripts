@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+import threading
 import traceback
 import tkinter as tk
 from pathlib import Path
@@ -113,6 +114,8 @@ class ToolPage(ttk.Frame):
 
     def append_log(self, text: str) -> None:
         self._log_queue.put(text.rstrip("\n") + "\n")
+        if threading.current_thread() is threading.main_thread():
+            self._drain_log_queue()
 
     def _schedule_poll(self) -> None:
         if self._poll_after_id is None:

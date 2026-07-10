@@ -5,8 +5,9 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+from .catalog import catalog_factories, default_catalog
 from .runtime import TaskRegistry, ToolPaths
-
+from .ui import DashboardPage, TaskCenter, configure_theme
 
 PAGE_NAMES = (
     "导出上网电量",
@@ -18,7 +19,6 @@ PAGE_NAMES = (
     "市场表更新",
     "WPS写入工具",
 )
-
 PageFactory = Callable[[tk.Misc, ToolPaths, TaskRegistry], tk.Frame]
 
 
@@ -32,103 +32,97 @@ class ToolboxApp(tk.Tk):
         *,
         workspace: Path | None = None,
         page_factories: Mapping[str, PageFactory] | None = None,
+        lazy_pages: bool | None = None,
     ) -> None:
         super().__init__()
         self.title("电力工作工具箱")
-        self.geometry("1100x720")
-        self.minsize(960, 640)
-
+        self.geometry("1240x760")
+        self.minsize(980, 640)
         self.paths = ToolPaths(workspace or default_workspace())
         self.registry = TaskRegistry()
         self.pages: dict[str, tk.Frame] = {}
         self.nav_buttons: dict[str, ttk.Button] = {}
         self.current_page = ""
         self.status_var = tk.StringVar(master=self, value="就绪")
-
+        injected = page_factories is not None
+        self._factories = dict(page_factories or catalog_factories())
+        self._lazy_pages = (not injected) if lazy_pages is None else lazy_pages
         self._configure_style()
-        self._build_shell(page_factories or self._default_page_factories())
+        self._build_shell()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _configure_style(self) -> None:
-        style = ttk.Style(self)
-        style.configure("AppTitle.TLabel", font=("Microsoft YaHei UI", 16, "bold"))
-        style.configure("PageTitle.TLabel", font=("Microsoft YaHei UI", 15, "bold"))
-        style.configure("Muted.TLabel", foreground="#5f6b7a")
-        style.configure("Nav.TButton", anchor="w", padding=(14, 11))
-        style.configure(
-            "NavSelected.TButton",
-            anchor="w",
-            padding=(14, 11),
-            font=("Microsoft YaHei UI", 9, "bold"),
-        )
+        configure_theme(ttk.Style(self))
 
     @staticmethod
     def _default_page_factories() -> Mapping[str, PageFactory]:
-        from .pages import page_factories
+        return catalog_factories()
 
-        return page_factories()
-
-    def _build_shell(self, factories: Mapping[str, PageFactory]) -> None:
+    def _build_shell(self) -> None:
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
-
-        sidebar = ttk.Frame(self, padding=(14, 18))
+        sidebar = ttk.Frame(self, padding=(12, 18))
         sidebar.grid(row=0, column=0, sticky="ns")
-        ttk.Label(sidebar, text="电力工作工具箱", style="AppTitle.TLabel").pack(
-            anchor="w", pady=(0, 18)
-        )
+        ttk.Label(sidebar, text="电力工作台", style="AppTitle.TLabel").pack(anchor="w", pady=(0, 14))
+        dashboard_button = ttk.Button(sidebar, text="今日概览", style="Nav.TButton", command=lambda: self.show_page("今日概览"), width=22)
+        dashboard_button.pack(fill="x", pady=(0, 10))
+        self.nav_buttons["今日概览"] = dashboard_button
 
-        page_host = ttk.Frame(self)
-        page_host.grid(row=0, column=1, sticky="nsew")
-        page_host.rowconfigure(0, weight=1)
-        page_host.columnconfigure(0, weight=1)
-
-        for name in PAGE_NAMES:
-            if name not in factories:
+        last_category = None
+        for descriptor in default_catalog():
+            name = descriptor.name
+            if name not in self._factories:
                 raise KeyError(f"缺少页面工厂：{name}")
-            button = ttk.Button(
-                sidebar,
-                text=name,
-                style="Nav.TButton",
-                command=lambda page_name=name: self.show_page(page_name),
-                width=22,
-            )
-            button.pack(fill="x", pady=2)
+            category = descriptor.category
+            if category != last_category:
+                ttk.Label(sidebar, text=category, style="Section.TLabel").pack(anchor="w", padx=8, pady=(10, 4))
+                last_category = category
+            button = ttk.Button(sidebar, text=name, style="Nav.TButton", command=lambda value=name: self.show_page(value), width=22)
+            button.pack(fill="x", pady=1)
             self.nav_buttons[name] = button
 
-            page = factories[name](page_host, self.paths, self.registry)
+        self.page_host = ttk.Frame(self)
+        self.page_host.grid(row=0, column=1, sticky="nsew")
+        self.page_host.rowconfigure(0, weight=1)
+        self.page_host.columnconfigure(0, weight=1)
+        self.dashboard = DashboardPage(self.page_host, self.registry, self.show_page)
+        self.dashboard.grid(row=0, column=0, sticky="nsew")
+
+        self.task_center = TaskCenter(self, self.registry)
+        self.task_center.grid(row=0, column=2, sticky="nsew")
+        if not self._lazy_pages:
+            for name in PAGE_NAMES:
+                self._create_page(name)
+
+        ttk.Label(self, textvariable=self.status_var, anchor="w", padding=(12, 5), relief="sunken").grid(row=1, column=0, columnspan=3, sticky="ew")
+        self.show_page("今日概览" if self._lazy_pages else PAGE_NAMES[0])
+
+    def _create_page(self, name: str) -> tk.Frame:
+        page = self.pages.get(name)
+        if page is None:
+            page = self._factories[name](self.page_host, self.paths, self.registry)
             page.grid(row=0, column=0, sticky="nsew")
             self.pages[name] = page
-
-        status = ttk.Label(
-            self,
-            textvariable=self.status_var,
-            anchor="w",
-            padding=(12, 5),
-            relief="sunken",
-        )
-        status.grid(row=1, column=0, columnspan=2, sticky="ew")
-        self.show_page(PAGE_NAMES[0])
+        return page
 
     def show_page(self, name: str) -> None:
-        if name not in self.pages:
+        if name == "今日概览":
+            page = self.dashboard
+        elif name in self._factories:
+            page = self._create_page(name)
+        else:
             raise KeyError(f"未知页面：{name}")
-        self.pages[name].tkraise()
+        page.tkraise()
         self.current_page = name
         self.status_var.set(f"当前功能：{name}")
         for page_name, button in self.nav_buttons.items():
-            button.configure(
-                style="NavSelected.TButton" if page_name == name else "Nav.TButton"
-            )
+            button.configure(style="NavSelected.TButton" if page_name == name else "Nav.TButton")
 
     def _on_close(self) -> None:
-        if self.registry.has_running_tasks():
-            confirmed = messagebox.askyesno(
-                "仍有任务运行",
-                "关闭工具箱将终止由工具箱启动的任务，确定关闭吗？",
-                parent=self,
-            )
-            if not confirmed:
+        active = self.registry.active_snapshots()
+        if active or self.registry.has_running_tasks():
+            names = "\n".join(f"• {task.name}" for task in active) or "• 后台任务"
+            if not messagebox.askyesno("仍有任务运行", f"以下任务仍在运行：\n\n{names}\n\n关闭工具箱将取消这些任务，确定关闭吗？", parent=self):
                 return
         self.registry.terminate_all()
         self.destroy()
