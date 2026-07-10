@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 import unittest
+import gc
 from pathlib import Path
 
 
@@ -56,6 +57,7 @@ class WorkbenchTests(unittest.TestCase):
                 self.root.destroy()
             except tk.TclError:
                 pass
+            gc.collect()
 
     def test_lazy_app_starts_with_dashboard_and_creates_page_once(self) -> None:
         from toolbox.app import PAGE_NAMES, ToolboxApp

@@ -29,10 +29,10 @@ class TaskEngine:
     def events(self) -> EventBuffer:
         return self._events
 
-    def start_callable(self, name: str, worker: Worker, *, on_done: DoneCallback | None = None, _task_id: str | None = None) -> str:
+    def start_callable(self, name: str, worker: Worker, *, on_done: DoneCallback | None = None, cancellable: bool = True, _task_id: str | None = None) -> str:
         task_id = _task_id or uuid4().hex
         token = CancellationToken()
-        created = TaskSnapshot(task_id=task_id, name=name)
+        created = TaskSnapshot(task_id=task_id, name=name, cancellable=cancellable)
 
         def emit(event: TaskEvent) -> None:
             self._events.publish(event if event.task_id == task_id else replace(event, task_id=task_id))
@@ -40,6 +40,11 @@ class TaskEngine:
         def transition(state: TaskState, **changes: Any) -> TaskSnapshot:
             with self._lock:
                 current = self._snapshots[task_id]
+                if current.state in {TaskState.SUCCEEDED, TaskState.FAILED, TaskState.CANCELLED}:
+                    return current
+                if current.state is TaskState.CANCELLING and state in {TaskState.RUNNING, TaskState.SUCCEEDED}:
+                    state = TaskState.CANCELLED
+                    changes = {"message": "任务已取消", "error": TaskCancelled("任务已取消")}
                 updated = current.transition(state, **changes)
                 self._snapshots[task_id] = updated
             emit(TaskEvent(task_id, TaskEventKind.STATE, message=state.value))
@@ -74,7 +79,7 @@ class TaskEngine:
         thread.start()
         return task_id
 
-    def start_process(self, name: str, command: Sequence[str], *, cwd: Path, env: Mapping[str, str] | None, on_done: DoneCallback | None = None, on_output: Callable[[str], None] | None = None) -> str:
+    def start_process(self, name: str, command: Sequence[str], *, cwd: Path, env: Mapping[str, str] | None, on_done: DoneCallback | None = None, on_output: Callable[[str], None] | None = None, cancellable: bool = True) -> str:
         task_id = uuid4().hex
 
         def worker(token: CancellationToken, emit: Callable[[TaskEvent], None]) -> int:
@@ -84,12 +89,12 @@ class TaskEngine:
                     on_output(line)
             return ProcessRunner().run(list(command), cwd=cwd, env=env, token=token, on_output=output).returncode
 
-        return self.start_callable(name, worker, on_done=on_done, _task_id=task_id)
+        return self.start_callable(name, worker, on_done=on_done, cancellable=cancellable, _task_id=task_id)
 
     def cancel(self, task_id: str) -> bool:
         with self._lock:
             snapshot = self._snapshots.get(task_id)
-            if snapshot is None or snapshot.state not in ACTIVE_STATES:
+            if snapshot is None or snapshot.state not in ACTIVE_STATES or not snapshot.cancellable:
                 return False
             self._snapshots[task_id] = snapshot.transition(TaskState.CANCELLING)
             token = self._tokens[task_id]
@@ -111,7 +116,7 @@ class TaskEngine:
     def has_running_tasks(self) -> bool:
         return bool(self.active_snapshots())
 
-    def shutdown(self, timeout: float = 5.0) -> None:
+    def shutdown(self, timeout: float = 5.0) -> tuple[TaskSnapshot, ...]:
         for snapshot in self.active_snapshots():
             self.cancel(snapshot.task_id)
         deadline = time.monotonic() + timeout
@@ -119,6 +124,6 @@ class TaskEngine:
             with self._lock:
                 threads = tuple(self._threads.values())
             if not threads or time.monotonic() >= deadline:
-                return
+                return self.active_snapshots()
             for thread in threads:
                 thread.join(timeout=min(0.1, max(0.0, deadline - time.monotonic())))

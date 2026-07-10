@@ -5,6 +5,7 @@ import threading
 import time
 import tkinter as tk
 import unittest
+import gc
 from pathlib import Path
 
 
@@ -26,6 +27,7 @@ class ToolPageTaskTests(unittest.TestCase):
             self.registry.terminate_all()
             self.page.destroy()
             self.root.destroy()
+            gc.collect()
 
     def wait_for(self, predicate, timeout: float = 3.0) -> bool:
         deadline = time.monotonic() + timeout

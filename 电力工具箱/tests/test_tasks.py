@@ -80,6 +80,41 @@ class ProcessRunnerTests(unittest.TestCase):
         assert process is not None
         self.assertIsNotNone(process.poll())
 
+    @unittest.skipUnless(sys.platform != "win32", "POSIX process group assertion")
+    def test_cancellation_reaps_child_process_group(self) -> None:
+        import os
+        import tempfile
+        from toolbox.tasks import CancellationToken, ProcessRunner, TaskCancelled
+
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "child.pid"
+            code = (
+                "import subprocess,sys,time; "
+                "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+                f"open({str(pid_file)!r},'w').write(str(p.pid)); time.sleep(30)"
+            )
+            token = CancellationToken()
+            runner = ProcessRunner(terminate_timeout=0.5)
+            errors: list[BaseException] = []
+            thread = threading.Thread(target=lambda: self._run_captured(runner, code, token, errors))
+            thread.start()
+            deadline = time.monotonic() + 2
+            while not pid_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            child_pid = int(pid_file.read_text())
+            token.cancel()
+            thread.join(timeout=5)
+            self.assertIsInstance(errors[0], TaskCancelled)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child_pid, 0)
+
+    @staticmethod
+    def _run_captured(runner, code, token, errors) -> None:
+        try:
+            runner.run([sys.executable, "-c", code], cwd=Path.cwd(), env=None, token=token, on_output=lambda _line: None)
+        except BaseException as exc:
+            errors.append(exc)
+
 
 class TaskEngineTests(unittest.TestCase):
     def test_engine_tracks_success_cancel_and_process_output(self) -> None:
@@ -124,6 +159,34 @@ class TaskEngineTests(unittest.TestCase):
         self.assertTrue(finished.wait(2))
         self.assertEqual(TaskState.SUCCEEDED, engine.snapshot(process_id).state)
         self.assertEqual(["line\n"], lines)
+
+    def test_non_cancellable_task_rejects_cancel_and_shutdown_reports_it(self) -> None:
+        from toolbox.tasks import TaskEngine, TaskState
+
+        engine = TaskEngine()
+        release = threading.Event()
+        task_id = engine.start_callable(
+            "写入阶段", lambda _token, _emit: release.wait(1), cancellable=False
+        )
+        self.assertFalse(engine.cancel(task_id))
+        remaining = engine.shutdown(timeout=0.01)
+        self.assertEqual((task_id,), tuple(item.task_id for item in remaining))
+        release.set()
+
+    def test_success_cannot_overwrite_accepted_cancellation(self) -> None:
+        from toolbox.tasks import TaskEngine, TaskState
+
+        engine = TaskEngine()
+        for _ in range(100):
+            release = threading.Event()
+            task_id = engine.start_callable("竞态", lambda _token, _emit: release.wait(1))
+            accepted = engine.cancel(task_id)
+            release.set()
+            deadline = time.monotonic() + 1
+            while engine.snapshot(task_id).state in {TaskState.CREATED, TaskState.RUNNING, TaskState.CANCELLING} and time.monotonic() < deadline:
+                time.sleep(0.001)
+            if accepted:
+                self.assertEqual(TaskState.CANCELLED, engine.snapshot(task_id).state)
 
 
 class ErrorClassificationTests(unittest.TestCase):

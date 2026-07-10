@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import subprocess
 import threading
+import os
+import signal
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
@@ -42,11 +44,14 @@ class ProcessRunner:
         on_output: Callable[[str], None],
     ) -> ProcessResult:
         lines: Queue[str | None] = Queue()
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if os.name == "nt":
+            creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         process = subprocess.Popen(
             list(command), cwd=str(cwd), stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, encoding="utf-8",
             errors="replace", env=dict(env) if env is not None else None,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), bufsize=1,
+            creationflags=creationflags, start_new_session=os.name != "nt", bufsize=1,
         )
         with self._lock:
             self._active_process = process
@@ -91,10 +96,22 @@ class ProcessRunner:
 
     def terminate(self, process: subprocess.Popen[str]) -> None:
         try:
-            process.terminate()
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    process.terminate()
             process.wait(timeout=self.terminate_timeout)
         except subprocess.TimeoutExpired:
-            process.kill()
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    process.kill()
             process.wait(timeout=self.terminate_timeout)
         except OSError:
             pass

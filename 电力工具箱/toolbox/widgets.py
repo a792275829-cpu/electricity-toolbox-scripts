@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import inspect
 import traceback
 import tkinter as tk
 from pathlib import Path
@@ -34,6 +35,7 @@ class ToolPage(ttk.Frame):
         self._completion_queue: queue.Queue[tuple[TaskSnapshot, Callable | None]] = queue.Queue()
         self._poll_after_id: str | None = None
         self._max_log_lines = 5_000
+        self._current_cancellable = True
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
@@ -110,7 +112,7 @@ class ToolPage(ttk.Frame):
             self.progress.stop()
         if status:
             self.status_var.set(status)
-        self.cancel_button.configure(state="normal" if busy else "disabled")
+        self.cancel_button.configure(state="normal" if busy and self._current_cancellable else "disabled")
 
     def append_log(self, text: str) -> None:
         self._log_queue.put(text.rstrip("\n") + "\n")
@@ -162,14 +164,16 @@ class ToolPage(ttk.Frame):
         *,
         status: str,
         on_success: Callable[[T], None] | None = None,
+        cancellable: bool = True,
     ) -> None:
         if self.busy:
             return
+        self._current_cancellable = cancellable
         self.set_busy(True, status)
 
         def task_worker(token, _emit):
             token.raise_if_cancelled()
-            result = worker()
+            result = worker(token) if len(inspect.signature(worker).parameters) else worker()
             token.raise_if_cancelled()
             return result
 
@@ -177,6 +181,7 @@ class ToolPage(ttk.Frame):
             status,
             task_worker,
             on_done=lambda snapshot: self._completion_queue.put((snapshot, on_success)),
+            cancellable=cancellable,
         )
 
     def _finish_success(
@@ -226,10 +231,12 @@ class ToolPage(ttk.Frame):
         cwd: Path,
         status: str,
         on_success: Callable[[int], None] | None = None,
+        cancellable: bool = True,
     ) -> None:
         if self.busy:
             return
         self.append_log(f"> {' '.join(command)}")
+        self._current_cancellable = cancellable
         self.set_busy(True, status)
         self.current_task_id = self.registry.start_process(
             status,
@@ -238,6 +245,7 @@ class ToolPage(ttk.Frame):
             env=utf8_environment(),
             on_output=self.append_log,
             on_done=lambda snapshot: self._completion_queue.put((snapshot, on_success)),
+            cancellable=cancellable,
         )
 
     def destroy(self) -> None:

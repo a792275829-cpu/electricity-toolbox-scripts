@@ -43,6 +43,7 @@ class TaskSnapshot:
     message: str = ""
     result: Any = None
     error: BaseException | None = None
+    cancellable: bool = True
 
     def transition(self, state: TaskState, **changes: Any) -> "TaskSnapshot":
         return replace(self, state=state, **changes)

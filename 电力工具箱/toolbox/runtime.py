@@ -12,6 +12,7 @@ from types import ModuleType
 from .tasks import ProcessRunner, TaskEngine
 
 _MODULE_CACHE: dict[tuple[str, Path], tuple[int, ModuleType]] = {}
+_MODULE_CACHE_LOCK = threading.RLock()
 
 
 PREFERRED_PYTHON = Path(
@@ -128,28 +129,30 @@ def load_module(name: str, path: Path) -> ModuleType:
     if not path.is_file():
         raise FileNotFoundError(f"找不到模块文件：{path}")
     modified = path.stat().st_mtime_ns
-    cached = _MODULE_CACHE.get((name, path))
-    if cached is not None and cached[0] == modified:
-        return cached[1]
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"无法加载模块：{path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    try:
-        source = path.read_bytes()
-        exec(compile(source, str(path), "exec"), module.__dict__)
-    except Exception:
-        sys.modules.pop(name, None)
-        raise
-    _MODULE_CACHE[(name, path)] = (modified, module)
-    return module
+    with _MODULE_CACHE_LOCK:
+        cached = _MODULE_CACHE.get((name, path))
+        if cached is not None and cached[0] == modified:
+            return cached[1]
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"无法加载模块：{path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            source = path.read_bytes()
+            exec(compile(source, str(path), "exec"), module.__dict__)
+        except Exception:
+            sys.modules.pop(name, None)
+            raise
+        _MODULE_CACHE[(name, path)] = (modified, module)
+        return module
 
 
 def clear_module_cache() -> None:
-    for name, _path in tuple(_MODULE_CACHE):
-        sys.modules.pop(name, None)
-    _MODULE_CACHE.clear()
+    with _MODULE_CACHE_LOCK:
+        for name, _path in tuple(_MODULE_CACHE):
+            sys.modules.pop(name, None)
+        _MODULE_CACHE.clear()
 
 
 def utf8_environment() -> dict[str, str]:
@@ -237,8 +240,8 @@ class TaskRegistry(TaskEngine):
             legacy = bool(self._legacy_processes or self._legacy_threads)
         return legacy or super().has_running_tasks()
 
-    def terminate_all(self) -> None:
-        self.shutdown(timeout=5.0)
+    def terminate_all(self):
+        remaining = self.shutdown(timeout=5.0)
         with self._legacy_lock:
             processes = list(self._legacy_processes)
             self._legacy_processes.clear()
@@ -246,3 +249,4 @@ class TaskRegistry(TaskEngine):
             if process.poll() is not None:
                 continue
             ProcessRunner().terminate(process)
+        return remaining

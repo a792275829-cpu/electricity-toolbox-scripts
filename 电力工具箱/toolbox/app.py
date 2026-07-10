@@ -124,7 +124,10 @@ class ToolboxApp(tk.Tk):
             names = "\n".join(f"• {task.name}" for task in active) or "• 后台任务"
             if not messagebox.askyesno("仍有任务运行", f"以下任务仍在运行：\n\n{names}\n\n关闭工具箱将取消这些任务，确定关闭吗？", parent=self):
                 return
-        self.registry.terminate_all()
+        remaining = self.registry.terminate_all()
+        if remaining:
+            messagebox.showwarning("无法立即关闭", "仍有不可安全中断的写入任务。请等待任务结束后再关闭。", parent=self)
+            return
         self.destroy()
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 import threading
 import tkinter as tk
 from collections.abc import Mapping
@@ -17,6 +16,7 @@ from .runtime import (
     utf8_environment,
 )
 from .widgets import ToolPage
+from .tasks import CancellationToken, ProcessRunner
 from .page_support import (
     add_path_row as _add_path_row,
     clearing_file_date,
@@ -545,29 +545,15 @@ class ReportPage(ToolPage):
         if selected:
             self.template_report.set(selected)
 
-    def _execute_command(self, command: list[str]) -> None:
+    def _execute_command(self, command: list[str], token: CancellationToken) -> None:
         self.append_log(f"> {' '.join(command)}")
-        process = subprocess.Popen(
+        ProcessRunner().run(
             command,
-            cwd=str(self.paths.report_scripts_dir),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
+            cwd=self.paths.report_scripts_dir,
             env=utf8_environment(),
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            token=token,
+            on_output=self.append_log,
         )
-        self.registry.register_process(process)
-        try:
-            assert process.stdout is not None
-            for line in process.stdout:
-                self.append_log(line)
-            code = process.wait()
-        finally:
-            self.registry.unregister_process(process)
-        if code != 0:
-            raise RuntimeError(f"命令退出码 {code}")
 
     def start_report(self) -> None:
         report_date = self.report_date.get().strip()
@@ -626,9 +612,10 @@ class ReportPage(ToolPage):
             )
         self.clear_log()
 
-        def worker() -> int:
+        def worker(token: CancellationToken) -> int:
             for command in commands:
-                self._execute_command(command)
+                token.raise_if_cancelled()
+                self._execute_command(command, token)
             return len(commands)
 
         self.run_in_thread(
@@ -720,6 +707,7 @@ class PrivateUploadPage(ToolPage):
             self.build_command(mode, source),
             cwd=self.paths.private_uploader_dir,
             status="正在预览..." if mode == "--plan" else "正在上传...",
+            cancellable=mode == "--plan",
         )
 
 
@@ -868,6 +856,7 @@ class GroupUploadPage(ToolPage):
             self.build_upload_command(self.selected_paths, force=self.force.get()),
             cwd=self.paths.group_upload_dir,
             status="正在上传集团每日数据...",
+            cancellable=False,
         )
 
     def start_login(self) -> None:
@@ -1028,6 +1017,7 @@ class MarketTableUpdatePage(ToolPage):
             self.build_update_command(run_date, workbook),
             cwd=self.paths.market_table_update_dir,
             status="正在更新市场表...",
+            cancellable=False,
             on_success=lambda _code: messagebox.showinfo(
                 "完成", "市场表更新完成。", parent=self
             ),
