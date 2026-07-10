@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
+from .tasks import ProcessRunner, TaskEngine
+
 
 PREFERRED_PYTHON = Path(
     r"C:\Users\lllg\AppData\Local\Programs\Python\Python311\python.exe"
@@ -187,48 +189,46 @@ def node_executable() -> str:
 configure_portable_environment()
 
 
-class TaskRegistry:
+class TaskRegistry(TaskEngine):
     def __init__(self) -> None:
-        self._processes: set[subprocess.Popen[str]] = set()
-        self._threads: set[threading.Thread] = set()
-        self._lock = threading.Lock()
+        super().__init__()
+        self._legacy_processes: set[subprocess.Popen[str]] = set()
+        self._legacy_threads: set[threading.Thread] = set()
+        self._legacy_lock = threading.Lock()
 
     def register_process(self, process: subprocess.Popen[str]) -> None:
-        with self._lock:
-            self._processes.add(process)
+        with self._legacy_lock:
+            self._legacy_processes.add(process)
 
     def unregister_process(self, process: subprocess.Popen[str]) -> None:
-        with self._lock:
-            self._processes.discard(process)
+        with self._legacy_lock:
+            self._legacy_processes.discard(process)
 
     def register_thread(self, thread: threading.Thread) -> None:
-        with self._lock:
-            self._threads.add(thread)
+        with self._legacy_lock:
+            self._legacy_threads.add(thread)
 
     def unregister_thread(self, thread: threading.Thread) -> None:
-        with self._lock:
-            self._threads.discard(thread)
+        with self._legacy_lock:
+            self._legacy_threads.discard(thread)
 
     def has_running_tasks(self) -> bool:
-        with self._lock:
-            self._processes = {
-                process for process in self._processes if process.poll() is None
+        with self._legacy_lock:
+            self._legacy_processes = {
+                process for process in self._legacy_processes if process.poll() is None
             }
-            self._threads = {thread for thread in self._threads if thread.is_alive()}
-            return bool(self._processes or self._threads)
+            self._legacy_threads = {
+                thread for thread in self._legacy_threads if thread.is_alive()
+            }
+            legacy = bool(self._legacy_processes or self._legacy_threads)
+        return legacy or super().has_running_tasks()
 
     def terminate_all(self) -> None:
-        with self._lock:
-            processes = list(self._processes)
-            self._processes.clear()
+        self.shutdown(timeout=5.0)
+        with self._legacy_lock:
+            processes = list(self._legacy_processes)
+            self._legacy_processes.clear()
         for process in processes:
             if process.poll() is not None:
                 continue
-            try:
-                process.terminate()
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=2)
-            except OSError:
-                pass
+            ProcessRunner().terminate(process)
