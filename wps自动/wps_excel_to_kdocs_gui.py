@@ -1465,18 +1465,43 @@ class WpsWriterFrame(ttk.Frame):
         mapping_frame = ttk.LabelFrame(root, text="Document configs")
         mapping_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
 
-        mapping_toolbar = ttk.Frame(mapping_frame)
-        mapping_toolbar.pack(fill="x", padx=8, pady=(8, 0))
-        ttk.Button(mapping_toolbar, text="Add config", command=self.add_config).pack(side="left")
-        ttk.Button(mapping_toolbar, text="Edit", command=self.edit_config).pack(side="left", padx=8)
-        ttk.Button(mapping_toolbar, text="Copy", command=self.copy_config).pack(side="left")
-        ttk.Button(mapping_toolbar, text="Remove", command=self.remove_config).pack(side="left", padx=8)
-        ttk.Button(mapping_toolbar, text="Move up", command=self.move_config_up).pack(side="left")
-        ttk.Button(mapping_toolbar, text="Move down", command=self.move_config_down).pack(side="left", padx=8)
-        ttk.Button(mapping_toolbar, text="Import", command=self.import_config).pack(side="left")
-        ttk.Button(mapping_toolbar, text="Export", command=self.export_config).pack(side="left", padx=8)
-        ttk.Button(mapping_toolbar, text="Write to WPS", command=self.write).pack(side="right")
-        ttk.Button(mapping_toolbar, text="Preview", command=self.preview).pack(side="right", padx=8)
+        self.mapping_toolbar = ttk.Frame(mapping_frame)
+        self.mapping_toolbar.pack(fill="x", padx=8, pady=(8, 0))
+        self.mapping_toolbar.columnconfigure(0, weight=1)
+
+        self.mapping_primary_toolbar = ttk.Frame(self.mapping_toolbar)
+        self.mapping_primary_toolbar.grid(row=0, column=0, sticky="ew")
+        primary_actions = [
+            ("Add config", self.add_config),
+            ("Edit", self.edit_config),
+            ("Copy", self.copy_config),
+            ("Remove", self.remove_config),
+            ("Move up", self.move_config_up),
+            ("Move down", self.move_config_down),
+        ]
+        for column, (text, command) in enumerate(primary_actions):
+            self.mapping_primary_toolbar.columnconfigure(column, weight=1, uniform="config-action")
+            ttk.Button(
+                self.mapping_primary_toolbar,
+                text=text,
+                command=command,
+            ).grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 2, 0))
+
+        self.mapping_secondary_toolbar = ttk.Frame(self.mapping_toolbar)
+        self.mapping_secondary_toolbar.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        self.mapping_secondary_toolbar.columnconfigure(2, weight=1)
+        ttk.Button(
+            self.mapping_secondary_toolbar, text="Import", command=self.import_config
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            self.mapping_secondary_toolbar, text="Export", command=self.export_config
+        ).grid(row=0, column=1, sticky="w", padx=(4, 0))
+        ttk.Button(
+            self.mapping_secondary_toolbar, text="Preview", command=self.preview
+        ).grid(row=0, column=3, sticky="e", padx=(4, 0))
+        ttk.Button(
+            self.mapping_secondary_toolbar, text="Write to WPS", command=self.write
+        ).grid(row=0, column=4, sticky="e", padx=(4, 0))
 
         tree_frame = ttk.Frame(mapping_frame)
         tree_frame.pack(fill="both", expand=True, padx=8, pady=8)
