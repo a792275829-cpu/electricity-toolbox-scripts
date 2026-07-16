@@ -17,6 +17,7 @@ def default_adapters() -> dict[str, ToolAdapter]:
     rows = (
         ToolAdapter("online-energy", retryable_read=True),
         ToolAdapter("market-table", destructive=True),
+        ToolAdapter("guangdong-price", retryable_read=True),
         ToolAdapter("trade-analysis"),
         ToolAdapter("summary"),
         ToolAdapter("report"),

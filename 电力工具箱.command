@@ -70,7 +70,9 @@ dependencies_ready() {
 import cryptography
 import docx
 import openpyxl
+import pandas
 import playwright
+import sklearn
 PY
 }
 

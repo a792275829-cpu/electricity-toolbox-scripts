@@ -4,6 +4,7 @@
 **/auth_state.json.lock
 **/upload.config.json
 **/wps_excel_to_kdocs_config.json
+**/file_dialog_settings.json
 **/.browser-profile/
 **/.browser-profile-uploader/
 **/wps-browser-profile/

@@ -65,6 +65,13 @@ UNIT_COST_START_COLUMN = "N"
 UNIT_COST_END_COLUMN = "X"
 OPERATION_MODE_START_COLUMN = "B"
 OPERATION_MODE_END_COLUMN = "M"
+MARKET_BOARD_ONLINE_UNIT_COLUMNS = ("AA", "AE")
+SPOT_CLEARING_UNIT_COUNT_START_COLUMN = "AB"
+SPOT_CLEARING_UNIT_COUNT_END_COLUMN = "AC"
+DAY_AHEAD_CLEARING_UNIT_COUNT_GROUPS = (
+    "DAY_AHEAD_CLEARANCE_COAL",
+    "DAY_AHEAD_CLEARANCE_GAS",
+)
 ACTUAL_LOAD_TYPES = (
     "1",  # 统调
     "6",  # B类
@@ -637,6 +644,113 @@ def fetch_user_settlement_values(
     return extract_user_settlement_values(payload.get("data") or [], run_date)
 
 
+def extract_market_board_online_unit_values(
+    payload: dict[str, Any],
+    run_date: date,
+) -> list[int | float]:
+    rows = [
+        row
+        for row in payload.get("dataApplyConfigDOList") or []
+        if date_matches(row.get("date"), run_date)
+        and str(row.get("dataType")) == "1"
+    ]
+    if not rows:
+        raise RuntimeError(
+            f"市场行情看板没有返回日期 {run_date.isoformat()} 的日前在线机组数据"
+        )
+
+    row = rows[0]
+    values = []
+    for field, label in (
+        ("onlineUnit", "在线机组数"),
+        ("overHaulCapacity", "省内机组预测检修容量"),
+    ):
+        value = row.get(field)
+        if value in (None, ""):
+            raise RuntimeError(f"市场行情看板缺少{label}：{field}")
+        values.append(normalize_report_number(value))
+    return values
+
+
+def fetch_market_board_online_unit_values(
+    context,
+    run_date: date,
+) -> list[int | float]:
+    response = context.request.get(
+        f"{online_export_module.BASE_URL}/gdfire/api/spot/market/info",
+        params={
+            "provinceAreaId": DEFAULT_PROVINCE_AREA_ID,
+            "provinceId": DEFAULT_PROVINCE_AREA_ID.lstrip("0"),
+            "timeSegment": 2,
+            "startDate": run_date.isoformat(),
+            "endDate": run_date.isoformat(),
+        },
+        timeout=30000,
+    )
+    payload = online_export_module.parse_json_response(
+        response,
+        f"读取市场行情看板在线机组数与检修容量 {run_date.isoformat()}",
+    )
+    return extract_market_board_online_unit_values(payload.get("data") or {}, run_date)
+
+
+def extract_spot_clearing_unit_count_values(
+    payload: list[dict[str, Any]],
+    run_date: date,
+) -> list[int | float]:
+    rows_by_group = {
+        str(row.get("dataItemGroup")): row
+        for row in payload
+        if date_matches(row.get("date"), run_date)
+        and str(row.get("dataType")) == "1"
+    }
+
+    coal_row = rows_by_group.get(DAY_AHEAD_CLEARING_UNIT_COUNT_GROUPS[0])
+    gas_row = rows_by_group.get(DAY_AHEAD_CLEARING_UNIT_COUNT_GROUPS[1])
+    if coal_row is None:
+        raise RuntimeError(f"现货分时分类型出清电量缺少 {run_date.isoformat()} 日前燃煤数据")
+    if gas_row is None:
+        raise RuntimeError(f"现货分时分类型出清电量缺少 {run_date.isoformat()} 日前燃气数据")
+
+    coal_counts = coal_row.get("unitCount") or []
+    if len(coal_counts) < 24 or coal_counts[23] in (None, ""):
+        raise RuntimeError("现货分时分类型出清电量日前燃煤缺少 23:00 开机台数")
+
+    gas_counts = [
+        normalize_report_number(value)
+        for value in (gas_row.get("unitCount") or [])
+        if value not in (None, "")
+    ]
+    if not gas_counts:
+        raise RuntimeError("现货分时分类型出清电量日前燃气缺少开机台数")
+
+    return [
+        normalize_report_number(coal_counts[23]),
+        normalize_number(max(gas_counts)),
+    ]
+
+
+def fetch_spot_clearing_unit_count_values(
+    context,
+    run_date: date,
+) -> list[int | float]:
+    response = context.request.post(
+        f"{online_export_module.BASE_URL}/gdfire/api/spot/clear/timeType/data/list",
+        data={
+            "provinceAreaId": DEFAULT_PROVINCE_AREA_ID,
+            "spotClearEleGroupList": list(DAY_AHEAD_CLEARING_UNIT_COUNT_GROUPS),
+            "startDate": run_date.isoformat(),
+            "endDate": run_date.isoformat(),
+        },
+        timeout=30000,
+    )
+    payload = online_export_module.parse_json_response(
+        response,
+        f"读取现货分时分类型出清电量日前燃煤和燃气 {run_date.isoformat()}",
+    )
+    return extract_spot_clearing_unit_count_values(payload.get("data") or [], run_date)
+
+
 def extract_unit_cost_price_values(payload: list[dict[str, Any]]) -> list[int | float]:
     rows_by_unit_id: dict[str, dict[str, Any]] = {}
     for org_item in payload:
@@ -867,6 +981,91 @@ def write_unit_cost_price_values(
         "sheet": sheet.title,
         "row": row,
         "range": f"{UNIT_COST_START_COLUMN}{row}:{get_column_letter(end_column)}{row}",
+        "count": written_count,
+        "skipped": skipped_count,
+    }
+
+
+def write_market_board_online_unit_values(
+    workbook_path: Path | str,
+    run_date: date,
+    values: list[int | float],
+) -> dict[str, Any]:
+    if len(values) != 2:
+        raise ValueError(f"需要写入 2 个在线机组数与检修容量数值，实际收到 {len(values)} 个")
+
+    path = Path(workbook_path).expanduser()
+    row = find_date_row_in_workbook(path, run_date, COST_SHEET_NAME)
+    workbook = load_workbook_checked(path)
+    if COST_SHEET_NAME not in workbook.sheetnames:
+        raise RuntimeError(f"Excel 中未找到工作表：{COST_SHEET_NAME}")
+    sheet = workbook[COST_SHEET_NAME]
+
+    written_count = 0
+    skipped_count = 0
+    cells = []
+    for column_name, value in zip(MARKET_BOARD_ONLINE_UNIT_COLUMNS, values):
+        column = openpyxl.utils.column_index_from_string(column_name)
+        cell = sheet.cell(row=row, column=column)
+        cells.append(cell.coordinate)
+        if cell_is_non_empty(cell):
+            skipped_count += 1
+            continue
+        if row > 1:
+            copy_cell_style(sheet.cell(row=row - 1, column=column), cell)
+        cell.value = value
+        written_count += 1
+
+    workbook.save(path)
+    return {
+        "workbook": str(path),
+        "sheet": sheet.title,
+        "row": row,
+        "range": ",".join(cells),
+        "count": written_count,
+        "skipped": skipped_count,
+    }
+
+
+def write_spot_clearing_unit_count_values(
+    workbook_path: Path | str,
+    run_date: date,
+    values: list[int | float],
+) -> dict[str, Any]:
+    if len(values) != 2:
+        raise ValueError(f"需要写入 2 个燃煤和燃气开机台数，实际收到 {len(values)} 个")
+
+    path = Path(workbook_path).expanduser()
+    row = find_date_row_in_workbook(path, run_date, COST_SHEET_NAME)
+    workbook = load_workbook_checked(path)
+    if COST_SHEET_NAME not in workbook.sheetnames:
+        raise RuntimeError(f"Excel 中未找到工作表：{COST_SHEET_NAME}")
+    sheet = workbook[COST_SHEET_NAME]
+    start_column = openpyxl.utils.column_index_from_string(
+        SPOT_CLEARING_UNIT_COUNT_START_COLUMN
+    )
+
+    written_count = 0
+    skipped_count = 0
+    for offset, value in enumerate(values):
+        cell = sheet.cell(row=row, column=start_column + offset)
+        if cell_is_non_empty(cell):
+            skipped_count += 1
+            continue
+        if row > 1:
+            copy_cell_style(sheet.cell(row=row - 1, column=start_column + offset), cell)
+        cell.value = value
+        written_count += 1
+
+    workbook.save(path)
+    return {
+        "workbook": str(path),
+        "sheet": sheet.title,
+        "row": row,
+        "range": (
+            f"{SPOT_CLEARING_UNIT_COUNT_START_COLUMN}{row}:"
+            f"{SPOT_CLEARING_UNIT_COUNT_END_COLUMN}{row}"
+        ),
         "count": written_count,
         "skipped": skipped_count,
     }
@@ -1103,6 +1302,46 @@ def run_update(
                         f"（{write_count_text(cost_summary)}）"
                     )
                 log(
+                    "正在读取省内现货交易市场行情看板在线机组数与检修容量："
+                    f"{run_date.isoformat()}（基准日期 D）"
+                )
+                market_board_values = fetch_values_or_skip(
+                    "省内现货交易市场行情看板在线机组数与检修容量",
+                    lambda: fetch_market_board_online_unit_values(context, run_date),
+                )
+                market_board_summary = None
+                if market_board_values is not None:
+                    log("已读取在线机组数与省内机组预测检修容量 2 个数值。")
+                    market_board_summary = write_market_board_online_unit_values(
+                        workbook_path,
+                        run_date,
+                        market_board_values,
+                    )
+                    log(
+                        f"已写入：{market_board_summary['sheet']}!{market_board_summary['range']} "
+                        f"（{write_count_text(market_board_summary)}）"
+                    )
+                log(
+                    "正在读取公有数据管理现货分时分类型出清电量日前燃煤和燃气："
+                    f"{run_date.isoformat()}（基准日期 D）"
+                )
+                spot_clearing_values = fetch_values_or_skip(
+                    "公有数据管理现货分时分类型出清电量日前燃煤和燃气",
+                    lambda: fetch_spot_clearing_unit_count_values(context, run_date),
+                )
+                spot_clearing_summary = None
+                if spot_clearing_values is not None:
+                    log("已读取日前燃煤 23:00 和燃气全天最大开机台数 2 个数值。")
+                    spot_clearing_summary = write_spot_clearing_unit_count_values(
+                        workbook_path,
+                        run_date,
+                        spot_clearing_values,
+                    )
+                    log(
+                        f"已写入：{spot_clearing_summary['sheet']}!{spot_clearing_summary['range']} "
+                        f"（{write_count_text(spot_clearing_summary)}）"
+                    )
+                log(
                     "正在复制机组运行方式："
                     f"{(run_date - timedelta(days=1)).isoformat()} -> {run_date.isoformat()}"
                 )
@@ -1122,6 +1361,8 @@ def run_update(
                     "userSettlement": user_settlement_summary,
                     "actualLoad": summary,
                     "unitCostPrices": cost_summary,
+                    "marketBoardOnlineUnit": market_board_summary,
+                    "spotClearingUnitCounts": spot_clearing_summary,
                     "unitOperationMode": operation_summary,
                 }
             finally:

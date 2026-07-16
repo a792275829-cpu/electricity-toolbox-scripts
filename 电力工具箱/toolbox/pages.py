@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from .file_dialogs import FileDialogState
 from .runtime import (
     TaskRegistry,
     ToolPaths,
@@ -24,6 +25,14 @@ from .page_support import (
     default_review_root,
     open_directory as _open_directory,
 )
+
+
+def _file_dialog_state(paths: ToolPaths) -> FileDialogState:
+    """Keep lightweight test doubles compatible with the shared dialog state."""
+    settings_path = getattr(paths, "file_dialog_settings", None)
+    if settings_path is None:
+        settings_path = Path(getattr(paths, "group_upload_dir", Path.cwd())) / "file_dialog_settings.json"
+    return FileDialogState(settings_path)
 
 
 class OnlineEnergyPage(ToolPage):
@@ -109,6 +118,7 @@ class TradeAnalysisPage(ToolPage):
             description="选择一个或多个出清 Excel，批量生成 HTML 分析报告。",
         )
         self.paths = paths
+        self.file_dialogs = _file_dialog_state(paths)
         self.files: list[Path] = []
         self.output_dir = tk.StringVar(master=self, value=str(Path.home() / "Downloads"))
 
@@ -203,6 +213,7 @@ class TradeAnalysisPage(ToolPage):
     def add_files(self) -> None:
         selected = filedialog.askopenfilenames(
             title="选择出清 Excel 文件",
+            initialdir=str(self.file_dialogs.initial_directory("trade_analysis_input")),
             filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
             parent=self,
         )
@@ -213,6 +224,8 @@ class TradeAnalysisPage(ToolPage):
                 self.files.append(path)
                 self.listbox.insert("end", str(path))
                 existing.add(path.resolve())
+        if selected:
+            self.file_dialogs.remember_file("trade_analysis_input", selected[0])
 
     def remove_selected(self) -> None:
         for index in reversed(self.listbox.curselection()):
@@ -226,11 +239,16 @@ class TradeAnalysisPage(ToolPage):
     def choose_output_dir(self) -> None:
         selected = filedialog.askdirectory(
             title="选择输出目录",
-            initialdir=self.output_dir.get(),
+            initialdir=str(
+                self.file_dialogs.initial_directory(
+                    "trade_analysis_output", self.output_dir.get()
+                )
+            ),
             parent=self,
         )
         if selected:
             self.output_dir.set(selected)
+            self.file_dialogs.remember_directory("trade_analysis_output", selected)
 
     def start_analysis(self) -> None:
         if not self.files:
@@ -279,6 +297,7 @@ class SummaryPage(ToolPage):
             description="汇总日前和实时交易结果，并保留原始 Excel 的显示精度。",
         )
         self.paths = paths
+        self.file_dialogs = _file_dialog_state(paths)
         default_input = default_review_folder_for_date(today or date.today(), review_root)
         self.input_dir = tk.StringVar(master=self, value=str(default_input))
         self.output_file = tk.StringVar(
@@ -320,21 +339,32 @@ class SummaryPage(ToolPage):
         return input_dir / f"{input_dir.name}_汇总.xlsx"
 
     def choose_input_dir(self) -> None:
-        selected = filedialog.askdirectory(title="选择原始数据文件夹", parent=self)
+        selected = filedialog.askdirectory(
+            title="选择原始数据文件夹",
+            initialdir=str(
+                self.file_dialogs.initial_directory("summary_input", self.input_dir.get())
+            ),
+            parent=self,
+        )
         if selected:
             path = Path(selected)
             self.input_dir.set(str(path))
             self.output_file.set(str(self.default_output_for(path)))
+            self.file_dialogs.remember_directory("summary_input", path)
 
     def choose_output_file(self) -> None:
         selected = filedialog.asksaveasfilename(
             title="选择输出文件",
+            initialdir=str(
+                self.file_dialogs.initial_directory("summary_output", self.output_file.get())
+            ),
             defaultextension=".xlsx",
             filetypes=[("Excel 文件", "*.xlsx")],
             parent=self,
         )
         if selected:
             self.output_file.set(selected)
+            self.file_dialogs.remember_file("summary_output", selected)
 
     def open_output_dir(self) -> None:
         output = self.output_file.get().strip()
@@ -384,6 +414,7 @@ class ReportPage(ToolPage):
             description="抓取每日数据并根据三个 Excel 数据源生成生产经营情况 Word 报告。",
         )
         self.paths = paths
+        self.file_dialogs = _file_dialog_state(paths)
         self.report_date = tk.StringVar(master=self, value=date.today().isoformat())
         self.online_workbook = tk.StringVar(master=self)
         self.day_ahead_workbook = tk.StringVar(master=self)
@@ -528,22 +559,30 @@ class ReportPage(ToolPage):
     def choose_excel(self, variable: tk.StringVar) -> None:
         selected = filedialog.askopenfilename(
             title="选择 Excel 文件",
-            initialdir=str(Path.home() / "Downloads"),
+            initialdir=str(
+                self.file_dialogs.initial_directory("report_excel", variable.get())
+            ),
             filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
             parent=self,
         )
         if selected:
             variable.set(selected)
+            self.file_dialogs.remember_file("report_excel", selected)
 
     def choose_template(self) -> None:
         selected = filedialog.askopenfilename(
             title="选择 Word 模板",
-            initialdir=str(self.paths.report_root / "输出"),
+            initialdir=str(
+                self.file_dialogs.initial_directory(
+                    "report_template", self.template_report.get()
+                )
+            ),
             filetypes=[("Word 文件", "*.docx"), ("所有文件", "*.*")],
             parent=self,
         )
         if selected:
             self.template_report.set(selected)
+            self.file_dialogs.remember_file("report_template", selected)
 
     def _execute_command(self, command: list[str], token: CancellationToken) -> None:
         self.append_log(f"> {' '.join(command)}")
@@ -644,6 +683,7 @@ class PrivateUploadPage(ToolPage):
             description="选择复盘目录，先预览匹配结果，再确认上传私有数据。",
         )
         self.paths = paths
+        self.file_dialogs = _file_dialog_state(paths)
         default = default_review_folder_for_date(today or date.today(), review_root)
         self.source_folder = tk.StringVar(master=self, value=str(default))
 
@@ -681,11 +721,16 @@ class PrivateUploadPage(ToolPage):
     def choose_folder(self) -> None:
         selected = filedialog.askdirectory(
             title="选择复盘文件夹",
-            initialdir=self.source_folder.get(),
+            initialdir=str(
+                self.file_dialogs.initial_directory(
+                    "private_upload_source", self.source_folder.get()
+                )
+            ),
             parent=self,
         )
         if selected:
             self.source_folder.set(selected)
+            self.file_dialogs.remember_directory("private_upload_source", selected)
 
     def confirm_upload(self) -> None:
         folder = self.source_folder.get().strip()
@@ -727,6 +772,7 @@ class GroupUploadPage(ToolPage):
             description="上传能销和省内日报数据；上传完成后自动新建集团日报。",
         )
         self.paths = paths
+        self.file_dialogs = _file_dialog_state(paths)
         self.selected_paths: list[Path] = []
         self.selection_var = tk.StringVar(master=self, value="未选择文件")
         self.summary_var = tk.StringVar(
@@ -826,7 +872,9 @@ class GroupUploadPage(ToolPage):
     def choose_files(self) -> None:
         selected = filedialog.askopenfilenames(
             title="选择能销数据；也可同时选择省内数据",
-            initialdir=str(self.paths.group_upload_dir),
+            initialdir=str(
+                self.file_dialogs.initial_directory("group_upload_input")
+            ),
             filetypes=[("Excel 文件", "*.xlsx *.xls"), ("所有文件", "*.*")],
             parent=self,
         )
@@ -838,6 +886,7 @@ class GroupUploadPage(ToolPage):
         except Exception as exc:
             messagebox.showerror("文件校验失败", str(exc), parent=self)
             return
+        self.file_dialogs.remember_file("group_upload_input", selected[0])
 
     def confirm_upload(self) -> None:
         if not self.selected_paths:
@@ -883,6 +932,7 @@ class MarketTableUpdatePage(ToolPage):
             description="按一个基准运行日期抓取网页数据并写入指定市场 Excel。",
         )
         self.paths = paths
+        self.file_dialogs = _file_dialog_state(paths)
         self.run_date = tk.StringVar(
             master=self, value=(today or date.today()).isoformat()
         )
@@ -961,6 +1011,18 @@ class MarketTableUpdatePage(ToolPage):
         ).pack(anchor="w", pady=(4, 0))
         ttk.Label(
             mapping,
+            text="省内现货交易 > 市场行情看板 > 在线机组数、省内机组预测检修容量：来源日期为基准日期 D；写入 2026年运行方式及成本 工作表对应日期行 AA、AE。",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).pack(anchor="w", pady=(4, 0))
+        ttk.Label(
+            mapping,
+            text="公有数据管理 > 现货分时分类型出清电量 > 日前：燃煤取 23:00 开机台数，燃气取全天开机台数最大值；来源日期为基准日期 D；写入 2026年运行方式及成本 工作表对应日期行 AB:AC。",
+            style="Muted.TLabel",
+            wraplength=820,
+        ).pack(anchor="w", pady=(4, 0))
+        ttk.Label(
+            mapping,
             text="2026年运行方式及成本 > 机组运行方式：来源日期为基准日期 D-1；复制 B:M 到基准日期 D 对应日期行 B:M。",
             style="Muted.TLabel",
             wraplength=820,
@@ -991,12 +1053,15 @@ class MarketTableUpdatePage(ToolPage):
     def choose_workbook(self) -> None:
         selected = filedialog.askopenfilename(
             title="选择市场 Excel",
-            initialdir=str(Path(self.workbook.get()).expanduser().parent),
+            initialdir=str(
+                self.file_dialogs.initial_directory("market_workbook", self.workbook.get())
+            ),
             filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
             parent=self,
         )
         if selected:
             self.workbook.set(selected)
+            self.file_dialogs.remember_file("market_workbook", selected)
 
     def start_update(self) -> None:
         try:
@@ -1033,6 +1098,219 @@ class MarketTableUpdatePage(ToolPage):
             ],
             cwd=self.paths.market_table_update_dir,
             status="正在打开登录窗口...",
+        )
+
+
+class GuangdongPricePage(ToolPage):
+    def __init__(
+        self,
+        parent: tk.Misc,
+        paths: ToolPaths,
+        registry: TaskRegistry,
+        *,
+        today: date | None = None,
+    ) -> None:
+        super().__init__(
+            parent,
+            registry=registry,
+            title="广东电价预测",
+            description="登录华能广东现货系统，按 96 个十五分钟时点更新数据，并运行 D+1 日前电价预测。",
+        )
+        self.paths = paths
+        self.file_dialogs = _file_dialog_state(paths)
+        current = today or date.today()
+        self.run_date = tk.StringVar(master=self, value=current.isoformat())
+        self.master_workbook = tk.StringVar(
+            master=self,
+            value=str(paths.guangdong_price_output_dir / "广东电价数据总表.xlsx"),
+        )
+        self.prediction_input = self.master_workbook
+        self.prediction_output_dir = tk.StringVar(
+            master=self, value=str(paths.guangdong_price_output_dir / "D+1预测")
+        )
+        self.forecast_days = tk.IntVar(master=self, value=1)
+        self.training_months = tk.IntVar(master=self, value=3)
+
+        form = ttk.LabelFrame(self.content, text="数据抓取与合并", padding=12)
+        form.grid(row=0, column=0, sticky="ew")
+        form.columnconfigure(1, weight=1)
+        ttk.Label(form, text="运行日 D").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Entry(form, textvariable=self.run_date, width=16).grid(
+            row=0, column=1, sticky="w", pady=4
+        )
+        ttk.Label(form, text="格式：YYYY-MM-DD", style="Muted.TLabel").grid(
+            row=0, column=2, sticky="w", padx=(8, 0), pady=4
+        )
+        master_button = _add_path_row(
+            form,
+            row=1,
+            label="数据总表",
+            variable=self.master_workbook,
+            command=lambda: _open_directory(paths.guangdong_price_output_dir),
+            button_text="打开目录",
+        )
+        ttk.Label(
+            form,
+            text="自动检查并补齐截至 D 日缺少 96 个时点的日期；账号密码读取本地配置。",
+            style="Muted.TLabel",
+        ).grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
+
+        prediction = ttk.LabelFrame(self.content, text="D+1 日前电价预测", padding=12)
+        prediction.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        prediction.columnconfigure(1, weight=1)
+        ttk.Label(prediction, text="建模输入表").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(prediction, textvariable=self.prediction_input).grid(
+            row=0, column=1, columnspan=4, sticky="w", pady=4
+        )
+        prediction_dir_button = _add_path_row(
+            prediction,
+            row=1,
+            label="预测输出目录",
+            variable=self.prediction_output_dir,
+            command=self.choose_prediction_output_dir,
+            button_text="选择目录",
+        )
+        ttk.Label(prediction, text="向后预测天数").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Spinbox(
+            prediction, from_=1, to=7, textvariable=self.forecast_days, width=8
+        ).grid(row=2, column=1, sticky="w", pady=4)
+        ttk.Label(prediction, text="滚动训练月数").grid(
+            row=3, column=0, sticky="w", pady=4
+        )
+        ttk.Spinbox(
+            prediction, from_=2, to=24, textvariable=self.training_months, width=8
+        ).grid(row=3, column=1, sticky="w", pady=4)
+        ttk.Label(
+            prediction,
+            text="默认使用最近 3 个自然月，降低旧市场规律对近期预测的干扰。",
+            style="Muted.TLabel",
+        ).grid(row=3, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=4)
+        ttk.Label(
+            prediction,
+            text="抓取完成后会自动填入不含实际/实时泄漏字段的建模表。",
+            style="Muted.TLabel",
+        ).grid(row=2, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=4)
+
+        self.update_button = ttk.Button(
+            self.actions, text="补齐数据总表", command=self.start_update
+        )
+        self.update_button.pack(side="left")
+        self.predict_button = ttk.Button(
+            self.actions, text="运行 D+1 预测", command=self.start_prediction
+        )
+        self.predict_button.pack(side="left", padx=(8, 0))
+        ttk.Button(
+            self.actions,
+            text="打开输出目录",
+            command=lambda: _open_directory(paths.guangdong_price_output_dir),
+        ).pack(side="left", padx=(8, 0))
+        self.register_busy_widgets(
+            self.update_button,
+            self.predict_button,
+            master_button,
+            prediction_dir_button,
+        )
+        self.append_log("数据总表也是默认建模输入表；账号密码从本地 config.json 读取。")
+
+    @staticmethod
+    def validate_date_range(start_text: str, end_text: str) -> tuple[date, date]:
+        start = datetime.strptime(start_text, "%Y-%m-%d").date()
+        end = datetime.strptime(end_text, "%Y-%m-%d").date()
+        if start > end:
+            raise ValueError("开始日期不能晚于结束日期")
+        return start, end
+
+    def choose_prediction_output_dir(self) -> None:
+        selected = filedialog.askdirectory(
+            title="选择预测输出目录",
+            initialdir=str(
+                self.file_dialogs.initial_directory(
+                    "guangdong_prediction_output", self.prediction_output_dir.get()
+                )
+            ),
+            parent=self,
+        )
+        if selected:
+            self.prediction_output_dir.set(selected)
+            self.file_dialogs.remember_directory("guangdong_prediction_output", selected)
+
+    def build_prediction_command(
+        self,
+        input_path: Path,
+        output_dir: Path,
+        forecast_days: int,
+        training_months: int | None = None,
+    ) -> list[str]:
+        months = training_months if training_months is not None else self.training_months.get()
+        return [
+            python_executable(),
+            str(self.paths.guangdong_price_forecast),
+            "--input",
+            str(input_path),
+            "--output-dir",
+            str(output_dir),
+            "--forecast-days",
+            str(forecast_days),
+            "--training-months",
+            str(months),
+        ]
+
+    def start_update(self) -> None:
+        try:
+            datetime.strptime(self.run_date.get().strip(), "%Y-%m-%d")
+        except ValueError as exc:
+            messagebox.showerror("日期无效", str(exc), parent=self)
+            return
+        run_date = self.run_date.get().strip()
+        self.clear_log()
+        self.append_log(f"检查截至 {run_date} 的空缺数据")
+
+        def worker() -> dict[str, object]:
+            module = load_module("toolbox_guangdong_data_update", self.paths.guangdong_data_update)
+            return module.update_master_workbook(run_date=run_date)
+
+        def finished(outputs: dict[str, Path]) -> None:
+            self.master_workbook.set(str(outputs["master"]))
+            for name, path in outputs.items():
+                self.append_log(f"{name}：{path}")
+            messagebox.showinfo(
+                "更新完成",
+                f"数据总表已就绪，也是默认建模输入表：\n{outputs['master']}",
+                parent=self,
+            )
+
+        self.run_in_thread(
+            worker,
+            status="正在抓取并合并广东现货数据...",
+            on_success=finished,
+            cancellable=False,
+        )
+
+    def start_prediction(self) -> None:
+        input_path = Path(self.prediction_input.get().strip())
+        output_dir = Path(self.prediction_output_dir.get().strip())
+        forecast_days = self.forecast_days.get()
+        training_months = self.training_months.get()
+        if not input_path.is_file():
+            messagebox.showerror("文件不存在", "请选择有效的建模输入表。", parent=self)
+            return
+        if forecast_days < 1:
+            messagebox.showerror("预测天数无效", "预测天数必须至少为 1。", parent=self)
+            return
+        if training_months < 2:
+            messagebox.showerror("训练窗口无效", "训练窗口至少为 2 个月。", parent=self)
+            return
+        output_dir.mkdir(parents=True, exist_ok=True)
+        self.clear_log()
+        self.run_process(
+            self.build_prediction_command(
+                input_path, output_dir, forecast_days, training_months
+            ),
+            cwd=self.paths.guangdong_price_dir,
+            status="正在训练并生成 D+1 日前电价预测...",
+            on_success=lambda _code: messagebox.showinfo(
+                "预测完成", f"预测结果已保存到：\n{output_dir}", parent=self
+            ),
         )
 
 
@@ -1090,5 +1368,6 @@ def page_factories() -> Mapping[str, object]:
         "私有数据上传": PrivateUploadPage,
         "上传集团每日数据": GroupUploadPage,
         "市场表更新": MarketTableUpdatePage,
+        "广东电价预测": GuangdongPricePage,
         "WPS写入工具": WpsWriterPage,
     }

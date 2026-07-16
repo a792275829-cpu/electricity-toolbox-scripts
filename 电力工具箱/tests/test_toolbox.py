@@ -25,6 +25,42 @@ def destroy_tk(root: tk.Misc) -> None:
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_file_dialog_state_remembers_module_and_common_directories(self) -> None:
+        from toolbox.file_dialogs import FileDialogState
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "first"
+            second = root / "second"
+            first.mkdir()
+            second.mkdir()
+            settings = root / "file_dialog_settings.json"
+            state = FileDialogState(settings)
+
+            state.remember_file("report_excel", first / "source.xlsx")
+            self.assertEqual(state.initial_directory("report_excel"), first)
+            self.assertEqual(state.initial_directory("group_upload_input"), first)
+
+            state.remember_directory("group_upload_input", second)
+            reloaded = FileDialogState(settings)
+            self.assertEqual(reloaded.initial_directory("report_excel"), first)
+            self.assertEqual(reloaded.initial_directory("group_upload_input"), second)
+            self.assertEqual(reloaded.initial_directory("new_module"), second)
+
+    def test_file_dialog_state_uses_existing_current_path_then_fallback(self) -> None:
+        from toolbox.file_dialogs import FileDialogState
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "workbooks"
+            folder.mkdir()
+            state = FileDialogState(root / "settings.json")
+
+            self.assertEqual(
+                state.initial_directory("market_workbook", folder / "market.xlsx"),
+                folder,
+            )
+
     def test_tool_paths_resolve_from_workspace(self) -> None:
         from toolbox.runtime import ToolPaths
 
@@ -454,6 +490,51 @@ class RuntimeTests(unittest.TestCase):
             ],
         )
 
+    def test_group_upload_create_daily_report_uses_template_fallback_after_timeout(self) -> None:
+        from toolbox.runtime import ToolPaths, load_module
+
+        paths = ToolPaths(Path(__file__).resolve().parents[2])
+        module = load_module("group_upload_template_timeout_fallback_test", paths.group_upload)
+
+        class FakeResponse:
+            status = 200
+
+            def __init__(self, body: dict[str, object]) -> None:
+                self.body = body
+
+            def text(self) -> str:
+                import json
+
+                return json.dumps(self.body, ensure_ascii=False)
+
+        class FakeRequest:
+            def __init__(self) -> None:
+                self.posts: list[tuple[str, dict[str, object]]] = []
+
+            def get(self, url, params=None, **_kwargs):
+                if url.endswith("/huaneng/group/api/report"):
+                    return FakeResponse({"retCode": "T200", "data": {"datas": []}})
+                if url.endswith("/huaneng/group/api/report/queryTemplates"):
+                    raise module.PlaywrightTimeoutError("template endpoint timed out")
+                raise AssertionError(f"unexpected request: {url}")
+
+            def post(self, url, data=None, **_kwargs):
+                self.posts.append((url, data or {}))
+                return FakeResponse({"retCode": "T200", "data": "file-id"})
+
+        class FakeContext:
+            def __init__(self) -> None:
+                self.request = FakeRequest()
+
+        context = FakeContext()
+        with (
+            mock.patch.object(module, "open_day_report_page", return_value=object()),
+            mock.patch.object(module.time, "sleep"),
+        ):
+            module.create_daily_report(context, "2026-07-06", headless=True)
+
+        self.assertEqual(context.request.posts[0][1]["templateId"], module.DEFAULT_DAILY_REPORT_TEMPLATE_ID)
+
     def test_group_upload_smoke_report_cli_skips_file_selection(self) -> None:
         from toolbox.runtime import ToolPaths, load_module
 
@@ -792,11 +873,19 @@ class PageAdapterTests(unittest.TestCase):
         self.assertIn("--daily-clearing-workbook", command)
 
     def test_upload_pages_build_non_shell_commands(self) -> None:
-        from toolbox.pages import GroupUploadPage, MarketTableUpdatePage, PrivateUploadPage
+        from toolbox.pages import (
+            GuangdongPricePage,
+            GroupUploadPage,
+            MarketTableUpdatePage,
+            PrivateUploadPage,
+        )
 
         private = PrivateUploadPage(self.root, self.paths, self.registry)
         group = GroupUploadPage(self.root, self.paths, self.registry)
         market = MarketTableUpdatePage(self.root, self.paths, self.registry)
+        guangdong = GuangdongPricePage(
+            self.root, self.paths, self.registry, today=date(2026, 7, 11)
+        )
 
         plan_command = private.build_command("--plan", Path(r"C:\review"))
         self.assertEqual(plan_command[-3:], ["--plan", "--source", r"C:\review"])
@@ -816,6 +905,20 @@ class PageAdapterTests(unittest.TestCase):
         self.assertEqual(Path(market_command[1]), self.paths.market_table_update)
         self.assertIn("--date", market_command)
         self.assertIn("2026-07-02", market_command)
+
+        self.assertEqual(guangdong.run_date.get(), "2026-07-11")
+        self.assertEqual(
+            Path(guangdong.prediction_input.get()),
+            self.paths.guangdong_price_output_dir / "广东电价数据总表.xlsx",
+        )
+        prediction_command = guangdong.build_prediction_command(
+            Path("/tmp/model.xlsx"), Path("/tmp/prediction"), 2, 3
+        )
+        self.assertEqual(Path(prediction_command[1]), self.paths.guangdong_price_forecast)
+        self.assertEqual(
+            prediction_command[-4:],
+            ["--forecast-days", "2", "--training-months", "3"],
+        )
 
     def test_wps_writer_page_embeds_writer_frame(self) -> None:
         from toolbox.pages import WpsWriterPage
@@ -1106,6 +1209,7 @@ class PageAdapterTests(unittest.TestCase):
         self.assertEqual(len({str(frame) for frame in frames}), len(PAGE_NAMES))
         self.assertIn("WPS写入工具", PAGE_NAMES)
         self.assertIn("市场表更新", PAGE_NAMES)
+        self.assertIn("广东电价预测", PAGE_NAMES)
 
     def test_market_table_update_writes_actual_load_values_by_date(self) -> None:
         from openpyxl import Workbook, load_workbook
@@ -1418,6 +1522,149 @@ class PageAdapterTests(unittest.TestCase):
             [updated_ws.cell(6, column).value for column in range(70, 77)],
             values,
         )
+
+    def test_market_table_update_extracts_market_board_online_unit_values(self) -> None:
+        from toolbox.runtime import load_module
+
+        module = load_module(
+            "market_table_update_market_board_extract_test",
+            self.paths.market_table_update,
+        )
+        payload = {
+            "dataApplyConfigDOList": [
+                {
+                    "date": "2026-07-16 00:00:00",
+                    "dataType": 2,
+                    "onlineUnit": 999,
+                    "overHaulCapacity": 8888.8,
+                },
+                {
+                    "date": "2026-07-16 00:00:00",
+                    "dataType": 1,
+                    "onlineUnit": 473.0,
+                    "overHaulCapacity": 2985.6,
+                },
+            ]
+        }
+
+        self.assertEqual(
+            module.extract_market_board_online_unit_values(
+                payload,
+                date(2026, 7, 16),
+            ),
+            [473, 2985.6],
+        )
+
+    def test_market_table_update_writes_market_board_values_to_aa_and_ae(self) -> None:
+        from openpyxl import Workbook, load_workbook
+        from toolbox.runtime import load_module
+
+        module = load_module(
+            "market_table_update_market_board_write_test",
+            self.paths.market_table_update,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            workbook_path = Path(directory) / "market.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "2026年运行方式及成本"
+            ws["A4"] = date(2026, 7, 15)
+            ws["A5"] = "=A4+1"
+            ws["AA5"] = "已有在线机组数"
+            wb.save(workbook_path)
+
+            summary = module.write_market_board_online_unit_values(
+                workbook_path,
+                date(2026, 7, 16),
+                [473, 2985.6],
+            )
+
+            updated = load_workbook(workbook_path, data_only=False)
+            updated_ws = updated["2026年运行方式及成本"]
+
+        self.assertEqual(summary["sheet"], "2026年运行方式及成本")
+        self.assertEqual(summary["row"], 5)
+        self.assertEqual(summary["range"], "AA5,AE5")
+        self.assertEqual(summary["count"], 1)
+        self.assertEqual(summary["skipped"], 1)
+        self.assertEqual(updated_ws["AA5"].value, "已有在线机组数")
+        self.assertEqual(updated_ws["AE5"].value, 2985.6)
+
+    def test_market_table_update_extracts_day_ahead_coal_and_gas_unit_counts(self) -> None:
+        from toolbox.runtime import load_module
+
+        module = load_module(
+            "market_table_update_spot_clearing_extract_test",
+            self.paths.market_table_update,
+        )
+        coal_counts = [124, 122, 122, 122, 122] + [121] * 19
+        gas_counts = [42, 25, 23, 22, 22, 24, 27, 29, 41, 43, 45, 45,
+                      45, 45, 45, 44, 45, 45, 45, 46, 44, 41, 40, 38]
+        payload = [
+            {
+                "date": "2026-07-16 00:00:00",
+                "dataType": "2",
+                "dataItemGroup": "REAL_TIME_CLEARANCE_COAL",
+                "unitCount": [999] * 24,
+            },
+            {
+                "date": "2026-07-16 00:00:00",
+                "dataType": "1",
+                "dataItemGroup": "DAY_AHEAD_CLEARANCE_COAL",
+                "unitCount": coal_counts,
+            },
+            {
+                "date": "2026-07-16 00:00:00",
+                "dataType": "1",
+                "dataItemGroup": "DAY_AHEAD_CLEARANCE_GAS",
+                "unitCount": gas_counts,
+            },
+        ]
+
+        self.assertEqual(
+            module.extract_spot_clearing_unit_count_values(
+                payload,
+                date(2026, 7, 16),
+            ),
+            [121, 46],
+        )
+
+    def test_market_table_update_writes_spot_clearing_values_to_ab_and_ac(self) -> None:
+        from openpyxl import Workbook, load_workbook
+        from toolbox.runtime import load_module
+
+        module = load_module(
+            "market_table_update_spot_clearing_write_test",
+            self.paths.market_table_update,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            workbook_path = Path(directory) / "market.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "2026年运行方式及成本"
+            ws["A4"] = date(2026, 7, 15)
+            ws["A5"] = "=A4+1"
+            ws["AB5"] = "已有燃煤台数"
+            wb.save(workbook_path)
+
+            summary = module.write_spot_clearing_unit_count_values(
+                workbook_path,
+                date(2026, 7, 16),
+                [121, 46],
+            )
+
+            updated = load_workbook(workbook_path, data_only=False)
+            updated_ws = updated["2026年运行方式及成本"]
+
+        self.assertEqual(summary["sheet"], "2026年运行方式及成本")
+        self.assertEqual(summary["row"], 5)
+        self.assertEqual(summary["range"], "AB5:AC5")
+        self.assertEqual(summary["count"], 1)
+        self.assertEqual(summary["skipped"], 1)
+        self.assertEqual(updated_ws["AB5"].value, "已有燃煤台数")
+        self.assertEqual(updated_ws["AC5"].value, 46)
 
     def test_market_table_update_writes_unit_cost_prices_by_formula_date(self) -> None:
         from openpyxl import Workbook, load_workbook
@@ -1927,6 +2174,10 @@ class PageAdapterTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(module, "write_actual_load_values", return_value={"range": "AH5:BA5", "sheet": "2026年市场情况", "count": 20}))
             stack.enter_context(mock.patch.object(module, "fetch_unit_cost_price_values", return_value=[3] * 11))
             stack.enter_context(mock.patch.object(module, "write_unit_cost_price_values", return_value={"range": "N7:X7", "sheet": "2026年运行方式及成本", "count": 11}))
+            fetch_market_board = stack.enter_context(mock.patch.object(module, "fetch_market_board_online_unit_values", return_value=[473, 2985.6]))
+            write_market_board = stack.enter_context(mock.patch.object(module, "write_market_board_online_unit_values", return_value={"range": "AA7,AE7", "sheet": "2026年运行方式及成本", "count": 2}))
+            fetch_spot_clearing = stack.enter_context(mock.patch.object(module, "fetch_spot_clearing_unit_count_values", return_value=[121, 46]))
+            write_spot_clearing = stack.enter_context(mock.patch.object(module, "write_spot_clearing_unit_count_values", return_value={"range": "AB7:AC7", "sheet": "2026年运行方式及成本", "count": 2}))
             stack.enter_context(mock.patch.object(module, "copy_previous_day_unit_operation_mode", return_value={"range": "B7:M7", "sheet": "2026年运行方式及成本", "sourceRow": 6}))
             result = module.run_update(Path("market.xlsx"), date(2026, 7, 6), headless=True)
 
@@ -1937,7 +2188,21 @@ class PageAdapterTests(unittest.TestCase):
         self.assertEqual(result["userSettlement"]["range"], "BR1:BX1")
         self.assertEqual(result["actualLoad"]["range"], "AH5:BA5")
         self.assertEqual(result["unitCostPrices"]["range"], "N7:X7")
+        self.assertEqual(result["marketBoardOnlineUnit"]["range"], "AA7,AE7")
+        self.assertEqual(result["spotClearingUnitCounts"]["range"], "AB7:AC7")
         self.assertEqual(result["unitOperationMode"]["range"], "B7:M7")
+        fetch_market_board.assert_called_once_with(context, date(2026, 7, 6))
+        write_market_board.assert_called_once_with(
+            Path("market.xlsx"),
+            date(2026, 7, 6),
+            [473, 2985.6],
+        )
+        fetch_spot_clearing.assert_called_once_with(context, date(2026, 7, 6))
+        write_spot_clearing.assert_called_once_with(
+            Path("market.xlsx"),
+            date(2026, 7, 6),
+            [121, 46],
+        )
         write_day_ahead_load.assert_not_called()
         ensure_login.assert_called_once()
         context.close.assert_called_once()
@@ -2009,6 +2274,10 @@ class PageAdapterTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(module, "write_actual_load_values", return_value={"range": "AH5:BA5", "sheet": "2026年市场情况", "count": 20}))
             stack.enter_context(mock.patch.object(module, "fetch_unit_cost_price_values", return_value=[5] * 11))
             stack.enter_context(mock.patch.object(module, "write_unit_cost_price_values", return_value={"range": "N7:X7", "sheet": "2026年运行方式及成本", "count": 11}))
+            stack.enter_context(mock.patch.object(module, "fetch_market_board_online_unit_values", return_value=[473, 2985.6]))
+            stack.enter_context(mock.patch.object(module, "write_market_board_online_unit_values", return_value={"range": "AA7,AE7", "sheet": "2026年运行方式及成本", "count": 2}))
+            stack.enter_context(mock.patch.object(module, "fetch_spot_clearing_unit_count_values", return_value=[121, 46]))
+            stack.enter_context(mock.patch.object(module, "write_spot_clearing_unit_count_values", return_value={"range": "AB7:AC7", "sheet": "2026年运行方式及成本", "count": 2}))
             stack.enter_context(mock.patch.object(module, "copy_previous_day_unit_operation_mode", return_value={"range": "B7:M7", "sheet": "2026年运行方式及成本", "sourceRow": 6}))
             result = module.run_update(Path("market.xlsx"), date(2026, 7, 6), headless=True)
 
@@ -2058,6 +2327,10 @@ class PageAdapterTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(module, "write_actual_load_values", return_value={"range": "AH5:BA5", "sheet": "2026年市场情况", "count": 20}))
             stack.enter_context(mock.patch.object(module, "fetch_unit_cost_price_values", return_value=[6] * 11))
             stack.enter_context(mock.patch.object(module, "write_unit_cost_price_values", return_value={"range": "N7:X7", "sheet": "2026年运行方式及成本", "count": 11}))
+            stack.enter_context(mock.patch.object(module, "fetch_market_board_online_unit_values", return_value=[473, 2985.6]))
+            stack.enter_context(mock.patch.object(module, "write_market_board_online_unit_values", return_value={"range": "AA7,AE7", "sheet": "2026年运行方式及成本", "count": 2}))
+            stack.enter_context(mock.patch.object(module, "fetch_spot_clearing_unit_count_values", return_value=[121, 46]))
+            stack.enter_context(mock.patch.object(module, "write_spot_clearing_unit_count_values", return_value={"range": "AB7:AC7", "sheet": "2026年运行方式及成本", "count": 2}))
             stack.enter_context(mock.patch.object(module, "copy_previous_day_unit_operation_mode", return_value={"range": "B7:M7", "sheet": "2026年运行方式及成本", "sourceRow": 6}))
             result = module.run_update(Path("market.xlsx"), date(2026, 7, 6), headless=True)
 
@@ -2107,6 +2380,10 @@ class PageAdapterTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(module, "write_actual_load_values", return_value={"range": "AH5:BA5", "sheet": "2026年市场情况", "count": 20}))
             stack.enter_context(mock.patch.object(module, "fetch_unit_cost_price_values", return_value=[7] * 11))
             stack.enter_context(mock.patch.object(module, "write_unit_cost_price_values", return_value={"range": "N7:X7", "sheet": "2026年运行方式及成本", "count": 11}))
+            stack.enter_context(mock.patch.object(module, "fetch_market_board_online_unit_values", return_value=[473, 2985.6]))
+            stack.enter_context(mock.patch.object(module, "write_market_board_online_unit_values", return_value={"range": "AA7,AE7", "sheet": "2026年运行方式及成本", "count": 2}))
+            stack.enter_context(mock.patch.object(module, "fetch_spot_clearing_unit_count_values", return_value=[121, 46]))
+            stack.enter_context(mock.patch.object(module, "write_spot_clearing_unit_count_values", return_value={"range": "AB7:AC7", "sheet": "2026年运行方式及成本", "count": 2}))
             stack.enter_context(mock.patch.object(module, "copy_previous_day_unit_operation_mode", return_value={"range": "B7:M7", "sheet": "2026年运行方式及成本", "sourceRow": 6}))
             result = module.run_update(Path("market.xlsx"), date(2026, 7, 6), headless=True)
 

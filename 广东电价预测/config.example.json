@@ -1,0 +1,7 @@
+{
+  "username": "your-username",
+  "password": "your-password",
+  "masterWorkbook": "输出/广东电价数据总表.xlsx",
+  "initialWorkbook": "~/Downloads/广东数据/广东数据整合_20240101至20260625.xlsx",
+  "initialDate": "2026-01-01"
+}

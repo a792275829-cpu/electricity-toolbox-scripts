@@ -7,12 +7,12 @@ from pathlib import Path
 
 
 class CatalogTests(unittest.TestCase):
-    def test_catalog_has_eight_unique_tools_in_business_groups(self) -> None:
+    def test_catalog_has_nine_unique_tools_in_business_groups(self) -> None:
         from toolbox.catalog import default_catalog
 
         catalog = default_catalog()
-        self.assertEqual(8, len(catalog))
-        self.assertEqual(8, len({item.tool_id for item in catalog}))
+        self.assertEqual(9, len(catalog))
+        self.assertEqual(9, len({item.tool_id for item in catalog}))
         self.assertEqual(
             {"数据采集", "分析与报告", "上传与写入"},
             {item.category for item in catalog},
@@ -29,6 +29,7 @@ class CatalogTests(unittest.TestCase):
         )
         self.assertFalse(adapters["trade-analysis"].destructive)
         self.assertTrue(adapters["group-upload"].destructive)
+        self.assertTrue(adapters["guangdong-price"].retryable_read)
 
 
 class DiagnosticTests(unittest.TestCase):

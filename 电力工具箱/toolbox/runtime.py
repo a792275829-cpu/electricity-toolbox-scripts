@@ -123,6 +123,26 @@ class ToolPaths:
     def market_table_update_dir(self) -> Path:
         return self.market_table_update.parent
 
+    @property
+    def guangdong_price_dir(self) -> Path:
+        return self.workspace / "广东电价预测"
+
+    @property
+    def guangdong_data_update(self) -> Path:
+        return self.guangdong_price_dir / "update_gdfire_data.py"
+
+    @property
+    def guangdong_price_forecast(self) -> Path:
+        return self.guangdong_price_dir / "train_d1_forecast.py"
+
+    @property
+    def guangdong_price_output_dir(self) -> Path:
+        return self.guangdong_price_dir / "输出"
+
+    @property
+    def file_dialog_settings(self) -> Path:
+        return self.workspace / "电力工具箱" / "file_dialog_settings.json"
+
 
 def load_module(name: str, path: Path) -> ModuleType:
     path = Path(path).resolve()

@@ -34,6 +34,8 @@ def diagnose_environment(paths: ToolPaths) -> DiagnosticReport:
         ("电量汇总", paths.summary), ("报告工具", paths.report_gui),
         ("私有上传", paths.private_uploader), ("集团上传", paths.group_upload),
         ("市场表更新", paths.market_table_update), ("WPS写入", paths.wps_writer),
+        ("广东数据抓取", paths.guangdong_data_update),
+        ("广东电价预测", paths.guangdong_price_forecast),
     )
     for name, path in tool_files:
         checks.append(DiagnosticCheck(name, path.is_file(), str(path) if path.is_file() else f"找不到：{path}"))

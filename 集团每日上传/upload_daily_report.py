@@ -36,6 +36,8 @@ DEFAULT_PROVINCE_ID = "44"
 DEFAULT_PROVINCE_NAME = "广东省"
 DEFAULT_PUBLIC_PROVINCE_AREA_ID = "044"
 DEFAULT_DAILY_REPORT_TEMPLATE = "广东模板（修改）"
+DEFAULT_DAILY_REPORT_TEMPLATE_ID = "e4dccaa498651f38019877e865fe0022"
+REPORT_API_TIMEOUT_MS = 60000
 DAY_REPORT_TENANT_NAMES = ("广东分公司", "中国华能集团有限公司广东分公司", "华能广东分公司")
 
 PROFILE_DIR = SCRIPT_DIR / ".browser-profile"
@@ -872,10 +874,24 @@ def select_form_option_by_label(page: Page, label: str, option_text: str) -> Non
 
 
 def find_daily_report_template_id(context, template_name: str = DEFAULT_DAILY_REPORT_TEMPLATE) -> str:
-    response = context.request.get(
-        f"{BASE_URL}/huaneng/group/api/report/queryTemplates",
-        timeout=20000,
-    )
+    last_error: BaseException | None = None
+    response = None
+    for attempt in range(1, 4):
+        try:
+            response = context.request.get(
+                f"{BASE_URL}/huaneng/group/api/report/queryTemplates",
+                timeout=REPORT_API_TIMEOUT_MS,
+            )
+            break
+        except (PlaywrightTimeoutError, PlaywrightError) as exc:
+            last_error = exc
+            log(f"读取日报模板列表超时/失败，准备重试（{attempt}/3）：{short_error(exc)}")
+            time.sleep(2)
+    if response is None:
+        if template_name == DEFAULT_DAILY_REPORT_TEMPLATE:
+            log(f"读取日报模板列表失败，使用已验证模板ID兜底：{DEFAULT_DAILY_REPORT_TEMPLATE_ID}")
+            return DEFAULT_DAILY_REPORT_TEMPLATE_ID
+        raise RuntimeError(f"读取日报模板列表失败：{short_error(last_error) if last_error else '未知错误'}")
     data = parse_json_response(response, "读取日报模板列表")
     templates = data.get("data") or []
     if not isinstance(templates, list):
@@ -897,7 +913,7 @@ def daily_report_exists(context, report_name: str, report_date: str) -> bool:
             "numPerPage": 10,
             "pageNum": 1,
         },
-        timeout=20000,
+        timeout=REPORT_API_TIMEOUT_MS,
     )
     data = parse_json_response(response, "查询已有集团日报")
     payload = data.get("data") or {}

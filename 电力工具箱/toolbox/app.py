@@ -17,6 +17,7 @@ PAGE_NAMES = (
     "私有数据上传",
     "上传集团每日数据",
     "市场表更新",
+    "广东电价预测",
     "WPS写入工具",
 )
 PageFactory = Callable[[tk.Misc, ToolPaths, TaskRegistry], tk.Frame]

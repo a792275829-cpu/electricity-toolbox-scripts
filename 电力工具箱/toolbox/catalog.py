@@ -31,6 +31,7 @@ def default_catalog() -> tuple[ToolDescriptor, ...]:
     return (
         ToolDescriptor("online-energy", "导出上网电量", "数据采集", "OnlineEnergyPage", "抓取并汇总上网电量"),
         ToolDescriptor("market-table", "市场表更新", "数据采集", "MarketTableUpdatePage", "读取市场数据并更新年度表"),
+        ToolDescriptor("guangdong-price", "广东电价预测", "数据采集", "GuangdongPricePage", "抓取广东现货数据并运行 D+1 日前电价预测"),
         ToolDescriptor("trade-analysis", "电力交易分析", "分析与报告", "TradeAnalysisPage", "批量生成交易分析报告"),
         ToolDescriptor("summary", "电量汇总", "分析与报告", "SummaryPage", "汇总日前和实时交易结果"),
         ToolDescriptor("report", "生成报告", "分析与报告", "ReportPage", "生成生产经营情况报告"),
