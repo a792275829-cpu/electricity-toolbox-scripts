@@ -58,6 +58,10 @@ function log(message = '') {
   console.log(message);
 }
 
+function safeErrorMessage(error) {
+  return String(error?.message || error || '未知错误').split('\nCall log:')[0].trim();
+}
+
 function parseArgs(argv) {
   const args = {
     mode: 'plan',
@@ -282,15 +286,23 @@ async function launchContext(config) {
     launchOptions.executablePath = chromeExecutablePath;
   }
 
-  const storageState = await pathExists(config.authStatePath) ? config.authStatePath : undefined;
-  const browser = await chromium.launch(launchOptions);
-  const context = await browser.newContext({
-    storageState,
+  await fs.mkdir(config.userDataDir, { recursive: true });
+  const context = await chromium.launchPersistentContext(config.userDataDir, {
+    ...launchOptions,
     acceptDownloads: true,
-    viewport: launchOptions.viewport,
   });
+  if (await pathExists(config.authStatePath)) {
+    try {
+      const state = await readJson(config.authStatePath);
+      if (Array.isArray(state?.cookies) && state.cookies.length > 0) {
+        await context.addCookies(state.cookies);
+      }
+    } catch (error) {
+      log(`读取私有上传登录态失败，将重新登录：${error.message}`);
+    }
+  }
   log('浏览器启动完成。');
-  return { browser, context };
+  return { browser: context.browser(), context };
 }
 
 async function saveAuthState(context, config) {
@@ -326,9 +338,14 @@ async function apiLogin(context, config) {
   }
 
   log('获取登录公钥...');
-  const keyResponse = await context.request.get(`${config.baseUrl}/usercenter/web/pf/login/info/publicKey`, {
-    timeout: 20_000,
-  });
+  let keyResponse;
+  try {
+    keyResponse = await context.request.get(`${config.baseUrl}/usercenter/web/pf/login/info/publicKey`, {
+      timeout: 60_000,
+    });
+  } catch (error) {
+    throw new Error(`获取登录公钥失败：${safeErrorMessage(error)}。请确认内网/VPN/代理可访问 ${config.baseUrl}`);
+  }
   if (keyResponse.status() >= 400) {
     throw new Error(`获取登录公钥失败 HTTP ${keyResponse.status()}`);
   }
@@ -344,7 +361,7 @@ async function apiLogin(context, config) {
       username: config.username,
       password: encryptedPassword,
     },
-    timeout: 20_000,
+    timeout: 60_000,
   });
   const loginBody = await loginResponse.json().catch(async () => ({ text: await loginResponse.text() }));
   if (loginResponse.status() >= 400 || (loginBody.retCode && loginBody.retCode !== 'T200')) {
@@ -539,6 +556,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error?.stack || error?.message || String(error));
+  const detail = error?.stack || error?.message || String(error);
+  console.error(detail.split('\nCall log:')[0]);
   process.exitCode = 1;
 });

@@ -8,6 +8,8 @@
 **/.browser-profile/
 **/.browser-profile-uploader/
 **/wps-browser-profile/
+**/wps-chrome.pid
+**/wps-chrome-state.json
 
 # Runtime caches and dependencies
 .codegraph/
@@ -28,6 +30,8 @@
 集团每日上传/*.xlsx
 每日生产经营情况汇报自动生成工具/输出/
 上网电量抓取/输出/
+500kV断面分析/local_data/
+500kV断面分析/result/
 
 # Local office temp files
 ~$*

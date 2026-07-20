@@ -48,10 +48,11 @@ class ProcessRunner:
         if os.name == "nt":
             creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         process = subprocess.Popen(
-            list(command), cwd=str(cwd), stdout=subprocess.PIPE,
+            list(command), cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, encoding="utf-8",
             errors="replace", env=dict(env) if env is not None else None,
-            creationflags=creationflags, start_new_session=os.name != "nt", bufsize=1,
+            creationflags=creationflags, start_new_session=os.name != "nt",
+            close_fds=True, bufsize=1,
         )
         with self._lock:
             self._active_process = process
@@ -99,19 +100,25 @@ class ProcessRunner:
             if os.name == "nt":
                 subprocess.run(["taskkill", "/PID", str(process.pid), "/T"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
             else:
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    process.terminate()
+                self._signal_owned_process(process, signal.SIGTERM)
             process.wait(timeout=self.terminate_timeout)
         except subprocess.TimeoutExpired:
             if os.name == "nt":
                 subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
             else:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    process.kill()
+                self._signal_owned_process(process, signal.SIGKILL)
             process.wait(timeout=self.terminate_timeout)
         except OSError:
             pass
+
+    @staticmethod
+    def _signal_owned_process(process: subprocess.Popen[str], sig: signal.Signals) -> None:
+        """Signal only the session created for this child, never the caller's terminal group."""
+        try:
+            process_group = os.getpgid(process.pid)
+        except ProcessLookupError:
+            return
+        if process_group == process.pid:
+            os.killpg(process_group, sig)
+        else:
+            process.send_signal(sig)

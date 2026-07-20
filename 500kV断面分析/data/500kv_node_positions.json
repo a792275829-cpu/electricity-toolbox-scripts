@@ -1,0 +1,1214 @@
+{
+  "version": 1,
+  "updated_at": "2026-07-19T12:10:38+08:00",
+  "image": {
+    "path": "接线图.png",
+    "width": 7111,
+    "height": 5025,
+    "sha256": "8f3555a39a7b8027d80adff2f8a7fee53f3c12ff7631b26ecab0168bc08c8038"
+  },
+  "topology": {
+    "path": "500kV节点拓扑.md",
+    "nodes": 119,
+    "unique_edges": 152,
+    "duplicate_edges": [
+      [
+        "嘉应站",
+        "敬州变",
+        "粤东"
+      ]
+    ]
+  },
+  "nodes": [
+    {
+      "name": "上寨站",
+      "anchor": {
+        "x": 4967.95,
+        "y": 842.51
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:24:02+08:00"
+    },
+    {
+      "name": "东坡站",
+      "anchor": {
+        "x": 1238.75,
+        "y": 1527.27
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T09:57:29+08:00"
+    },
+    {
+      "name": "东方换流站",
+      "anchor": {
+        "x": 4699.85,
+        "y": 3803.96
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:25:05+08:00"
+    },
+    {
+      "name": "东海岛站",
+      "anchor": {
+        "x": 512.21,
+        "y": 3813.05
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:25:18+08:00"
+    },
+    {
+      "name": "东莞变",
+      "anchor": {
+        "x": 5188.79,
+        "y": 2197.19
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:25:35+08:00"
+    },
+    {
+      "name": "丹霞站",
+      "anchor": {
+        "x": 1215.54,
+        "y": 203.98
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:26:04+08:00"
+    },
+    {
+      "name": "乌石湾电厂",
+      "anchor": {
+        "x": 643.66,
+        "y": 3474.94
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:26:47+08:00"
+    },
+    {
+      "name": "云霄换流站",
+      "anchor": {
+        "x": 6826.49,
+        "y": 503.75
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:26:56+08:00"
+    },
+    {
+      "name": "五邑站",
+      "anchor": {
+        "x": 1963.95,
+        "y": 3601.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:27:22+08:00"
+    },
+    {
+      "name": "从西换流站",
+      "anchor": {
+        "x": 3069.67,
+        "y": 1186.62
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:27:33+08:00"
+    },
+    {
+      "name": "侨乡换流站",
+      "anchor": {
+        "x": 2064.08,
+        "y": 3107.23
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:27:40+08:00"
+    },
+    {
+      "name": "凤城站",
+      "anchor": {
+        "x": 2533.4,
+        "y": 3112.6
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:27:47+08:00"
+    },
+    {
+      "name": "凤安站",
+      "anchor": {
+        "x": 4320.6,
+        "y": 836.6
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:27:50+08:00"
+    },
+    {
+      "name": "凤翔站",
+      "anchor": {
+        "x": 633.6,
+        "y": 3276.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:27:51+08:00"
+    },
+    {
+      "name": "加林站",
+      "anchor": {
+        "x": 3541.2,
+        "y": 4465.44
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:28:00+08:00"
+    },
+    {
+      "name": "北郊站",
+      "anchor": {
+        "x": 3191.37,
+        "y": 1930.56
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:28:12+08:00"
+    },
+    {
+      "name": "南粤换流站",
+      "anchor": {
+        "x": 3866.25,
+        "y": 3186.17
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:28:23+08:00"
+    },
+    {
+      "name": "博罗变",
+      "anchor": {
+        "x": 4335.01,
+        "y": 1204.85
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:28:31+08:00"
+    },
+    {
+      "name": "博贺电厂",
+      "anchor": {
+        "x": 117.57,
+        "y": 1780.88
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:28:52+08:00"
+    },
+    {
+      "name": "卧龙变",
+      "anchor": {
+        "x": 703.98,
+        "y": 2299.46
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:29:12+08:00"
+    },
+    {
+      "name": "合和海风场陆上站",
+      "anchor": {
+        "x": 1663.44,
+        "y": 3448.15
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:29:26+08:00"
+    },
+    {
+      "name": "吉康站",
+      "anchor": {
+        "x": 5441.73,
+        "y": 1128.24
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:29:38+08:00"
+    },
+    {
+      "name": "嘉应站",
+      "anchor": {
+        "x": 6264.01,
+        "y": 713.06
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:29:53+08:00"
+    },
+    {
+      "name": "回隆变",
+      "anchor": {
+        "x": 1569.48,
+        "y": 4803.27
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:30:03+08:00"
+    },
+    {
+      "name": "园山电厂",
+      "anchor": {
+        "x": 1777.3,
+        "y": 1011.33
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:30:16+08:00"
+    },
+    {
+      "name": "国安站",
+      "anchor": {
+        "x": 3034.35,
+        "y": 4476.88
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:30:25+08:00"
+    },
+    {
+      "name": "圭峰站",
+      "anchor": {
+        "x": 2935.0,
+        "y": 4311.99
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:30:30+08:00"
+    },
+    {
+      "name": "增城站",
+      "anchor": {
+        "x": 4001.25,
+        "y": 1921.17
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:30:47+08:00"
+    },
+    {
+      "name": "大亚湾电厂",
+      "anchor": {
+        "x": 6840.19,
+        "y": 3812.91
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:31:05+08:00"
+    },
+    {
+      "name": "太平岭核电厂",
+      "anchor": {
+        "x": 5462.95,
+        "y": 2678.08
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:31:21+08:00"
+    },
+    {
+      "name": "安澜变",
+      "anchor": {
+        "x": 200.49,
+        "y": 3246.07
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:31:27+08:00"
+    },
+    {
+      "name": "宝安换流站",
+      "anchor": {
+        "x": 4811.0,
+        "y": 3249.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:31:35+08:00"
+    },
+    {
+      "name": "小漠电厂",
+      "anchor": {
+        "x": 4994.56,
+        "y": 2352.68
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:31:56+08:00"
+    },
+    {
+      "name": "屹百站",
+      "anchor": {
+        "x": 6901.31,
+        "y": 3414.04
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:32:04+08:00"
+    },
+    {
+      "name": "岐山站",
+      "anchor": {
+        "x": 6072.67,
+        "y": 914.2
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:32:12+08:00"
+    },
+    {
+      "name": "岭澳核电厂",
+      "anchor": {
+        "x": 5553.2,
+        "y": 3626.91
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:32:21+08:00"
+    },
+    {
+      "name": "峡阳海风场",
+      "anchor": {
+        "x": 849.02,
+        "y": 4925.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:32:41+08:00"
+    },
+    {
+      "name": "崇文站",
+      "anchor": {
+        "x": 5537.0,
+        "y": 2828.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:32:49+08:00"
+    },
+    {
+      "name": "崇焕站",
+      "anchor": {
+        "x": 4280.84,
+        "y": 2673.65
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:33:11+08:00"
+    },
+    {
+      "name": "平海电厂",
+      "anchor": {
+        "x": 6398.2,
+        "y": 2886.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T09:57:54+08:00"
+    },
+    {
+      "name": "广南变",
+      "anchor": {
+        "x": 3060.94,
+        "y": 2940.18
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:33:20+08:00"
+    },
+    {
+      "name": "库湾站",
+      "anchor": {
+        "x": 1229.6,
+        "y": 896.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T09:57:59+08:00"
+    },
+    {
+      "name": "征程站",
+      "anchor": {
+        "x": 5293.2,
+        "y": 1481.6
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T09:58:02+08:00"
+    },
+    {
+      "name": "徐闻开关站",
+      "anchor": {
+        "x": 199.95,
+        "y": 3036.69
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:33:34+08:00"
+    },
+    {
+      "name": "惠州站",
+      "anchor": {
+        "x": 5491.55,
+        "y": 2164.64
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T09:58:15+08:00"
+    },
+    {
+      "name": "惠蓄电厂",
+      "anchor": {
+        "x": 4436.1,
+        "y": 1543.07
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:33:42+08:00"
+    },
+    {
+      "name": "承龙开关站",
+      "anchor": {
+        "x": 5176.2,
+        "y": 1047.6
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T09:58:24+08:00"
+    },
+    {
+      "name": "振兴站",
+      "anchor": {
+        "x": 2517.06,
+        "y": 838.86
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:33:48+08:00"
+    },
+    {
+      "name": "敬州变",
+      "anchor": {
+        "x": 5538.37,
+        "y": 842.85
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:34:01+08:00"
+    },
+    {
+      "name": "文山站",
+      "anchor": {
+        "x": 3830.4,
+        "y": 3896.6
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:07:26+08:00"
+    },
+    {
+      "name": "曲江站",
+      "anchor": {
+        "x": 1977.95,
+        "y": 548.69
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:07:36+08:00"
+    },
+    {
+      "name": "木棉站",
+      "anchor": {
+        "x": 3717.6,
+        "y": 1395.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:07:42+08:00"
+    },
+    {
+      "name": "柑乡变",
+      "anchor": {
+        "x": 777.82,
+        "y": 1907.16
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:34:16+08:00"
+    },
+    {
+      "name": "柘林电厂",
+      "anchor": {
+        "x": 6697.77,
+        "y": 747.35
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:34:28+08:00"
+    },
+    {
+      "name": "桂山站",
+      "anchor": {
+        "x": 3830.8,
+        "y": 4304.6
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:07:47+08:00"
+    },
+    {
+      "name": "楚庭站",
+      "anchor": {
+        "x": 3497.0,
+        "y": 2662.6
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:07:50+08:00"
+    },
+    {
+      "name": "榕江站",
+      "anchor": {
+        "x": 6064.26,
+        "y": 1583.74
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:34:35+08:00"
+    },
+    {
+      "name": "横沥站",
+      "anchor": {
+        "x": 4678.2,
+        "y": 1720.4
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:07:54+08:00"
+    },
+    {
+      "name": "水乡站",
+      "anchor": {
+        "x": 4558.8,
+        "y": 2318.4
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:08:01+08:00"
+    },
+    {
+      "name": "汕头变",
+      "anchor": {
+        "x": 6366.82,
+        "y": 1578.78
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:08:04+08:00"
+    },
+    {
+      "name": "江门变",
+      "anchor": {
+        "x": 2197.08,
+        "y": 3608.39
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:35:02+08:00"
+    },
+    {
+      "name": "沧江站",
+      "anchor": {
+        "x": 1602.0,
+        "y": 2910.8
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:08:11+08:00"
+    },
+    {
+      "name": "海路陆上集控站",
+      "anchor": {
+        "x": 1200.11,
+        "y": 4891.73
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:08:32+08:00"
+    },
+    {
+      "name": "海门电厂",
+      "anchor": {
+        "x": 6891.4,
+        "y": 2746.8
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:08:34+08:00"
+    },
+    {
+      "name": "深圳站",
+      "anchor": {
+        "x": 6278.38,
+        "y": 3789.62
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:35:11+08:00"
+    },
+    {
+      "name": "渡水站",
+      "anchor": {
+        "x": 3834.73,
+        "y": 851.48
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:35:17+08:00"
+    },
+    {
+      "name": "港城变",
+      "anchor": {
+        "x": 199.61,
+        "y": 3607.32
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:35:23+08:00"
+    },
+    {
+      "name": "演达变",
+      "anchor": {
+        "x": 4968.07,
+        "y": 1680.42
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:35:33+08:00"
+    },
+    {
+      "name": "澄海站",
+      "anchor": {
+        "x": 6477.4,
+        "y": 865.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:08:39+08:00"
+    },
+    {
+      "name": "狮洋站",
+      "anchor": {
+        "x": 3627.14,
+        "y": 2950.35
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:35:41+08:00"
+    },
+    {
+      "name": "玄陆升压站",
+      "anchor": {
+        "x": 5660.23,
+        "y": 1453.31
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:35:57+08:00"
+    },
+    {
+      "name": "玉城站",
+      "anchor": {
+        "x": 1241.65,
+        "y": 2130.4
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:36:41+08:00"
+    },
+    {
+      "name": "现代站",
+      "anchor": {
+        "x": 6323.8,
+        "y": 4534.6
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:08:43+08:00"
+    },
+    {
+      "name": "珠海B厂",
+      "anchor": {
+        "x": 2759.77,
+        "y": 4786.73
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:36:20+08:00"
+    },
+    {
+      "name": "甲湖湾电厂",
+      "anchor": {
+        "x": 5288.12,
+        "y": 1802.27
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:36:46+08:00"
+    },
+    {
+      "name": "电白站",
+      "anchor": {
+        "x": 1381.18,
+        "y": 4807.61
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:37:06+08:00"
+    },
+    {
+      "name": "盘龙站",
+      "anchor": {
+        "x": 6107.28,
+        "y": 2110.53
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:37:16+08:00"
+    },
+    {
+      "name": "盛丰站",
+      "anchor": {
+        "x": 4636.0,
+        "y": 1875.8
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:08:50+08:00"
+    },
+    {
+      "name": "砚都站",
+      "anchor": {
+        "x": 1241.08,
+        "y": 2899.84
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:37:23+08:00"
+    },
+    {
+      "name": "祯州站",
+      "anchor": {
+        "x": 6157.37,
+        "y": 2642.05
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:37:32+08:00"
+    },
+    {
+      "name": "福园站",
+      "anchor": {
+        "x": 4965.27,
+        "y": 1194.13
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:37:38+08:00"
+    },
+    {
+      "name": "科北站",
+      "anchor": {
+        "x": 3409.8,
+        "y": 1011.77
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:17:27+08:00"
+    },
+    {
+      "name": "穗东换流站",
+      "anchor": {
+        "x": 4481.23,
+        "y": 1913.49
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:09:04+08:00"
+    },
+    {
+      "name": "立安变",
+      "anchor": {
+        "x": 469.49,
+        "y": 1829.72
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:17:33+08:00"
+    },
+    {
+      "name": "紫荆站",
+      "anchor": {
+        "x": 4986.99,
+        "y": 4602.8
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:09:11+08:00"
+    },
+    {
+      "name": "红海湾电厂",
+      "anchor": {
+        "x": 5464.22,
+        "y": 1335.85
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:38:27+08:00"
+    },
+    {
+      "name": "纵江站",
+      "anchor": {
+        "x": 4659.63,
+        "y": 3032.63
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:17:45+08:00"
+    },
+    {
+      "name": "罗洞站",
+      "anchor": {
+        "x": 2241.6,
+        "y": 1951.8
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:09:30+08:00"
+    },
+    {
+      "name": "肇庆换流站",
+      "anchor": {
+        "x": 1077.43,
+        "y": 2999.75
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:17:51+08:00"
+    },
+    {
+      "name": "胪岗站",
+      "anchor": {
+        "x": 6578.2,
+        "y": 2591.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:09:33+08:00"
+    },
+    {
+      "name": "花都站",
+      "anchor": {
+        "x": 2246.87,
+        "y": 1518.6
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:17:57+08:00"
+    },
+    {
+      "name": "芷寮站",
+      "anchor": {
+        "x": 200.36,
+        "y": 4804.11
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:09:40+08:00"
+    },
+    {
+      "name": "茂名站",
+      "anchor": {
+        "x": 1095.32,
+        "y": 3610.97
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:18:10+08:00"
+    },
+    {
+      "name": "茅湖站",
+      "anchor": {
+        "x": 5670.76,
+        "y": 1574.63
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:09:49+08:00"
+    },
+    {
+      "name": "荔西站",
+      "anchor": {
+        "x": 3844.68,
+        "y": 1757.1
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:18:20+08:00"
+    },
+    {
+      "name": "莞城站",
+      "anchor": {
+        "x": 4473.0,
+        "y": 2859.6
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:09:54+08:00"
+    },
+    {
+      "name": "蝶岭站",
+      "anchor": {
+        "x": 1583.17,
+        "y": 3614.46
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:18:28+08:00"
+    },
+    {
+      "name": "融珠站",
+      "anchor": {
+        "x": 5390.42,
+        "y": 1946.63
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:18:42+08:00"
+    },
+    {
+      "name": "襟岛核电厂",
+      "anchor": {
+        "x": 3335.95,
+        "y": 4307.01
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:18:46+08:00"
+    },
+    {
+      "name": "西江变",
+      "anchor": {
+        "x": 2226.6,
+        "y": 2716.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:09:57+08:00"
+    },
+    {
+      "name": "调顺电厂",
+      "anchor": {
+        "x": 310.04,
+        "y": 4628.23
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:18:53+08:00"
+    },
+    {
+      "name": "贤令山站",
+      "anchor": {
+        "x": 586.47,
+        "y": 1127.48
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:19:00+08:00"
+    },
+    {
+      "name": "金鼎站",
+      "anchor": {
+        "x": 3832.66,
+        "y": 4091.8
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:19:07+08:00"
+    },
+    {
+      "name": "铜鼓电厂",
+      "anchor": {
+        "x": 2527.81,
+        "y": 4780.97
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:19:19+08:00"
+    },
+    {
+      "name": "阳江核电厂",
+      "anchor": {
+        "x": 2015.42,
+        "y": 3994.87
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:10:06+08:00"
+    },
+    {
+      "name": "阳西B厂",
+      "anchor": {
+        "x": 118.65,
+        "y": 2018.71
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:19:27+08:00"
+    },
+    {
+      "name": "阳西C厂",
+      "anchor": {
+        "x": 1670.84,
+        "y": 3319.7
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:19:35+08:00"
+    },
+    {
+      "name": "陆丰站",
+      "anchor": {
+        "x": 5641.2,
+        "y": 1206.0
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:10:09+08:00"
+    },
+    {
+      "name": "靖海电厂",
+      "anchor": {
+        "x": 6135.02,
+        "y": 1745.06
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:19:47+08:00"
+    },
+    {
+      "name": "韩江站",
+      "anchor": {
+        "x": 6342.0,
+        "y": 1256.8
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:10:14+08:00"
+    },
+    {
+      "name": "顺德站",
+      "anchor": {
+        "x": 3021.62,
+        "y": 3623.54
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:19:52+08:00"
+    },
+    {
+      "name": "香山站",
+      "anchor": {
+        "x": 3028.0,
+        "y": 3927.66
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:20:00+08:00"
+    },
+    {
+      "name": "鲲鹏站",
+      "anchor": {
+        "x": 5330.6,
+        "y": 3181.8
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:10:18+08:00"
+    },
+    {
+      "name": "鳌峰站",
+      "anchor": {
+        "x": 2185.98,
+        "y": 4094.34
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:20:16+08:00"
+    },
+    {
+      "name": "鹅凰A站",
+      "anchor": {
+        "x": 259.75,
+        "y": 1776.26
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T12:20:28+08:00"
+    },
+    {
+      "name": "鹅凰B站",
+      "anchor": {
+        "x": 277.27,
+        "y": 2030.17
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:38:51+08:00"
+    },
+    {
+      "name": "鹏城站",
+      "anchor": {
+        "x": 5546.4,
+        "y": 3786.8
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-19T12:10:38+08:00"
+    },
+    {
+      "name": "龙田变",
+      "anchor": {
+        "x": 1806.48,
+        "y": 3449.68
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:38:44+08:00"
+    },
+    {
+      "name": "龙门换流站",
+      "anchor": {
+        "x": 4124.08,
+        "y": 1210.42
+      },
+      "status": "verified",
+      "source": "manual-calibration",
+      "updated_at": "2026-07-18T11:38:36+08:00"
+    }
+  ]
+}

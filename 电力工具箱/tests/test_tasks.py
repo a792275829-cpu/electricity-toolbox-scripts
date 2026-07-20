@@ -36,6 +36,54 @@ class EventBufferTests(unittest.TestCase):
 
 
 class ProcessRunnerTests(unittest.TestCase):
+    def test_parallel_processes_have_isolated_input_and_cancellation(self) -> None:
+        from toolbox.tasks import CancellationToken, ProcessRunner, TaskCancelled
+
+        tokens = [CancellationToken(), CancellationToken()]
+        runners = [ProcessRunner(terminate_timeout=0.5), ProcessRunner(terminate_timeout=0.5)]
+        outputs: list[list[str]] = [[], []]
+        results = [None, None]
+        errors: list[BaseException | None] = [None, None]
+
+        def target(index: int, delay: float) -> None:
+            code = (
+                "import sys,time; "
+                "print('stdin-eof=' + str(sys.stdin.read() == ''), flush=True); "
+                f"time.sleep({delay}); print('done', flush=True)"
+            )
+            try:
+                results[index] = runners[index].run(
+                    [sys.executable, "-c", code],
+                    cwd=Path.cwd(),
+                    env=None,
+                    token=tokens[index],
+                    on_output=outputs[index].append,
+                )
+            except BaseException as exc:
+                errors[index] = exc
+
+        threads = [
+            threading.Thread(target=target, args=(0, 30)),
+            threading.Thread(target=target, args=(1, 0.2)),
+        ]
+        for thread in threads:
+            thread.start()
+        deadline = time.monotonic() + 2
+        while any(runner.active_process is None for runner in runners) and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        self.assertTrue(all(runner.active_process is not None for runner in runners))
+        tokens[0].cancel()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertIsInstance(errors[0], TaskCancelled)
+        self.assertIsNone(errors[1])
+        self.assertIsNotNone(results[1])
+        self.assertIn("stdin-eof=True\n", outputs[1])
+        self.assertIn("done\n", outputs[1])
+
     def test_process_streams_output_and_supports_cancellation(self) -> None:
         from toolbox.tasks import CancellationToken, ProcessRunner, TaskCancelled
 
@@ -205,6 +253,33 @@ class ErrorClassificationTests(unittest.TestCase):
                 self.assertEqual(category, result.category)
                 self.assertTrue(result.summary)
                 self.assertTrue(result.advice)
+
+
+class TaskRegistryTests(unittest.TestCase):
+    def test_non_cancellable_registered_thread_blocks_shutdown_until_finished(self) -> None:
+        from toolbox.runtime import TaskRegistry
+
+        registry = TaskRegistry()
+        started = threading.Event()
+        release = threading.Event()
+
+        def worker() -> None:
+            started.set()
+            release.wait(timeout=5)
+
+        thread = threading.Thread(target=worker, name="external-write", daemon=True)
+        registry.register_thread(thread)
+        thread.start()
+        self.assertTrue(started.wait(1))
+        self.assertTrue(registry.has_running_tasks())
+
+        remaining = registry.terminate_all()
+        self.assertIn(thread, remaining)
+
+        release.set()
+        thread.join(timeout=2)
+        self.assertFalse(registry.has_running_tasks())
+        self.assertEqual((), registry.terminate_all())
 
 
 if __name__ == "__main__":

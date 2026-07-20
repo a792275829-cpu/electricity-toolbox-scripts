@@ -19,7 +19,7 @@ from export_online_energy import (
     interactive_login,
     launch_context,
     load_config,
-    parse_json_response,
+    request_json_with_retry,
     validate_date,
 )
 
@@ -103,8 +103,11 @@ def fetch_load_dataset(
     point: int,
     province_area_id: str,
 ) -> dict[str, Any]:
-    response = context.request.get(
+    return request_json_with_retry(
+        context,
+        "get",
         f"{BASE_URL}/gdfire/api/data/net/load",
+        "读取负荷对比数据",
         params={
             "startDate": start_date,
             "endDate": end_date,
@@ -112,9 +115,8 @@ def fetch_load_dataset(
             "provinceAreaId": province_area_id,
             "timeSegment": POINT_TO_TIME_SEGMENT[point],
         },
-        timeout=30000,
+        timeout=60000,
     )
-    return parse_json_response(response, "读取负荷对比数据")
 
 
 def select_load_type(dataset: dict[str, Any], load_type: str) -> dict[str, Any]:

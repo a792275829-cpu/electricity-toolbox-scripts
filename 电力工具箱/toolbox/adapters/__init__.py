@@ -19,6 +19,7 @@ def default_adapters() -> dict[str, ToolAdapter]:
         ToolAdapter("market-table", destructive=True),
         ToolAdapter("guangdong-price", retryable_read=True),
         ToolAdapter("trade-analysis"),
+        ToolAdapter("section-analysis"),
         ToolAdapter("summary"),
         ToolAdapter("report"),
         ToolAdapter("private-upload", destructive=True),

@@ -19,7 +19,7 @@ from export_online_energy import (
     interactive_login,
     launch_context,
     load_config,
-    parse_json_response,
+    request_json_with_retry,
     validate_date,
 )
 
@@ -68,16 +68,18 @@ def normalize_price_type(value: str) -> tuple[str, str]:
 
 
 def fetch_extreme_price(context, date_text: str, data_type: str) -> dict[str, Any]:
-    response = context.request.get(
+    return request_json_with_retry(
+        context,
+        "get",
         f"{BASE_URL}/gdfire/api/cockpit/extremePrice",
+        f"读取价格看板 {date_text} {data_type}",
         params={
             "startDate": date_text,
             "endDate": date_text,
             "dataType": data_type,
         },
-        timeout=30000,
+        timeout=60000,
     )
-    return parse_json_response(response, f"读取价格看板 {date_text} {data_type}")
 
 
 def build_price_summary(date_text: str, type_name: str, data_type: str, payload: dict[str, Any]) -> dict[str, Any]:

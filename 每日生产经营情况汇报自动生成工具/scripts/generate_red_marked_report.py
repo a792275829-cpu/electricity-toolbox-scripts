@@ -17,9 +17,7 @@ from openpyxl import load_workbook
 from docx import Document
 from docx.oxml.ns import qn
 from docx.shared import RGBColor
-
-from fetch_daily_data import build_report_date_plan, run_daily_data
-
+from docx.text.paragraph import Paragraph
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 APP_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name in {"scripts", "\u811a\u672c"} else SCRIPT_DIR
@@ -37,6 +35,21 @@ TEMPLATE_PATH = LOCAL_TEMPLATE_PATH if LOCAL_TEMPLATE_PATH.exists() else (
 LOAD_SUBJECT_CODES = ["1", "6", "2", "18"]
 GUANGDONG_WEATHER_LATITUDE = 23.1291
 GUANGDONG_WEATHER_LONGITUDE = 113.2644
+QINGYUAN_DAILY_CLEARING_VALUES = [
+    "清  远",
+    "220",
+    "669",
+    "/",
+    "/",
+    "/",
+    "/",
+    "220",
+    "13",
+    "/",
+    "13",
+    "669",
+    "756",
+]
 
 
 def log(message: str) -> None:
@@ -335,6 +348,96 @@ def replace_cell_text(cell, text: str) -> None:
     replace_paragraph(paragraph, text)
 
 
+def paragraph_index(document, paragraph) -> int:
+    for index, candidate in enumerate(document.paragraphs):
+        if candidate._element is paragraph._element:
+            return index
+    raise ValueError("段落不属于当前文档")
+
+
+def find_paragraph(document, predicate, *, start: int = 0):
+    for paragraph in document.paragraphs[start:]:
+        if predicate(paragraph.text.strip()):
+            return paragraph
+    raise ValueError("模板中未找到所需段落")
+
+
+def find_exact_paragraph(document, text: str, *, start: int = 0):
+    return find_paragraph(document, lambda value: value == text, start=start)
+
+
+def next_nonempty_paragraph(document, paragraph):
+    start = paragraph_index(document, paragraph) + 1
+    return find_paragraph(document, bool, start=start)
+
+
+def startup_date_paragraphs(document) -> list:
+    heading = find_exact_paragraph(document, "一、机组启停情况")
+    end_heading = find_exact_paragraph(document, "二、分公司电量、电价完成情况")
+    start = paragraph_index(document, heading) + 1
+    end = paragraph_index(document, end_heading)
+    date_pattern = re.compile(r"^(?:\d+月)?\d+日：$")
+    return [
+        paragraph
+        for paragraph in document.paragraphs[start:end]
+        if date_pattern.fullmatch(paragraph.text.strip())
+    ]
+
+
+def ensure_qingyuan_startup_paragraphs(document) -> None:
+    dates = startup_date_paragraphs(document)
+    if len(dates) < 2:
+        raise ValueError("模板的机组启停情况中未找到两个日期段落")
+
+    end_heading = find_exact_paragraph(document, "二、分公司电量、电价完成情况")
+    for date_paragraph in reversed(dates[:2]):
+        date_index = paragraph_index(document, date_paragraph)
+        start = date_index + 1
+        later_dates = [
+            paragraph_index(document, candidate)
+            for candidate in dates
+            if paragraph_index(document, candidate) > date_index
+        ]
+        end = min(later_dates, default=paragraph_index(document, end_heading))
+        block = document.paragraphs[start:end]
+        if any(paragraph.text.strip().startswith("清远厂：") for paragraph in block):
+            continue
+        dongguan = next(
+            (paragraph for paragraph in block if paragraph.text.strip().startswith("东莞厂：")),
+            None,
+        )
+        if dongguan is None:
+            raise ValueError("模板的机组启停情况中未找到东莞厂段落")
+        new_element = deepcopy(dongguan._element)
+        dongguan._element.addnext(new_element)
+        replace_paragraph(Paragraph(new_element, dongguan._parent), "清远厂：")
+
+
+def ensure_qingyuan_daily_clearing_row(table) -> None:
+    def normalized_label(row) -> str:
+        return re.sub(r"\s+", "", row.cells[0].text)
+
+    if any(normalized_label(row) == "清远" for row in table.rows):
+        return
+    dongguan = next((row for row in table.rows if normalized_label(row) == "东莞"), None)
+    if dongguan is None:
+        raise ValueError("日清分表中未找到东莞行")
+    new_element = deepcopy(dongguan._tr)
+    dongguan._tr.addnext(new_element)
+    new_row = next(row for row in table.rows if row._tr is new_element)
+    if len(new_row.cells) != len(QINGYUAN_DAILY_CLEARING_VALUES):
+        raise ValueError("日清分表列数与清远数据不匹配")
+    for cell, value in zip(new_row.cells, QINGYUAN_DAILY_CLEARING_VALUES):
+        replace_cell_text(cell, value)
+
+
+def ensure_qingyuan_template_content(document) -> None:
+    ensure_qingyuan_startup_paragraphs(document)
+    if not document.tables:
+        raise ValueError("模板中未找到日清分表")
+    ensure_qingyuan_daily_clearing_row(document.tables[0])
+
+
 def replace_red_runs(paragraph, values: list[str]) -> None:
     value_iter = iter(values)
     for run in paragraph.runs:
@@ -619,6 +722,8 @@ def generate(
     daily_clearing_workbook: Path | None = None,
     prefer_previous_template: bool = True,
 ) -> tuple[Path, Path]:
+    from fetch_daily_data import build_report_date_plan, run_daily_data
+
     plan = build_report_date_plan(report_date)
     actual_template_path = resolve_template_path(
         report_date,
@@ -634,24 +739,39 @@ def generate(
     day_ahead_clearing = load_day_ahead_clearing_summary(plan["dayAheadDate"], day_ahead_workbook)
     online_prices = load_online_price_summary(plan["actualOnlineEnergyDate"], online_workbook)
     doc = Document(actual_template_path)
-    replace_paragraph(doc.paragraphs[2], f"{day_number(plan['actualOnlineEnergyDate'])}\u65e5\uff1a")
-    replace_paragraph(doc.paragraphs[6], f"{day_number(report_date)}\u65e5\uff1a")
+    ensure_qingyuan_template_content(doc)
+    startup_dates = startup_date_paragraphs(doc)
+    replace_paragraph(startup_dates[0], f"{date_label(plan['actualOnlineEnergyDate'])}：")
+    replace_paragraph(startup_dates[1], f"{date_label(report_date)}：")
+
+    recent_heading = find_exact_paragraph(doc, "1.近两日完成情况")
+    online_paragraph = next_nonempty_paragraph(doc, recent_heading)
+    day_ahead_paragraph = next_nonempty_paragraph(doc, online_paragraph)
     # P13 is left unchanged until the online energy table source is confirmed.
-    replace_leading_date(doc.paragraphs[12], plan["actualOnlineEnergyDate"])
-    replace_paragraph(doc.paragraphs[12], ensure_qingyuan_online_energy_text(doc.paragraphs[12].text))
-    replace_online_price_text(doc.paragraphs[12], online_prices)
-    clear_paragraph_red(doc.paragraphs[12])
-    replace_paragraph(doc.paragraphs[13], build_day_ahead_clearing_text(plan["dayAheadDate"], day_ahead_clearing))
-    replace_paragraph(doc.paragraphs[15], build_strategy_text(payload))
-    replace_paragraph(doc.paragraphs[20], f"\u88681  {date_label(plan['dailyClearingDate'])}\u5206\u516c\u53f8\u65e5\u6e05\u5206\u60c5\u51b5")
-    replace_paragraph(doc.paragraphs[24], build_day_ahead_market_text(payload))
-    replace_paragraph(doc.paragraphs[26], build_actual_market_text(payload))
+    replace_leading_date(online_paragraph, plan["actualOnlineEnergyDate"])
+    replace_paragraph(online_paragraph, ensure_qingyuan_online_energy_text(online_paragraph.text))
+    replace_online_price_text(online_paragraph, online_prices)
+    clear_paragraph_red(online_paragraph)
+    replace_paragraph(day_ahead_paragraph, build_day_ahead_clearing_text(plan["dayAheadDate"], day_ahead_clearing))
+
+    strategy_heading = find_exact_paragraph(doc, "三、现货交易策略")
+    replace_paragraph(next_nonempty_paragraph(doc, strategy_heading), build_strategy_text(payload))
+    table_title = find_paragraph(doc, lambda text: text.startswith("表1"))
+    replace_paragraph(table_title, f"表1  {date_label(plan['dailyClearingDate'])}分公司日清分情况")
+    day_ahead_heading = find_exact_paragraph(doc, "1.日前市场")
+    replace_paragraph(next_nonempty_paragraph(doc, day_ahead_heading), build_day_ahead_market_text(payload))
+    actual_heading = find_exact_paragraph(doc, "2.实时市场")
+    replace_paragraph(next_nonempty_paragraph(doc, actual_heading), build_actual_market_text(payload))
+    weather_paragraph = find_paragraph(
+        doc,
+        lambda text: text.startswith("未来三天") and "气温" in text,
+    )
     weather_error = None
     try:
-        replace_weather_prefix(doc.paragraphs[28], report_date)
+        replace_weather_prefix(weather_paragraph, report_date)
     except Exception as exc:
         weather_error = str(exc)
-        clear_paragraph_red(doc.paragraphs[28])
+        clear_paragraph_red(weather_paragraph)
         log(f"天气自动更新失败，已保留模板原文：{weather_error}")
 
     if len(doc.tables) >= 2:

@@ -18,6 +18,7 @@ from .runtime import (
 )
 from .widgets import ToolPage
 from .tasks import CancellationToken, ProcessRunner
+from .section_analysis_page import SectionAnalysisPage
 from .page_support import (
     add_path_row as _add_path_row,
     clearing_file_date,
@@ -917,6 +918,19 @@ class GroupUploadPage(ToolPage):
 
 
 class MarketTableUpdatePage(ToolPage):
+    MAPPING_DESCRIPTIONS = (
+        "现货运行日报 > 市场负荷信息 > 日前：来源日期为基准日期 D；写入 2026年市场情况 工作表对应日期行 B:U。",
+        "现货运行日报 > 日前市场 > 发电侧申报均价起 12 项：来源日期为基准日期 D-1；写入 2026年市场情况 工作表对应日期行 V:AG。",
+        "现货运行日报 > 市场负荷信息 > 实际：来源日期为基准日期 D-2；写入 2026年市场情况 工作表对应日期行 AH:BA。",
+        "现货运行日报 > 实时市场 > 发电侧成交电量、发电侧加权均价、燃煤平均成交电价、燃气平均成交电价：来源日期为基准日期 D-2；写入 2026年市场情况 工作表对应日期行 BB:BE。",
+        "现货运行日报 > 发电侧结算 > 12 项：来源日期为基准日期 D-6；写入 2026年市场情况 工作表对应日期行 BF:BQ。",
+        "现货运行日报 > 用电侧结算 > 7 项：来源日期为基准日期 D-6；写入 2026年市场情况 工作表对应日期行 BR:BX。",
+        "现货基础信息报送 > 机组成本信息 > 单位变动成本对应电价：来源日期为基准日期 D；写入 2026年运行方式及成本 工作表对应日期行 N:X。",
+        "省内现货交易 > 市场行情看板 > 在线机组数、省内机组预测检修容量：来源日期为基准日期 D；写入 2026年运行方式及成本 工作表对应日期行 AA、AE。",
+        "公有数据管理 > 现货分时分类型出清电量 > 日前：燃煤取 23:00 开机台数，燃气取全天开机台数最大值；来源日期为基准日期 D；写入 2026年运行方式及成本 工作表对应日期行 AB:AC。",
+        "2026年运行方式及成本 > 机组运行方式：来源日期为基准日期 D-1；复制 B:M 到基准日期 D 对应日期行 B:M。",
+    )
+
     def __init__(
         self,
         parent: tk.Misc,
@@ -965,68 +979,30 @@ class MarketTableUpdatePage(ToolPage):
             button_text="选择文件",
         )
 
-        mapping = ttk.LabelFrame(self.content, text="当前已实现映射", padding=12)
-        mapping.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        ttk.Label(
+        self.content.rowconfigure(1, weight=1)
+        mapping = ttk.LabelFrame(self.content, text="当前已实现映射", padding=8)
+        mapping.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        mapping.columnconfigure(0, weight=1)
+        mapping.rowconfigure(0, weight=1)
+
+        self.mapping_text = tk.Text(
             mapping,
-            text="现货运行日报 > 市场负荷信息 > 日前：来源日期为基准日期 D；写入 2026年市场情况 工作表对应日期行 B:U。",
-            style="Muted.TLabel",
-            wraplength=820,
-        ).pack(anchor="w")
-        ttk.Label(
-            mapping,
-            text="现货运行日报 > 日前市场 > 发电侧申报均价起 12 项：来源日期为基准日期 D-1；写入 2026年市场情况 工作表对应日期行 V:AG。",
-            style="Muted.TLabel",
-            wraplength=820,
-        ).pack(anchor="w", pady=(4, 0))
-        ttk.Label(
-            mapping,
-            text="现货运行日报 > 市场负荷信息 > 实际：来源日期为基准日期 D-2；写入 2026年市场情况 工作表对应日期行 AH:BA。",
-            style="Muted.TLabel",
-            wraplength=820,
-        ).pack(anchor="w", pady=(4, 0))
-        ttk.Label(
-            mapping,
-            text="现货运行日报 > 实时市场 > 发电侧成交电量、发电侧加权均价、燃煤平均成交电价、燃气平均成交电价：来源日期为基准日期 D-2；写入 2026年市场情况 工作表对应日期行 BB:BE。",
-            style="Muted.TLabel",
-            wraplength=820,
-        ).pack(anchor="w", pady=(4, 0))
-        ttk.Label(
-            mapping,
-            text="现货运行日报 > 发电侧结算 > 12 项：来源日期为基准日期 D-6；写入 2026年市场情况 工作表对应日期行 BF:BQ。",
-            style="Muted.TLabel",
-            wraplength=820,
-        ).pack(anchor="w", pady=(4, 0))
-        ttk.Label(
-            mapping,
-            text="现货运行日报 > 用电侧结算 > 7 项：来源日期为基准日期 D-6；写入 2026年市场情况 工作表对应日期行 BR:BX。",
-            style="Muted.TLabel",
-            wraplength=820,
-        ).pack(anchor="w", pady=(4, 0))
-        ttk.Label(
-            mapping,
-            text="现货基础信息报送 > 机组成本信息 > 单位变动成本对应电价：来源日期为基准日期 D；写入 2026年运行方式及成本 工作表对应日期行 N:X。",
-            style="Muted.TLabel",
-            wraplength=820,
-        ).pack(anchor="w", pady=(4, 0))
-        ttk.Label(
-            mapping,
-            text="省内现货交易 > 市场行情看板 > 在线机组数、省内机组预测检修容量：来源日期为基准日期 D；写入 2026年运行方式及成本 工作表对应日期行 AA、AE。",
-            style="Muted.TLabel",
-            wraplength=820,
-        ).pack(anchor="w", pady=(4, 0))
-        ttk.Label(
-            mapping,
-            text="公有数据管理 > 现货分时分类型出清电量 > 日前：燃煤取 23:00 开机台数，燃气取全天开机台数最大值；来源日期为基准日期 D；写入 2026年运行方式及成本 工作表对应日期行 AB:AC。",
-            style="Muted.TLabel",
-            wraplength=820,
-        ).pack(anchor="w", pady=(4, 0))
-        ttk.Label(
-            mapping,
-            text="2026年运行方式及成本 > 机组运行方式：来源日期为基准日期 D-1；复制 B:M 到基准日期 D 对应日期行 B:M。",
-            style="Muted.TLabel",
-            wraplength=820,
-        ).pack(anchor="w", pady=(4, 0))
+            height=8,
+            wrap="word",
+            font=("Microsoft YaHei UI", 9),
+            borderwidth=0,
+            padx=4,
+            pady=4,
+        )
+        self.mapping_text.grid(row=0, column=0, sticky="nsew")
+        self.mapping_scrollbar = ttk.Scrollbar(
+            mapping, orient="vertical", command=self.mapping_text.yview
+        )
+        self.mapping_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.mapping_text.configure(yscrollcommand=self.mapping_scrollbar.set)
+        for index, description in enumerate(self.MAPPING_DESCRIPTIONS, start=1):
+            self.mapping_text.insert("end", f"{index}. {description}\n")
+        self.mapping_text.configure(state="disabled")
 
         actions = self.actions
         self.update_button = ttk.Button(
@@ -1325,6 +1301,10 @@ class WpsWriterPage(ToolPage):
             description="Use the WPS/KDocs writer directly inside the toolbox.",
         )
         self.paths = paths
+        # WpsWriterFrame owns its browser/write lifecycle and its own module log.
+        # The generic ToolPage task console is unused here and would show a
+        # second, misleading empty log and cancel button.
+        self.set_task_console_visible(False)
         self.content.rowconfigure(0, weight=1)
         self.content.columnconfigure(0, weight=1)
 
@@ -1335,8 +1315,9 @@ class WpsWriterPage(ToolPage):
         try:
             module = load_module("toolbox_wps_writer_gui", self.paths.wps_writer)
             frame_class = getattr(module, "WpsWriterFrame")
-            self.writer_frame = frame_class(self.content)
+            self.writer_frame = frame_class(self.content, task_registry=registry)
             self.writer_frame.grid(row=0, column=0, sticky="nsew")
+            self.actions.grid_remove()
         except Exception as exc:
             self._show_load_error(str(exc))
 
@@ -1363,6 +1344,7 @@ def page_factories() -> Mapping[str, object]:
     return {
         "导出上网电量": OnlineEnergyPage,
         "电力交易分析": TradeAnalysisPage,
+        "500kV断面分析": SectionAnalysisPage,
         "电量汇总": SummaryPage,
         "生成报告": ReportPage,
         "私有数据上传": PrivateUploadPage,

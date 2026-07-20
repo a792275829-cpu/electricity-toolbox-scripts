@@ -20,9 +20,11 @@ C:\Users\lllg\Desktop\私有数据上传工具.bat
 3. 点击“预览”确认文件。
 4. 点击“开始上传”执行上传。
 
-登录配置继续复用：
+账号密码配置可以继续从其他工具读取，但私有上传使用自己独立的登录态、锁文件和浏览器 profile：
 
 ```text
 C:\Users\lllg\Desktop\上网电量抓取\config.json
-C:\Users\lllg\Desktop\上网电量抓取\auth_state.json
+当前工具目录\auth_state.json
+当前工具目录\auth_state.json.lock
+当前工具目录\.browser-profile-uploader
 ```

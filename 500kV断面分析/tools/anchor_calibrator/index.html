@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>500kV节点锚点校准器</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <aside>
+    <header>
+      <small>WIRING DIAGRAM CALIBRATION</small>
+      <h1>500kV节点锚点校准</h1>
+      <p id="summary">正在加载…</p>
+    </header>
+    <input id="search" type="search" placeholder="搜索节点">
+    <div class="filters">
+      <button data-filter="all" class="active">全部</button>
+      <button data-filter="unresolved">待处理</button>
+      <button data-filter="candidate">候选</button>
+      <button data-filter="verified">已确认</button>
+    </div>
+    <div id="nodeList" class="node-list"></div>
+  </aside>
+  <main>
+    <div class="toolbar">
+      <div>
+        <strong id="nodeTitle">请选择节点</strong>
+        <span id="nodeMeta"></span>
+      </div>
+      <div class="actions">
+        <button id="fit">适应窗口</button>
+        <button id="previous">上一个</button>
+        <button id="next">下一个</button>
+        <button id="accept" class="primary">确认锚点</button>
+      </div>
+    </div>
+    <div id="viewer" class="viewer">
+      <div id="stage" class="stage">
+        <img id="diagram" src="/image.png" alt="广东电网接线图" draggable="false">
+        <svg id="overlay" viewBox="0 0 7111 5025" aria-label="校准标记"></svg>
+      </div>
+      <div class="hint">滚轮缩放 · 拖拽移动 · 点击图面设置锚点 · 数字键选择圆点候选 · Enter确认 · N下一个</div>
+    </div>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

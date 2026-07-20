@@ -1,0 +1,1000 @@
+{
+  "version": 1,
+  "updated_at": "2026-07-18T11:17:53+08:00",
+  "image": {
+    "path": "接线图.png",
+    "width": 7111,
+    "height": 5025,
+    "sha256": "8f3555a39a7b8027d80adff2f8a7fee53f3c12ff7631b26ecab0168bc08c8038"
+  },
+  "topology": {
+    "path": "500kV节点拓扑.md",
+    "nodes": 121,
+    "unique_edges": 153,
+    "duplicate_edges": [
+      [
+        "嘉应站",
+        "敬州变",
+        "粤东"
+      ]
+    ]
+  },
+  "nodes": [
+    {
+      "name": "上寨站",
+      "anchor": {
+        "x": 4970.2,
+        "y": 843.8
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "东坡站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "东方换流站",
+      "anchor": {
+        "x": 4700.4,
+        "y": 3805.8
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "东海岛站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "东莞变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "丹霞站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "乌石湾电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "云霄换流站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "五邑站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "从西换流站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "侨乡换流站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "凤城站",
+      "anchor": {
+        "x": 2533.4,
+        "y": 3112.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "凤安站",
+      "anchor": {
+        "x": 4320.6,
+        "y": 836.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "凤翔站",
+      "anchor": {
+        "x": 633.6,
+        "y": 3276.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "加林站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "北郊站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "南粤换流站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "博罗变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "博贺电厂",
+      "anchor": {
+        "x": 126.6,
+        "y": 1771.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "卧龙变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "合和海风场陆上站",
+      "anchor": {
+        "x": 1661.0,
+        "y": 3475.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "吉康站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "嘉应站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "回隆变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "园山电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "国安站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "圭峰站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "增城站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "大亚湾电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "太平岭核电厂",
+      "anchor": {
+        "x": 5479.6,
+        "y": 2618.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "安澜变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "宝安换流站",
+      "anchor": {
+        "x": 4811.0,
+        "y": 3249.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "小漠电厂",
+      "anchor": {
+        "x": 4924.6,
+        "y": 2296.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "屹百站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "岐山站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "岭澳核电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "峡阳海风场",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "崇文站",
+      "anchor": {
+        "x": 5537.0,
+        "y": 2828.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "崇焕站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "平海电厂",
+      "anchor": {
+        "x": 6398.2,
+        "y": 2886.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "广南变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "库湾站",
+      "anchor": {
+        "x": 1229.6,
+        "y": 896.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "征程站",
+      "anchor": {
+        "x": 5293.2,
+        "y": 1481.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "徐闻开关站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "惠州站",
+      "anchor": {
+        "x": 5476.0,
+        "y": 2223.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "惠蓄电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "承龙开关站",
+      "anchor": {
+        "x": 5176.2,
+        "y": 1047.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "振兴站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "敬州变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "文山站",
+      "anchor": {
+        "x": 3830.4,
+        "y": 3896.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "曲江站",
+      "anchor": {
+        "x": 2056.6,
+        "y": 538.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "木棉站",
+      "anchor": {
+        "x": 3717.6,
+        "y": 1395.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "柑乡变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "柘林电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "桂山站",
+      "anchor": {
+        "x": 3830.8,
+        "y": 4304.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "楚庭站",
+      "anchor": {
+        "x": 3497.0,
+        "y": 2662.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "榕江站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "横沥站",
+      "anchor": {
+        "x": 4678.2,
+        "y": 1720.4
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "水乡站",
+      "anchor": {
+        "x": 4558.8,
+        "y": 2318.4
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "汕头变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "江门变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "沧江站",
+      "anchor": {
+        "x": 1602.0,
+        "y": 2910.8
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "海路陆上集控站",
+      "anchor": {
+        "x": 1154.4,
+        "y": 4935.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "海门电厂",
+      "anchor": {
+        "x": 6891.4,
+        "y": 2746.8
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "深圳站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "渡水站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "港城变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "演达变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "澄海站",
+      "anchor": {
+        "x": 6477.4,
+        "y": 865.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "狮洋站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "玄陆升压站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "玉城站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "现代站",
+      "anchor": {
+        "x": 6323.8,
+        "y": 4534.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "珠海B厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "甲湖湾电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "电白站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "盘龙站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "盛丰站",
+      "anchor": {
+        "x": 4636.0,
+        "y": 1875.8
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "砚都站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "祯州站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "福园站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "科北站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "穗东换流站",
+      "anchor": {
+        "x": 4635.6,
+        "y": 1874.8
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "立安变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "紫荆站",
+      "anchor": {
+        "x": 4853.2,
+        "y": 4589.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "红海湾电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "纵江站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "罗洞站",
+      "anchor": {
+        "x": 2241.6,
+        "y": 1951.8
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "肇庆换流站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "胪岗站",
+      "anchor": {
+        "x": 6578.2,
+        "y": 2591.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "花都站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "芷寮站",
+      "anchor": {
+        "x": 245.4,
+        "y": 4741.4
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "茂名站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "茅湖站",
+      "anchor": {
+        "x": 5689.6,
+        "y": 1530.4
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "荔西站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "莞城站",
+      "anchor": {
+        "x": 4473.0,
+        "y": 2859.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "蝶岭站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "融珠站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "襟岛核电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "西江变",
+      "anchor": {
+        "x": 2226.6,
+        "y": 2716.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "调顺电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "贤令山站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "金鼎站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "铜鼓电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "阳江核电厂",
+      "anchor": {
+        "x": 2067.4,
+        "y": 4042.6
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "阳西B厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "阳西C厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "陆丰站",
+      "anchor": {
+        "x": 5641.2,
+        "y": 1206.0
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "靖海电厂",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "韩江站",
+      "anchor": {
+        "x": 6342.0,
+        "y": 1256.8
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "顺德站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "香山站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "高凉站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "鲲鹏站",
+      "anchor": {
+        "x": 5330.6,
+        "y": 3181.8
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "鳌峰站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "鹅凰A站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "鹅凰B站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "鹊垌站",
+      "anchor": {
+        "x": 1623.4,
+        "y": 3863.4
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "鹏城站",
+      "anchor": {
+        "x": 5546.4,
+        "y": 3786.8
+      },
+      "status": "candidate",
+      "source": "opencv-candidate",
+      "updated_at": null
+    },
+    {
+      "name": "龙田变",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    },
+    {
+      "name": "龙门换流站",
+      "anchor": null,
+      "status": "unresolved",
+      "source": null,
+      "updated_at": null
+    }
+  ]
+}

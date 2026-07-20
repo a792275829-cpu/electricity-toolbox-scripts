@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -13,6 +14,7 @@ from .tasks import ProcessRunner, TaskEngine
 
 _MODULE_CACHE: dict[tuple[str, Path], tuple[int, ModuleType]] = {}
 _MODULE_CACHE_LOCK = threading.RLock()
+_MISSING_MODULE = object()
 
 
 PREFERRED_PYTHON = Path(
@@ -50,6 +52,18 @@ class ToolPaths:
     @property
     def trade_analysis_dir(self) -> Path:
         return self.trade_analysis.parent
+
+    @property
+    def section_analysis_dir(self) -> Path:
+        return self.workspace / "500kV断面分析"
+
+    @property
+    def section_analysis_runner(self) -> Path:
+        return self.section_analysis_dir / "run_500kv_analysis.py"
+
+    @property
+    def section_analysis_topology(self) -> Path:
+        return self.section_analysis_dir / "500kV节点拓扑.md"
 
     @property
     def summary(self) -> Path:
@@ -144,6 +158,41 @@ class ToolPaths:
         return self.workspace / "电力工具箱" / "file_dialog_settings.json"
 
 
+def _module_is_local(module: object, roots: tuple[Path, ...]) -> bool:
+    module_file = getattr(module, "__file__", None)
+    if not module_file:
+        return False
+    try:
+        resolved = Path(module_file).resolve()
+    except (OSError, TypeError):
+        return False
+    return any(resolved == root or root in resolved.parents for root in roots)
+
+
+def _restore_local_imports(
+    before: dict[str, ModuleType],
+    *,
+    keep_name: str,
+    roots: tuple[Path, ...],
+) -> None:
+    for module_name in set(before).union(sys.modules):
+        if module_name == keep_name:
+            continue
+        previous = before.get(module_name, _MISSING_MODULE)
+        current = sys.modules.get(module_name, _MISSING_MODULE)
+        if previous is current:
+            continue
+        if not (
+            _module_is_local(previous, roots)
+            or _module_is_local(current, roots)
+        ):
+            continue
+        if previous is _MISSING_MODULE:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous
+
+
 def load_module(name: str, path: Path) -> ModuleType:
     path = Path(path).resolve()
     if not path.is_file():
@@ -157,13 +206,28 @@ def load_module(name: str, path: Path) -> ModuleType:
         if spec is None or spec.loader is None:
             raise ImportError(f"无法加载模块：{path}")
         module = importlib.util.module_from_spec(spec)
+        modules_before = dict(sys.modules)
+        sys_path_before = list(sys.path)
+        local_roots = (path.parent, Path(__file__).resolve().parents[2])
         sys.modules[name] = module
         try:
+            sys.path.insert(0, str(path.parent))
             source = path.read_bytes()
             exec(compile(source, str(path), "exec"), module.__dict__)
         except Exception:
-            sys.modules.pop(name, None)
+            previous = modules_before.get(name, _MISSING_MODULE)
+            if previous is _MISSING_MODULE:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
             raise
+        finally:
+            sys.path[:] = sys_path_before
+            _restore_local_imports(
+                modules_before,
+                keep_name=name,
+                roots=local_roots,
+            )
         _MODULE_CACHE[(name, path)] = (modified, module)
         return module
 
@@ -220,6 +284,28 @@ def node_executable() -> str:
     bundled = portable_runtime_root() / "node" / "node.exe"
     if bundled.is_file():
         return str(bundled)
+
+    discovered = shutil.which("node")
+    if discovered:
+        return discovered
+
+    if sys.platform == "darwin":
+        home = Path.home()
+        candidates = [
+            home / ".local" / "bin" / "node",
+            home / ".volta" / "bin" / "node",
+            Path("/opt/homebrew/bin/node"),
+            Path("/usr/local/bin/node"),
+        ]
+        candidates.extend(
+            sorted(
+                (home / ".nvm" / "versions" / "node").glob("*/bin/node"),
+                reverse=True,
+            )
+        )
+        for candidate in candidates:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
     return "node"
 
 
@@ -269,4 +355,9 @@ class TaskRegistry(TaskEngine):
             if process.poll() is not None:
                 continue
             ProcessRunner().terminate(process)
-        return remaining
+        with self._legacy_lock:
+            active_threads = tuple(
+                thread for thread in self._legacy_threads if thread.is_alive()
+            )
+            self._legacy_threads = set(active_threads)
+        return (*remaining, *active_threads)

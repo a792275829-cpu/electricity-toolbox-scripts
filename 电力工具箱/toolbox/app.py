@@ -7,11 +7,12 @@ from tkinter import messagebox, ttk
 
 from .catalog import catalog_factories, default_catalog
 from .runtime import TaskRegistry, ToolPaths
-from .ui import DashboardPage, TaskCenter, configure_theme
+from .ui import DashboardPage, DiagnosticCenterPanel, TaskCenter, configure_theme
 
 PAGE_NAMES = (
     "导出上网电量",
     "电力交易分析",
+    "500kV断面分析",
     "电量汇总",
     "生成报告",
     "私有数据上传",
@@ -89,8 +90,15 @@ class ToolboxApp(tk.Tk):
         self.dashboard = DashboardPage(self.page_host, self.registry, self.show_page, self.paths)
         self.dashboard.grid(row=0, column=0, sticky="nsew")
 
-        self.task_center = TaskCenter(self, self.registry)
-        self.task_center.grid(row=0, column=2, sticky="nsew")
+        right_rail = ttk.Frame(self)
+        right_rail.grid(row=0, column=2, sticky="nsew")
+        right_rail.columnconfigure(0, weight=1)
+        right_rail.rowconfigure(0, weight=1)
+        self.task_center = TaskCenter(right_rail, self.registry)
+        self.task_center.grid(row=0, column=0, sticky="nsew")
+        ttk.Separator(right_rail, orient="horizontal").grid(row=1, column=0, sticky="ew")
+        self.diagnostic_center = DiagnosticCenterPanel(right_rail, self.paths)
+        self.diagnostic_center.grid(row=2, column=0, sticky="ew")
         if not self._lazy_pages:
             for name in PAGE_NAMES:
                 self._create_page(name)

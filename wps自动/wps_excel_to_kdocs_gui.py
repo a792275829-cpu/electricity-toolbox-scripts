@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
+import subprocess
+import sys
 import threading
 import traceback
 import time as time_module
@@ -37,6 +40,10 @@ except ImportError:  # pragma: no cover - surfaced in GUI
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "wps_excel_to_kdocs_config.json"
 PROFILE_DIR = BASE_DIR / "wps-browser-profile"
+WPS_CHROME_PID_PATH = BASE_DIR / "wps-chrome.pid"
+WPS_CHROME_STATE_PATH = BASE_DIR / "wps-chrome-state.json"
+WPS_CHROME_LAUNCH_VERSION = 2
+WPS_CHROME_START_LOCK = threading.Lock()
 LOG_DIR = BASE_DIR / "logs"
 MAX_RECENT_URLS = 10
 DOCUMENT_CONFIGS_MIN_HEIGHT = 220
@@ -493,20 +500,39 @@ def wait_for_wps_ready(page, log, timeout_seconds: int) -> dict[str, Any]:
     last_log_second = 0
     readiness_script = """
     async () => {
-      if (window.WPSOpenApi?.EtApplication && window.WPSOpenApi?.documentReadyPromise) {
-        await window.WPSOpenApi.documentReadyPromise;
+      const api = window.WPSOpenApi;
+      if (!api?.EtApplication) {
         return {
-          ready: true,
+          ready: false,
           url: location.href,
           title: document.title,
-          hasSave: typeof window.WPSOpenApi.save === "function"
+          hasWPSOpenApi: !!api
         };
       }
+
+      const bounded = (value, milliseconds = 750) => Promise.race([
+        Promise.resolve(value),
+        new Promise(resolve => setTimeout(() => resolve(false), milliseconds))
+      ]);
+      let app;
+      let applicationReady = false;
+      let documentReady = false;
+      try {
+        app = api.EtApplication();
+        applicationReady = Boolean(await bounded(app.Ready));
+      } catch (_error) {}
+      if (!applicationReady && api.documentReadyPromise) {
+        try {
+          documentReady = Boolean(await bounded(
+            Promise.resolve(api.documentReadyPromise).then(() => true)
+          ));
+        } catch (_error) {}
+      }
       return {
-        ready: false,
+        ready: applicationReady || documentReady,
         url: location.href,
         title: document.title,
-        hasWPSOpenApi: !!window.WPSOpenApi
+        hasSave: typeof api.save === "function"
       };
     }
     """
@@ -537,10 +563,20 @@ def find_or_open_page(context, url: str):
     for page in context.pages:
         if "kdocs.cn" in page.url:
             page.bring_to_front()
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.goto(url, wait_until="commit", timeout=60000)
             return page
-    page = context.new_page()
-    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    page = next(
+        (
+            candidate
+            for candidate in context.pages
+            if candidate.url in {"", "about:blank", "chrome://newtab/"}
+        ),
+        None,
+    )
+    if page is None:
+        page = context.new_page()
+    page.bring_to_front()
+    page.goto(url, wait_until="commit", timeout=60000)
     return page
 
 
@@ -576,6 +612,317 @@ def resolve_cdp_endpoint(cdp_url: str) -> str:
     raise RuntimeError("Could not resolve Chrome DevTools websocket. " + " | ".join(errors))
 
 
+def find_macos_chrome() -> Path | None:
+    candidates = [
+        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        Path("/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
+        Path.home() / "Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        Path.home() / "Applications/Chromium.app/Contents/MacOS/Chromium",
+    ]
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
+
+
+def managed_cdp_host_port(cdp_url: str) -> tuple[str, int]:
+    parsed = urllib.parse.urlparse(cdp_url.strip() or "http://127.0.0.1:9222")
+    host = parsed.hostname or "127.0.0.1"
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError("The managed WPS Chrome CDP address must use localhost.")
+    return "127.0.0.1", parsed.port or 9222
+
+
+def build_wps_chrome_command(
+    chrome_path: Path,
+    cdp_url: str,
+    initial_url: str = "https://www.kdocs.cn/",
+) -> list[str]:
+    host, port = managed_cdp_host_port(cdp_url)
+    return [
+        str(chrome_path),
+        f"--remote-debugging-address={host}",
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={PROFILE_DIR}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        # The Tk config dialog normally covers Chrome on macOS. Keep the WPS
+        # renderer at foreground speed while that dedicated window is occluded.
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        initial_url,
+    ]
+
+
+def try_resolve_cdp_endpoint(cdp_url: str, timeout: float = 0.5) -> str | None:
+    if cdp_url.startswith("ws://") or cdp_url.startswith("wss://"):
+        return cdp_url
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for candidate in cdp_candidates(cdp_url):
+        try:
+            with opener.open(candidate.rstrip("/") + "/json/version", timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            websocket_url = data.get("webSocketDebuggerUrl")
+            if websocket_url:
+                return str(websocket_url)
+        except Exception:
+            continue
+    return None
+
+
+def cdp_page_targets(
+    cdp_url: str, timeout: float = 0.5
+) -> tuple[str | None, list[dict[str, Any]]]:
+    if cdp_url.startswith("ws://") or cdp_url.startswith("wss://"):
+        return None, []
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for candidate in cdp_candidates(cdp_url):
+        try:
+            with opener.open(candidate.rstrip("/") + "/json/list", timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            if isinstance(data, list):
+                return candidate.rstrip("/"), [item for item in data if isinstance(item, dict)]
+        except Exception:
+            continue
+    return None, []
+
+
+def ensure_wps_cdp_page(
+    cdp_url: str,
+    initial_url: str = "https://www.kdocs.cn/",
+    *,
+    require_initial_url: bool = False,
+) -> bool:
+    base_url, targets = cdp_page_targets(cdp_url)
+    page_targets = [target for target in targets if target.get("type") == "page"]
+    target_key = initial_url.rstrip("/").split("/")[-1]
+    if require_initial_url and target_key:
+        if any(target_key in str(target.get("url") or "") for target in page_targets):
+            return False
+    elif page_targets:
+        return False
+    if base_url is None:
+        raise RuntimeError("Could not inspect the dedicated WPS Chrome page list.")
+
+    encoded_url = urllib.parse.quote(initial_url, safe="")
+    request = urllib.request.Request(
+        f"{base_url}/json/new?{encoded_url}", method="PUT"
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=5) as response:
+        created = json.loads(response.read().decode("utf-8"))
+    if not isinstance(created, dict) or created.get("type") != "page":
+        raise RuntimeError("Dedicated WPS Chrome did not create a browser page.")
+    return True
+
+
+def managed_chrome_pid() -> int | None:
+    try:
+        pid = int(WPS_CHROME_PID_PATH.read_text(encoding="utf-8").strip())
+        os.kill(pid, 0)
+        if sys.platform == "darwin":
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command="],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if str(PROFILE_DIR) not in result.stdout:
+                return None
+        return pid
+    except (
+        FileNotFoundError,
+        ValueError,
+        ProcessLookupError,
+        PermissionError,
+        subprocess.SubprocessError,
+    ):
+        return None
+
+
+def managed_chrome_launch_version(pid: int) -> int:
+    try:
+        state = json.loads(WPS_CHROME_STATE_PATH.read_text(encoding="utf-8"))
+        if int(state.get("pid") or 0) != pid:
+            return 0
+        return int(state.get("version") or 0)
+    except (FileNotFoundError, ValueError, TypeError, json.JSONDecodeError):
+        return 0
+
+
+def stop_outdated_managed_chrome(log, cdp_url: str) -> None:
+    pid = managed_chrome_pid()
+    if pid is None or managed_chrome_launch_version(pid) >= WPS_CHROME_LAUNCH_VERSION:
+        return
+    log("Restarting dedicated WPS Chrome once to apply the macOS speed settings.")
+    try:
+        os.kill(pid, 15)
+    except ProcessLookupError:
+        return
+    deadline = time_module.monotonic() + 8
+    while time_module.monotonic() < deadline:
+        if try_resolve_cdp_endpoint(cdp_url, timeout=0.2) is None:
+            time_module.sleep(0.5)
+            return
+        time_module.sleep(0.2)
+    raise RuntimeError(
+        "The old dedicated WPS Chrome did not exit. Close that dedicated Chrome window and try again."
+    )
+
+
+def _ensure_wps_dedicated_chrome(
+    cdp_url: str = "http://127.0.0.1:9222",
+    log=lambda _message: None,
+    timeout_seconds: float = 15,
+    initial_url: str = "https://www.kdocs.cn/",
+    preload_url: bool = False,
+) -> dict[str, Any]:
+    stop_outdated_managed_chrome(log, cdp_url)
+    existing_endpoint = try_resolve_cdp_endpoint(cdp_url)
+    if existing_endpoint:
+        ensure_wps_cdp_page(
+            cdp_url,
+            initial_url,
+            require_initial_url=preload_url,
+        )
+        log("Reusing the running dedicated WPS Chrome.")
+        return {"started": False, "endpoint": existing_endpoint}
+    existing_pid = managed_chrome_pid()
+    if existing_pid is not None:
+        # Chrome can briefly stop answering /json/version while a heavy KDocs
+        # page is busy. Give the owned process time to recover instead of
+        # launching a second process against the same profile.
+        recovery_deadline = time_module.monotonic() + 3
+        while time_module.monotonic() < recovery_deadline:
+            endpoint = try_resolve_cdp_endpoint(cdp_url)
+            if endpoint:
+                ensure_wps_cdp_page(
+                    cdp_url,
+                    initial_url,
+                    require_initial_url=preload_url,
+                )
+                log("Reusing the running dedicated WPS Chrome.")
+                return {"started": False, "endpoint": endpoint, "pid": existing_pid}
+            time_module.sleep(0.2)
+        raise RuntimeError(
+            "Dedicated WPS Chrome is running but its local debugging endpoint is not responding. "
+            "Wait a moment or close that dedicated window and start it again."
+        )
+    if sys.platform != "darwin":
+        raise RuntimeError("Automatic dedicated Chrome startup is currently available on macOS only.")
+
+    chrome_path = find_macos_chrome()
+    if chrome_path is None:
+        raise RuntimeError("Google Chrome was not found in /Applications or ~/Applications.")
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        PROFILE_DIR.chmod(0o700)
+    except OSError:
+        pass
+    command = build_wps_chrome_command(chrome_path, cdp_url, initial_url)
+    log(f"Starting dedicated WPS Chrome: {chrome_path.name}")
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    WPS_CHROME_PID_PATH.write_text(str(process.pid), encoding="utf-8")
+    WPS_CHROME_STATE_PATH.write_text(
+        json.dumps(
+            {"pid": process.pid, "version": WPS_CHROME_LAUNCH_VERSION},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    deadline = time_module.monotonic() + timeout_seconds
+    while time_module.monotonic() < deadline:
+        endpoint = try_resolve_cdp_endpoint(cdp_url)
+        if endpoint:
+            ensure_wps_cdp_page(
+                cdp_url,
+                initial_url,
+                require_initial_url=preload_url,
+            )
+            log("Dedicated WPS Chrome is ready. Log in once if WPS asks for it.")
+            return {"started": True, "endpoint": endpoint, "pid": process.pid}
+        if process.poll() is not None:
+            break
+        time_module.sleep(0.2)
+    raise RuntimeError(
+        "Dedicated WPS Chrome did not expose its local debugging endpoint. "
+        "Close any Chrome window using the WPS profile and try again."
+    )
+
+
+def ensure_wps_dedicated_chrome(
+    cdp_url: str = "http://127.0.0.1:9222",
+    log=lambda _message: None,
+    timeout_seconds: float = 15,
+    initial_url: str = "https://www.kdocs.cn/",
+    preload_url: bool = False,
+) -> dict[str, Any]:
+    with WPS_CHROME_START_LOCK:
+        return _ensure_wps_dedicated_chrome(
+            cdp_url,
+            log,
+            timeout_seconds,
+            initial_url,
+            preload_url,
+        )
+
+
+def open_browser_context(
+    playwright,
+    browser_mode: str,
+    cdp_url: str,
+    log,
+    initial_url: str | None = None,
+):
+    if browser_mode in {"managed_cdp", "cdp"}:
+        if browser_mode == "managed_cdp":
+            ensure_wps_dedicated_chrome(
+                cdp_url,
+                log,
+                initial_url=initial_url or "https://www.kdocs.cn/",
+                preload_url=bool(initial_url),
+            )
+        else:
+            log(f"Connecting to existing Chrome through CDP: {cdp_url}")
+        endpoint = resolve_cdp_endpoint(cdp_url)
+        try:
+            browser = playwright.chromium.connect_over_cdp(endpoint)
+        except Exception as exc:
+            if browser_mode != "managed_cdp" or "context management is not supported" not in str(exc):
+                raise
+            log("Dedicated Chrome had no open page; creating a WPS page and reconnecting.")
+            ensure_wps_cdp_page(cdp_url)
+            endpoint = resolve_cdp_endpoint(cdp_url)
+            browser = playwright.chromium.connect_over_cdp(endpoint)
+        context = browser.contexts[0] if browser.contexts else browser.new_context()
+        return browser, context, False
+
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    log("Starting one-time browser with persistent WPS profile...")
+    try:
+        context = playwright.chromium.launch_persistent_context(
+            str(PROFILE_DIR),
+            headless=False,
+            channel="chrome",
+            viewport={"width": 1400, "height": 900},
+        )
+    except Exception:
+        log("Chrome channel was not available; falling back to bundled Chromium.")
+        context = playwright.chromium.launch_persistent_context(
+            str(PROFILE_DIR),
+            headless=False,
+            viewport={"width": 1400, "height": 900},
+        )
+    return None, context, True
+
+
 def write_to_wps(
     url: str,
     prepared: list[PreparedMapping],
@@ -601,35 +948,17 @@ def write_to_wps(
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
-        browser = None
-        if browser_mode == "cdp":
-            log(f"Connecting to existing Chrome through CDP: {cdp_url}")
-            try:
-                endpoint = resolve_cdp_endpoint(cdp_url)
-                browser = p.chromium.connect_over_cdp(endpoint)
-            except Exception as exc:
+        try:
+            _browser, context, close_context = open_browser_context(
+                p, browser_mode, cdp_url, log, initial_url=url
+            )
+        except Exception as exc:
+            if browser_mode == "cdp":
                 raise RuntimeError(
-                    "Could not connect to existing Chrome. Start Chrome with a remote debugging port, "
-                    "for example: chrome.exe --remote-debugging-port=9222 --user-data-dir=%TEMP%\\wps-cdp-profile, "
-                    "then log in to WPS in that Chrome window."
+                    "Could not connect to existing Chrome. Start it with a custom --user-data-dir "
+                    "and --remote-debugging-port, then log in to WPS in that window."
                 ) from exc
-            context = browser.contexts[0] if browser.contexts else browser.new_context()
-        else:
-            log("Starting browser with persistent WPS profile...")
-            try:
-                context = p.chromium.launch_persistent_context(
-                    str(PROFILE_DIR),
-                    headless=False,
-                    channel="chrome",
-                    viewport={"width": 1400, "height": 900},
-                )
-            except Exception:
-                log("Chrome channel was not available; falling back to bundled Chromium.")
-                context = p.chromium.launch_persistent_context(
-                    str(PROFILE_DIR),
-                    headless=False,
-                    viewport={"width": 1400, "height": 900},
-                )
+            raise
         try:
             log(f"Opening or selecting KDocs URL: {url}")
             page = find_or_open_page(context, url)
@@ -645,7 +974,6 @@ def write_to_wps(
 
             writer_script = """
             async (payload) => {
-              await window.WPSOpenApi.documentReadyPromise;
               const app = window.WPSOpenApi.EtApplication();
               const results = [];
               for (const item of payload) {
@@ -693,11 +1021,7 @@ def write_to_wps(
                 raise RuntimeError(f"Write failed after retries: {last_error}")
             return result
         finally:
-            if browser_mode == "cdp":
-                # Do not close the user's existing Chrome windows. Let the process
-                # ending release this automation connection.
-                pass
-            else:
+            if close_context:
                 context.close()
 
 
@@ -706,28 +1030,9 @@ def read_online_document_info(url: str, browser_mode: str, cdp_url: str, log) ->
         raise RuntimeError("Missing dependency: playwright. Run: pip install -r work/requirements.txt")
 
     with sync_playwright() as p:
-        browser = None
-        if browser_mode == "cdp":
-            log(f"Connecting to existing Chrome through CDP: {cdp_url}")
-            endpoint = resolve_cdp_endpoint(cdp_url)
-            browser = p.chromium.connect_over_cdp(endpoint)
-            context = browser.contexts[0] if browser.contexts else browser.new_context()
-        else:
-            PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-            log("Starting browser with persistent WPS profile...")
-            try:
-                context = p.chromium.launch_persistent_context(
-                    str(PROFILE_DIR),
-                    headless=False,
-                    channel="chrome",
-                    viewport={"width": 1400, "height": 900},
-                )
-            except Exception:
-                context = p.chromium.launch_persistent_context(
-                    str(PROFILE_DIR),
-                    headless=False,
-                    viewport={"width": 1400, "height": 900},
-                )
+        _browser, context, close_context = open_browser_context(
+            p, browser_mode, cdp_url, log, initial_url=url
+        )
         try:
             page = find_or_open_page(context, url)
             ready = wait_for_wps_ready(page, log, timeout_seconds=120)
@@ -738,7 +1043,6 @@ def read_online_document_info(url: str, browser_mode: str, cdp_url: str, log) ->
                 )
             script = """
             async () => {
-              await window.WPSOpenApi.documentReadyPromise;
               const app = window.WPSOpenApi.EtApplication();
               const count = await app.Worksheets.Count;
               const sheets = [];
@@ -752,9 +1056,7 @@ def read_online_document_info(url: str, browser_mode: str, cdp_url: str, log) ->
             sheets = page.evaluate(script)
             return {"title": ready.get("title") or page.title(), "sheets": sheets}
         finally:
-            if browser_mode == "cdp":
-                pass
-            else:
+            if close_context:
                 context.close()
 
 
@@ -776,28 +1078,9 @@ def read_online_range_values(
         raise RuntimeError("Missing dependency: playwright. Run: pip install -r work/requirements.txt")
 
     with sync_playwright() as p:
-        browser = None
-        if browser_mode == "cdp":
-            log(f"Connecting to existing Chrome through CDP: {cdp_url}")
-            endpoint = resolve_cdp_endpoint(cdp_url)
-            browser = p.chromium.connect_over_cdp(endpoint)
-            context = browser.contexts[0] if browser.contexts else browser.new_context()
-        else:
-            PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-            log("Starting browser with persistent WPS profile...")
-            try:
-                context = p.chromium.launch_persistent_context(
-                    str(PROFILE_DIR),
-                    headless=False,
-                    channel="chrome",
-                    viewport={"width": 1400, "height": 900},
-                )
-            except Exception:
-                context = p.chromium.launch_persistent_context(
-                    str(PROFILE_DIR),
-                    headless=False,
-                    viewport={"width": 1400, "height": 900},
-                )
+        _browser, context, close_context = open_browser_context(
+            p, browser_mode, cdp_url, log, initial_url=url
+        )
         try:
             page = find_or_open_page(context, url)
             ready = wait_for_wps_ready(page, log, timeout_seconds=120)
@@ -808,7 +1091,6 @@ def read_online_range_values(
                 )
             script = """
             async ({sheetName, rangeText}) => {
-              await window.WPSOpenApi.documentReadyPromise;
               const app = window.WPSOpenApi.EtApplication();
               const sheet = await app.Worksheets(sheetName);
               const range = await sheet.Range(rangeText);
@@ -833,9 +1115,7 @@ def read_online_range_values(
             matrix = coerce_wps_matrix(raw, rows, cols)
             return [[normalize_cell_value(cell) for cell in row] for row in matrix]
         finally:
-            if browser_mode == "cdp":
-                pass
-            else:
+            if close_context:
                 context.close()
 
 
@@ -1107,10 +1387,31 @@ class DocumentConfigDialog(tk.Toplevel):
         self.cdp_url = cdp_url
         self.log = log or (lambda _message: None)
         self.autosave = autosave
-        self.local_sheets: list[str] = []
-        self.online_sheets: list[str] = []
+        self.local_sheets: list[str] = list(
+            dict.fromkeys(
+                region.source_sheet
+                for region in (initial.regions if initial else [])
+                if region.source_sheet
+            )
+        )
+        self.online_sheets: list[str] = list(
+            dict.fromkeys(
+                region.target_sheet
+                for region in (initial.regions if initial else [])
+                if region.target_sheet
+            )
+        )
         self.last_online_sheet_url = ""
         self.regions: list[RegionRow] = list(initial.regions) if initial else []
+        self._browser_read_lock = threading.Lock()
+        self._online_results: queue.Queue[
+            tuple[str, int, str, bool, dict[str, Any] | None, str | None]
+        ] = queue.Queue()
+        self._request_ids = {"source": 0, "target": 0}
+        self._pending_online_reads: dict[str, tuple[int, str]] = {}
+        self._online_poll_after_id: str | None = None
+        self._online_workers: set[threading.Thread] = set()
+        self._online_workers_lock = threading.Lock()
 
         default_url = initial.kdocs_url if initial else (self.recent_urls[0] if self.recent_urls else "")
         default_source_url = initial.source_url if initial else ""
@@ -1121,11 +1422,18 @@ class DocumentConfigDialog(tk.Toplevel):
         self.local_file = tk.StringVar(value=initial.local_file if initial else "")
         self.source_doc_title = tk.StringVar(value="")
         self.target_doc_title = tk.StringVar(value="")
+        cached_sheet_count = len(self.online_sheets)
+        cached_status = (
+            f"Using {cached_sheet_count} sheet name(s) from the saved config; "
+            "refresh online only if the document changed."
+            if cached_sheet_count
+            else ""
+        )
+        self.read_status = tk.StringVar(value=cached_status)
 
         self.create_widgets()
-        self.refresh_local_sheets(show_errors=False)
-        if self.kdocs_url.get().strip():
-            self.refresh_online_sheets(auto=True)
+        if self.source_type.get() == "excel":
+            self.refresh_local_sheets(show_errors=False)
 
         self.transient(parent)
         self.grab_set()
@@ -1154,18 +1462,18 @@ class DocumentConfigDialog(tk.Toplevel):
         ttk.Label(docs, text="Source KDocs URL").grid(row=2, column=0, padx=8, pady=6, sticky="w")
         source_url_combo = ttk.Combobox(docs, textvariable=self.source_url, values=self.recent_urls)
         source_url_combo.grid(row=2, column=1, padx=8, pady=6, sticky="ew")
-        source_url_combo.bind("<<ComboboxSelected>>", lambda _event: self.refresh_local_sheets(show_errors=False))
-        source_url_combo.bind("<FocusOut>", lambda _event: self.refresh_local_sheets(show_errors=False))
-        source_url_combo.bind("<Return>", lambda _event: self.refresh_local_sheets(show_errors=False))
-        ttk.Button(docs, text="Refresh source sheets", command=self.refresh_local_sheets).grid(row=2, column=2, padx=8, pady=6)
+        self.refresh_source_button = ttk.Button(
+            docs, text="Refresh source sheets", command=self.refresh_local_sheets
+        )
+        self.refresh_source_button.grid(row=2, column=2, padx=8, pady=6)
 
         ttk.Label(docs, text="Target KDocs URL").grid(row=3, column=0, padx=8, pady=6, sticky="w")
         url_combo = ttk.Combobox(docs, textvariable=self.kdocs_url, values=self.recent_urls)
         url_combo.grid(row=3, column=1, padx=8, pady=6, sticky="ew")
-        url_combo.bind("<<ComboboxSelected>>", lambda _event: self.refresh_online_sheets(auto=True))
-        url_combo.bind("<FocusOut>", lambda _event: self.refresh_online_sheets(auto=True))
-        url_combo.bind("<Return>", lambda _event: self.refresh_online_sheets(auto=True))
-        ttk.Button(docs, text="Refresh target sheets", command=self.refresh_online_sheets).grid(row=3, column=2, padx=8, pady=6)
+        self.refresh_target_button = ttk.Button(
+            docs, text="Refresh target sheets", command=self.refresh_online_sheets
+        )
+        self.refresh_target_button.grid(row=3, column=2, padx=8, pady=6)
 
         ttk.Label(docs, text="Source document").grid(row=4, column=0, padx=8, pady=6, sticky="w")
         ttk.Entry(docs, textvariable=self.source_doc_title, state="readonly").grid(row=4, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
@@ -1179,6 +1487,9 @@ class DocumentConfigDialog(tk.Toplevel):
         file_buttons.grid(row=6, column=2, padx=8, pady=6)
         ttk.Button(file_buttons, text="Browse", command=self.browse_local_file).pack(side="left")
         ttk.Button(file_buttons, text="Refresh sheets", command=self.refresh_local_sheets).pack(side="left", padx=(6, 0))
+        ttk.Label(docs, textvariable=self.read_status, style="Muted.TLabel").grid(
+            row=7, column=0, columnspan=3, padx=8, pady=(0, 6), sticky="w"
+        )
         docs.columnconfigure(1, weight=1)
 
         regions_frame = ttk.LabelFrame(root, text="Regions")
@@ -1227,26 +1538,28 @@ class DocumentConfigDialog(tk.Toplevel):
             self.refresh_local_sheets(show_errors=True)
 
     def refresh_local_sheets(self, show_errors: bool = True) -> None:
+        if self.source_type.get() == "kdocs":
+            url = self.source_url.get().strip()
+            if not url:
+                self.local_sheets = []
+                self.source_doc_title.set("")
+                if show_errors:
+                    messagebox.showerror("Missing URL", "Source KDocs URL is required.", parent=self)
+                return
+            self._start_online_read("source", url, show_errors)
+            return
+
+        self._request_ids["source"] += 1
+        self._pending_online_reads.pop("source", None)
+        self.refresh_source_button.configure(state="normal")
         try:
-            if self.source_type.get() == "kdocs":
-                url = self.source_url.get().strip()
-                if not url:
-                    self.local_sheets = []
-                    self.source_doc_title.set("")
-                    if show_errors:
-                        messagebox.showerror("Missing URL", "Source KDocs URL is required.", parent=self)
-                    return
-                info = read_online_document_info(url, self.browser_mode, self.cdp_url, lambda _message: None)
-                self.local_sheets = info["sheets"]
-                self.source_doc_title.set(info.get("title") or "")
-            else:
-                path_text = self.local_file.get().strip()
-                if not path_text:
-                    self.local_sheets = []
-                    self.source_doc_title.set("")
-                    return
-                self.local_sheets = read_excel_sheet_names(Path(path_text).expanduser())
-                self.source_doc_title.set(Path(path_text).name)
+            path_text = self.local_file.get().strip()
+            if not path_text:
+                self.local_sheets = []
+                self.source_doc_title.set("")
+                return
+            self.local_sheets = read_excel_sheet_names(Path(path_text).expanduser())
+            self.source_doc_title.set(Path(path_text).name)
         except Exception as exc:
             self.local_sheets = []
             if show_errors:
@@ -1261,18 +1574,116 @@ class DocumentConfigDialog(tk.Toplevel):
             return
         if auto and url == self.last_online_sheet_url:
             return
-        try:
-            info = read_online_document_info(url, self.browser_mode, self.cdp_url, lambda _message: None)
-            self.online_sheets = info["sheets"]
-            self.target_doc_title.set(info.get("title") or "")
-        except Exception as exc:
-            self.online_sheets = []
-            self.target_doc_title.set("")
-            self.last_online_sheet_url = ""
-            if not auto:
-                messagebox.showerror("Read online sheets failed", str(exc), parent=self)
+        self._start_online_read("target", url, not auto)
+
+    def _start_online_read(self, kind: str, url: str, show_errors: bool) -> None:
+        pending = self._pending_online_reads.get(kind)
+        if pending is not None and pending[1] == url:
             return
-        self.last_online_sheet_url = url
+
+        self._request_ids[kind] += 1
+        request_id = self._request_ids[kind]
+        self._pending_online_reads[kind] = (request_id, url)
+        button = self.refresh_source_button if kind == "source" else self.refresh_target_button
+        button.configure(state="disabled")
+        if kind == "source":
+            self.source_doc_title.set("Loading...")
+        else:
+            self.target_doc_title.set("Loading...")
+        self.read_status.set("Reading WPS document in the browser; this window remains usable...")
+
+        # Keep the worker independent from this Toplevel. A browser read can outlive
+        # the dialog, and retaining ``self`` from that thread lets Tk variables be
+        # finalized off the main thread when the window has already been closed.
+        browser_read_lock = self._browser_read_lock
+        browser_mode = self.browser_mode
+        cdp_url = self.cdp_url
+        log = self.log
+        online_results = self._online_results
+        online_workers = self._online_workers
+        online_workers_lock = self._online_workers_lock
+
+        def worker() -> None:
+            info: dict[str, Any] | None = None
+            error: str | None = None
+            try:
+                # A persistent Playwright profile cannot be opened twice at once.
+                with browser_read_lock:
+                    info = read_online_document_info(
+                        url, browser_mode, cdp_url, log
+                    )
+            except Exception as exc:
+                error = str(exc)
+            finally:
+                online_results.put(
+                    (kind, request_id, url, show_errors, info, error)
+                )
+                with online_workers_lock:
+                    online_workers.discard(threading.current_thread())
+
+        thread = threading.Thread(target=worker, daemon=True)
+        with self._online_workers_lock:
+            self._online_workers.add(thread)
+        try:
+            thread.start()
+        except Exception:
+            with self._online_workers_lock:
+                self._online_workers.discard(thread)
+            raise
+        if self._online_poll_after_id is None:
+            self._online_poll_after_id = self.after(50, self._drain_online_results)
+
+    def destroy(self) -> None:
+        if self._online_poll_after_id is not None:
+            try:
+                self.after_cancel(self._online_poll_after_id)
+            except tk.TclError:
+                pass
+            self._online_poll_after_id = None
+        self._pending_online_reads.clear()
+        super().destroy()
+
+    def _drain_online_results(self) -> None:
+        self._online_poll_after_id = None
+        while True:
+            try:
+                kind, request_id, url, show_errors, info, error = self._online_results.get_nowait()
+            except queue.Empty:
+                break
+            if request_id != self._request_ids[kind]:
+                continue
+
+            self._pending_online_reads.pop(kind, None)
+            button = self.refresh_source_button if kind == "source" else self.refresh_target_button
+            button.configure(state="normal")
+            if error is not None:
+                if kind == "source":
+                    self.local_sheets = []
+                    self.source_doc_title.set("")
+                    title = "Read source sheets failed"
+                else:
+                    self.online_sheets = []
+                    self.target_doc_title.set("")
+                    self.last_online_sheet_url = ""
+                    title = "Read online sheets failed"
+                self.read_status.set("WPS document read failed; use Refresh to try again.")
+                if show_errors:
+                    messagebox.showerror(title, error, parent=self)
+                continue
+
+            sheets = list((info or {}).get("sheets") or [])
+            document_title = str((info or {}).get("title") or "")
+            if kind == "source":
+                self.local_sheets = sheets
+                self.source_doc_title.set(document_title)
+            else:
+                self.online_sheets = sheets
+                self.target_doc_title.set(document_title)
+                self.last_online_sheet_url = url
+            self.read_status.set(f"Loaded {len(sheets)} sheet(s) from WPS.")
+
+        if self._pending_online_reads:
+            self._online_poll_after_id = self.after(50, self._drain_online_results)
 
     def add_region(self) -> None:
         dialog = RegionDialog(self, "Add region", local_sheets=self.local_sheets, online_sheets=self.online_sheets)
@@ -1415,18 +1826,22 @@ class DocumentConfigDialog(tk.Toplevel):
 
 
 class WpsWriterFrame(ttk.Frame):
-    def __init__(self, parent: tk.Misc) -> None:
+    def __init__(self, parent: tk.Misc, task_registry: Any | None = None) -> None:
         super().__init__(parent)
+        self.task_registry = task_registry
         self.log_queue: queue.Queue[str] = queue.Queue()
+        self.browser_event_queue: queue.Queue[tuple[bool, str]] = queue.Queue()
         self.worker: threading.Thread | None = None
+        self.browser_worker: threading.Thread | None = None
         self.configs: list[DocumentConfig] = []
         self.log_window: tk.Toplevel | None = None
         self.log_window_text: tk.Text | None = None
         self._drain_after_id: str | None = None
 
         self.recent_urls: list[str] = []
-        self.browser_mode = tk.StringVar(master=self, value="persistent")
+        self.browser_mode = tk.StringVar(master=self, value="managed_cdp")
         self.cdp_url = tk.StringVar(master=self, value="http://127.0.0.1:9222")
+        self.browser_status = tk.StringVar(master=self, value="Dedicated WPS Chrome not checked")
 
         self.create_widgets()
         self.load_initial_config()
@@ -1436,7 +1851,7 @@ class WpsWriterFrame(ttk.Frame):
         root = ttk.Frame(self, padding=10)
         root.pack(fill="both", expand=True)
         root.columnconfigure(0, weight=1)
-        root.rowconfigure(1, weight=3, minsize=DOCUMENT_CONFIGS_MIN_HEIGHT)
+        root.rowconfigure(1, weight=4, minsize=DOCUMENT_CONFIGS_MIN_HEIGHT)
         root.rowconfigure(2, weight=1)
 
         file_frame = ttk.LabelFrame(root, text="Browser")
@@ -1447,10 +1862,16 @@ class WpsWriterFrame(ttk.Frame):
         mode_frame.grid(row=0, column=1, padx=8, pady=8, sticky="ew")
         ttk.Radiobutton(
             mode_frame,
-            text="Dedicated WPS profile",
+            text="Dedicated WPS Chrome (recommended)",
+            variable=self.browser_mode,
+            value="managed_cdp",
+        ).pack(side="left")
+        ttk.Radiobutton(
+            mode_frame,
+            text="One-time browser",
             variable=self.browser_mode,
             value="persistent",
-        ).pack(side="left")
+        ).pack(side="left", padx=(16, 0))
         ttk.Radiobutton(
             mode_frame,
             text="Existing Chrome CDP",
@@ -1460,6 +1881,23 @@ class WpsWriterFrame(ttk.Frame):
 
         ttk.Label(file_frame, text="CDP URL").grid(row=1, column=0, padx=8, pady=8, sticky="w")
         ttk.Entry(file_frame, textvariable=self.cdp_url).grid(row=1, column=1, padx=8, pady=8, sticky="ew")
+        browser_actions = ttk.Frame(file_frame)
+        browser_actions.grid(row=2, column=1, padx=8, pady=(0, 8), sticky="ew")
+        self.start_browser_button = ttk.Button(
+            browser_actions,
+            text="Start/open dedicated Chrome",
+            command=self.start_wps_browser,
+        )
+        self.start_browser_button.pack(side="left")
+        self.check_browser_button = ttk.Button(
+            browser_actions,
+            text="Check status",
+            command=self.check_wps_browser,
+        )
+        self.check_browser_button.pack(side="left", padx=(8, 0))
+        ttk.Label(browser_actions, textvariable=self.browser_status, style="Muted.TLabel").pack(
+            side="left", padx=(12, 0)
+        )
         file_frame.columnconfigure(1, weight=1)
 
         mapping_frame = ttk.LabelFrame(root, text="Document configs")
@@ -1470,38 +1908,41 @@ class WpsWriterFrame(ttk.Frame):
         self.mapping_toolbar.columnconfigure(0, weight=1)
 
         self.mapping_primary_toolbar = ttk.Frame(self.mapping_toolbar)
-        self.mapping_primary_toolbar.grid(row=0, column=0, sticky="ew")
+        self.mapping_primary_toolbar.grid(row=0, column=0, sticky="w")
         primary_actions = [
             ("Add config", self.add_config),
             ("Edit", self.edit_config),
             ("Copy", self.copy_config),
             ("Remove", self.remove_config),
-            ("Move up", self.move_config_up),
-            ("Move down", self.move_config_down),
         ]
         for column, (text, command) in enumerate(primary_actions):
-            self.mapping_primary_toolbar.columnconfigure(column, weight=1, uniform="config-action")
             ttk.Button(
                 self.mapping_primary_toolbar,
                 text=text,
                 command=command,
-            ).grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 2, 0))
+            ).grid(row=0, column=column, padx=(0 if column == 0 else 4, 0))
+
+        self.mapping_sort_toolbar = ttk.Frame(self.mapping_toolbar)
+        self.mapping_sort_toolbar.grid(
+            row=1, column=1, sticky="e", padx=(12, 0), pady=(6, 0)
+        )
+        ttk.Button(
+            self.mapping_sort_toolbar, text="Move up", command=self.move_config_up
+        ).pack(side="left")
+        ttk.Button(
+            self.mapping_sort_toolbar, text="Move down", command=self.move_config_down
+        ).pack(side="left", padx=(4, 0))
 
         self.mapping_secondary_toolbar = ttk.Frame(self.mapping_toolbar)
-        self.mapping_secondary_toolbar.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-        self.mapping_secondary_toolbar.columnconfigure(2, weight=1)
+        self.mapping_secondary_toolbar.grid(
+            row=1, column=0, sticky="w", pady=(6, 0)
+        )
         ttk.Button(
             self.mapping_secondary_toolbar, text="Import", command=self.import_config
-        ).grid(row=0, column=0, sticky="w")
+        ).pack(side="left")
         ttk.Button(
             self.mapping_secondary_toolbar, text="Export", command=self.export_config
-        ).grid(row=0, column=1, sticky="w", padx=(4, 0))
-        ttk.Button(
-            self.mapping_secondary_toolbar, text="Preview", command=self.preview
-        ).grid(row=0, column=3, sticky="e", padx=(4, 0))
-        ttk.Button(
-            self.mapping_secondary_toolbar, text="Write to WPS", command=self.write
-        ).grid(row=0, column=4, sticky="e", padx=(4, 0))
+        ).pack(side="left", padx=(4, 0))
 
         tree_frame = ttk.Frame(mapping_frame)
         tree_frame.pack(fill="both", expand=True, padx=8, pady=8)
@@ -1526,17 +1967,35 @@ class WpsWriterFrame(ttk.Frame):
         scrollbar.pack(side="left", fill="y")
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.bind("<Double-1>", lambda _event: self.edit_config())
+        self.tree.bind("<<TreeviewSelect>>", lambda _event: self.update_selection_status())
 
-        log_frame = ttk.LabelFrame(root, text="Log")
-        log_frame.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
-        log_actions = ttk.Frame(log_frame)
+        self.execution_toolbar = ttk.Frame(mapping_frame)
+        self.execution_toolbar.pack(fill="x", padx=8, pady=(0, 8))
+        self.selection_status = tk.StringVar(value="Select a config to preview or write.")
+        ttk.Label(
+            self.execution_toolbar,
+            textvariable=self.selection_status,
+            style="Muted.TLabel",
+        ).pack(side="left")
+        ttk.Button(
+            self.execution_toolbar, text="Write to WPS", command=self.write
+        ).pack(side="right")
+        ttk.Button(
+            self.execution_toolbar, text="Preview", command=self.preview
+        ).pack(side="right", padx=(0, 6))
+
+        self.module_log_frame = ttk.LabelFrame(root, text="WPS operation log")
+        self.module_log_frame.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
+        log_actions = ttk.Frame(self.module_log_frame)
         log_actions.pack(fill="x", padx=8, pady=(8, 0))
         ttk.Button(log_actions, text="Clear log", command=self.clear_log).pack(side="left")
         ttk.Button(log_actions, text="Save log", command=self.save_log).pack(side="left", padx=8)
         ttk.Button(log_actions, text="Open log window", command=self.open_log_window).pack(side="left")
-        self.log_text = tk.Text(log_frame, height=14, wrap="word")
+        self.log_text = tk.Text(self.module_log_frame, height=8, wrap="word")
         self.log_text.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
-        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
+        log_scroll = ttk.Scrollbar(
+            self.module_log_frame, orient="vertical", command=self.log_text.yview
+        )
         log_scroll.pack(side="left", fill="y", pady=8)
         self.log_text.configure(yscrollcommand=log_scroll.set)
 
@@ -1560,6 +2019,9 @@ class WpsWriterFrame(ttk.Frame):
         if not selected:
             return
         index = self.tree.index(selected[0])
+        # Start (or reuse) the managed browser in parallel while the config
+        # dialog opens, and preload this config's target document.
+        self.start_wps_browser(initial_url=self.configs[index].kdocs_url)
 
         def autosave(config: DocumentConfig) -> None:
             self.configs[index] = config
@@ -1664,10 +2126,21 @@ class WpsWriterFrame(ttk.Frame):
         children = self.tree.get_children()
         items = [children[index] for index in sorted(set(indexes)) if 0 <= index < len(children)]
         if not items:
+            self.update_selection_status()
             return
         self.tree.selection_set(items)
         self.tree.focus(items[0])
         self.tree.see(items[0])
+        self.update_selection_status()
+
+    def update_selection_status(self) -> None:
+        indexes = self.selected_config_indexes()
+        if not indexes:
+            self.selection_status.set("Select a config to preview or write.")
+        elif len(indexes) == 1:
+            self.selection_status.set(f"Selected: {self.configs[indexes[0]].name}")
+        else:
+            self.selection_status.set(f"{len(indexes)} configs selected.")
 
     def refresh_tree(self) -> None:
         for item in self.tree.get_children():
@@ -1698,10 +2171,81 @@ class WpsWriterFrame(ttk.Frame):
                     summary,
                 ),
             )
+        self.update_selection_status()
 
     def log(self, message: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_queue.put(f"[{timestamp}] {message}")
+
+    def start_wps_browser(self, initial_url: str | None = None) -> None:
+        self.browser_mode.set("managed_cdp")
+        self.save_current_config()
+        self._run_browser_action(start=True, initial_url=initial_url)
+
+    def check_wps_browser(self) -> None:
+        self._run_browser_action(start=False)
+
+    def _run_browser_action(
+        self, *, start: bool, initial_url: str | None = None
+    ) -> None:
+        if self.browser_worker and self.browser_worker.is_alive():
+            return
+        self.start_browser_button.configure(state="disabled")
+        self.check_browser_button.configure(state="disabled")
+        self.browser_status.set("Starting..." if start else "Checking...")
+        cdp_url = self.cdp_url.get().strip()
+
+        def worker() -> None:
+            try:
+                if start:
+                    result = ensure_wps_dedicated_chrome(
+                        cdp_url,
+                        self.log,
+                        initial_url=initial_url or "https://www.kdocs.cn/",
+                        preload_url=bool(initial_url),
+                    )
+                    action = "started" if result.get("started") else "reused"
+                    message = f"Dedicated WPS Chrome ready ({action})"
+                else:
+                    endpoint = try_resolve_cdp_endpoint(cdp_url)
+                    if not endpoint:
+                        raise RuntimeError("Dedicated WPS Chrome is not running")
+                    message = "Dedicated WPS Chrome is running and reachable"
+                self.browser_event_queue.put((True, message))
+            except Exception as exc:
+                self.browser_event_queue.put((False, str(exc)))
+
+        self.browser_worker = self._start_tracked_thread(
+            worker,
+            name="wps-browser-start" if start else "wps-browser-check",
+        )
+
+    def _start_tracked_thread(
+        self,
+        target,
+        *,
+        args: tuple[Any, ...] = (),
+        name: str,
+    ) -> threading.Thread:
+        thread: threading.Thread
+
+        def tracked_target() -> None:
+            try:
+                target(*args)
+            finally:
+                if self.task_registry is not None:
+                    self.task_registry.unregister_thread(thread)
+
+        thread = threading.Thread(target=tracked_target, name=name, daemon=True)
+        if self.task_registry is not None:
+            self.task_registry.register_thread(thread)
+        try:
+            thread.start()
+        except BaseException:
+            if self.task_registry is not None:
+                self.task_registry.unregister_thread(thread)
+            raise
+        return thread
 
     def detail_log(self, message: str) -> None:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -1724,6 +2268,15 @@ class WpsWriterFrame(ttk.Frame):
             )
 
     def drain_logs(self) -> None:
+        while True:
+            try:
+                success, status = self.browser_event_queue.get_nowait()
+            except queue.Empty:
+                break
+            self.browser_status.set(status)
+            self.start_browser_button.configure(state="normal")
+            self.check_browser_button.configure(state="normal")
+            self.log(("Browser ready: " if success else "Browser error: ") + status)
         while True:
             try:
                 message = self.log_queue.get_nowait()
@@ -1811,7 +2364,10 @@ class WpsWriterFrame(ttk.Frame):
         self.recent_urls = [url for url in config.get("recent_urls", []) if isinstance(url, str) and url.strip()]
         if config.get("kdocs_url"):
             self.recent_urls = update_recent_urls(self.recent_urls, config["kdocs_url"])
-        self.browser_mode.set(config.get("browser_mode", "persistent"))
+        saved_browser_mode = config.get("browser_mode", "managed_cdp")
+        if saved_browser_mode == "persistent" and sys.platform == "darwin":
+            saved_browser_mode = "managed_cdp"
+        self.browser_mode.set(saved_browser_mode)
         self.cdp_url.set(config.get("cdp_url", "http://127.0.0.1:9222"))
         default_url = config.get("kdocs_url", "")
         default_file = config.get("excel_path", "")
@@ -2043,12 +2599,11 @@ class WpsWriterFrame(ttk.Frame):
 
         self.save_current_config()
         self.detail_log_prepared("WRITE PREPARED", prepared)
-        self.worker = threading.Thread(
-            target=self.write_worker,
+        self.worker = self._start_tracked_thread(
+            self.write_worker,
             args=(prepared, self.browser_mode.get(), self.cdp_url.get().strip()),
-            daemon=True,
+            name="wps-write",
         )
-        self.worker.start()
 
     def write_worker(self, prepared: list[PreparedMapping], browser_mode: str, cdp_url: str) -> None:
         try:
@@ -2104,5 +2659,14 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+    if "--launch-browser" in sys.argv:
+        launch_result = ensure_wps_dedicated_chrome(
+            "http://127.0.0.1:9222", print
+        )
+        print(
+            "WPS dedicated Chrome is ready "
+            f"({'started' if launch_result.get('started') else 'already running'})."
+        )
+    else:
+        app = App()
+        app.mainloop()

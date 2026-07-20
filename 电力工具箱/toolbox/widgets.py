@@ -63,20 +63,20 @@ class ToolPage(ttk.Frame):
         self.content.grid(row=2, column=0, sticky="nsew")
         self.content.columnconfigure(0, weight=1)
 
-        footer = ttk.Frame(self)
-        footer.grid(row=3, column=0, sticky="ew", pady=(12, 0))
-        footer.columnconfigure(0, weight=1)
-        self.progress = ttk.Progressbar(footer, mode="indeterminate")
+        self.footer = ttk.Frame(self)
+        self.footer.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        self.footer.columnconfigure(0, weight=1)
+        self.progress = ttk.Progressbar(self.footer, mode="indeterminate")
         self.progress.grid(row=0, column=0, sticky="ew")
         self.cancel_button = ttk.Button(
-            footer, text="取消任务", command=self.cancel_current_task, state="disabled"
+            self.footer, text="取消任务", command=self.cancel_current_task, state="disabled"
         )
         self.cancel_button.grid(row=0, column=1, padx=(8, 0))
-        ttk.Label(footer, textvariable=self.status_var).grid(
+        ttk.Label(self.footer, textvariable=self.status_var).grid(
             row=1, column=0, sticky="w", pady=(5, 0)
         )
 
-        log_frame = ttk.LabelFrame(footer, text="运行日志", padding=8)
+        log_frame = ttk.LabelFrame(self.footer, text="运行日志", padding=8)
         log_frame.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
@@ -94,6 +94,13 @@ class ToolPage(ttk.Frame):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=scrollbar.set)
         self._schedule_poll()
+
+    def set_task_console_visible(self, visible: bool) -> None:
+        """Show or hide this module's generic task controls and log console."""
+        if visible:
+            self.footer.grid()
+        else:
+            self.footer.grid_remove()
 
     def register_busy_widgets(self, *widgets: tk.Widget) -> None:
         self._busy_widgets.extend(widgets)

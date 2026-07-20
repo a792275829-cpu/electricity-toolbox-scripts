@@ -38,7 +38,11 @@ if [[ -f "$uploader_dir/package.json" ]]; then
   fi
 fi
 
-chmod +x "$launcher_dir/电力工具箱.command" "$launcher_dir/00_启动/电力工具箱.command" 2>/dev/null || true
+chmod +x \
+  "$launcher_dir/电力工具箱.command" \
+  "$launcher_dir/00_启动/电力工具箱.command" \
+  "$launcher_dir/wps自动/启动WPS专用Chrome.command" \
+  2>/dev/null || true
 
 print -r -- ""
 print -r -- "Setup complete. You can launch the toolbox with: ./电力工具箱.command"

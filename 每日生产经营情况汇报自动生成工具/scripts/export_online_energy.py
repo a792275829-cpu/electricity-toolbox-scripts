@@ -106,6 +106,42 @@ def parse_json_response(response, label: str) -> dict[str, Any]:
     return data
 
 
+def request_json_with_retry(
+    context,
+    method: str,
+    url: str,
+    label: str,
+    *,
+    attempts: int = 3,
+    retry_delay_seconds: float = 2.0,
+    timeout: float = 60000,
+    **request_kwargs: Any,
+) -> dict[str, Any]:
+    """Run a JSON API request, retrying Playwright network/read failures.
+
+    Playwright may raise while reading ``response.text()`` even after the server
+    has returned HTTP 200 (for example, a slow gzip/chunked response).  Keep the
+    request and body parsing in the same retry boundary so that case is covered.
+    """
+    if attempts < 1:
+        raise ValueError("attempts 必须大于等于 1")
+
+    last_error: PlaywrightError | None = None
+    request_method = getattr(context.request, method.lower())
+    for attempt in range(1, attempts + 1):
+        try:
+            response = request_method(url, timeout=timeout, **request_kwargs)
+            return parse_json_response(response, label)
+        except (PlaywrightTimeoutError, PlaywrightError) as exc:
+            last_error = exc
+            if attempt < attempts:
+                log(f"{label}网络超时/连接失败，准备重试（{attempt}/{attempts}）")
+                if retry_delay_seconds > 0:
+                    time.sleep(retry_delay_seconds)
+
+    raise RuntimeError(f"{label}网络请求失败，已重试 {attempts} 次，请稍后再试") from last_error
+
+
 def json_or_text(response) -> Any:
     text = response.text()
     try:

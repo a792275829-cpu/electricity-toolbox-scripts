@@ -19,7 +19,7 @@ from export_online_energy import (
     interactive_login,
     launch_context,
     load_config,
-    parse_json_response,
+    request_json_with_retry,
     switch_company,
     validate_date,
 )
@@ -179,16 +179,18 @@ def fetch_rolling_forecast(
     unit_name: str,
 ) -> dict[str, Any]:
     switch_company(context, org_id)
-    response = context.request.post(
+    data = request_json_with_retry(
+        context,
+        "post",
         f"{BASE_URL}/gdfire/api/data/personal/newEnergy/basic/query/v1",
+        f"读取多日滚动预测 {selected_date}",
         data={
             "runDate": selected_date,
             "orgIds": [org_id],
             "unitIds": [unit_id],
         },
-        timeout=30000,
+        timeout=60000,
     )
-    data = parse_json_response(response, f"读取多日滚动预测 {selected_date}")
     raw_rows = data.get("data") or []
     if not isinstance(raw_rows, list):
         raise RuntimeError("多日滚动预测返回格式不正确")
@@ -220,17 +222,19 @@ def fetch_rolling_forecast(
 
 
 def fetch_capacity_summary(context, *, date_text: str, province_area_id: str) -> dict[str, Any]:
-    response = context.request.get(
+    payload = request_json_with_retry(
+        context,
+        "get",
         f"{BASE_URL}/gdfire/api/data/net/capacity",
+        f"读取容量信息 {date_text}",
         params={
             "startDate": date_text,
             "endDate": date_text,
             "type": DEFAULT_DATA_TYPE,
             "provinceAreaId": province_area_id,
         },
-        timeout=30000,
+        timeout=60000,
     )
-    payload = parse_json_response(response, f"读取容量信息 {date_text}")
     rows = payload.get("data", {}).get("dataNetCapacityDTOList") or []
     row = rows[0] if rows else {}
     capacity = number_or_none(row.get("capacity"))
@@ -245,17 +249,19 @@ def fetch_capacity_summary(context, *, date_text: str, province_area_id: str) ->
 
 
 def fetch_startup_count_summary(context, *, date_text: str, province_area_id: str) -> dict[str, Any]:
-    response = context.request.get(
+    payload = request_json_with_retry(
+        context,
+        "get",
         f"{BASE_URL}/gdfire/api/spot/market/info",
+        f"读取市场行情看板开机台数 {date_text}",
         params={
             "provinceAreaId": province_area_id,
             "timeSegment": POINT_TO_TIME_SEGMENT[DEFAULT_POINT],
             "startDate": date_text,
             "endDate": date_text,
         },
-        timeout=30000,
+        timeout=60000,
     )
-    payload = parse_json_response(response, f"读取市场行情看板开机台数 {date_text}")
     rows = payload.get("data", {}).get("dataApplyConfigDOList") or []
     row = next(
         (
@@ -316,17 +322,19 @@ def summarize_period(period: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def fetch_load_info_summary(context, *, date_text: str, province_area_id: str) -> dict[str, Any]:
-    response = context.request.get(
+    payload = request_json_with_retry(
+        context,
+        "get",
         f"{BASE_URL}/gdfire/api/data/net/load",
+        f"读取负荷信息 {date_text}",
         params={
             "startDate": date_text,
             "endDate": date_text,
             "provinceAreaId": province_area_id,
             "timeSegment": POINT_TO_TIME_SEGMENT[DEFAULT_POINT],
         },
-        timeout=30000,
+        timeout=60000,
     )
-    payload = parse_json_response(response, f"读取负荷信息 {date_text}")
     rows = payload.get("data", {}).get("dataNetLoadDTOList") or []
     by_type: dict[str, dict[str, Any]] = {}
     for row in rows:

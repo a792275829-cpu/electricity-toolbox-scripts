@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import gc
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tkinter as tk
 import unittest
@@ -655,13 +657,19 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(Path(python_executable()).resolve(), Path(sys.executable).resolve())
         self.assertEqual(Path(pythonw_executable()).resolve(), Path(sys.executable).resolve())
 
-    def test_node_executable_uses_plain_node_on_macos(self) -> None:
-        if sys.platform != "darwin":
-            self.skipTest("macOS-specific runtime expectation")
-
+    def test_node_executable_finds_local_node_on_macos(self) -> None:
         from toolbox.runtime import node_executable
 
-        self.assertEqual(node_executable(), "node")
+        with tempfile.TemporaryDirectory() as folder:
+            local_node = Path(folder) / ".local" / "bin" / "node"
+            local_node.parent.mkdir(parents=True)
+            local_node.touch(mode=0o755)
+            with (
+                mock.patch("toolbox.runtime.sys.platform", "darwin"),
+                mock.patch("toolbox.runtime.shutil.which", return_value=None),
+                mock.patch.dict(os.environ, {"HOME": folder}),
+            ):
+                self.assertEqual(node_executable(), str(local_node))
 
     def test_task_registry_tracks_and_terminates_owned_process(self) -> None:
         from toolbox.runtime import TaskRegistry
@@ -738,6 +746,43 @@ class ToolboxAppTests(unittest.TestCase):
         self.assertIn("第一条日志", page.log_text.get("1.0", "end"))
         self.assertTrue(page.busy)
         self.assertEqual(page.status_var.get(), "运行中")
+
+    def test_close_keeps_window_open_while_registered_write_thread_runs(self) -> None:
+        from toolbox.app import PAGE_NAMES, ToolboxApp
+
+        # Finalize Tk cycles left by earlier GUI tests on the main thread before
+        # this test deliberately starts a background thread.
+        gc.collect()
+        factories = {
+            name: (lambda parent, _paths, _registry: tk.Frame(parent))
+            for name in PAGE_NAMES
+        }
+        app = ToolboxApp(page_factories=factories, lazy_pages=True)
+        app.withdraw()
+        self.addCleanup(destroy_tk, app)
+        started = threading.Event()
+        release = threading.Event()
+
+        def worker() -> None:
+            started.set()
+            release.wait(timeout=5)
+
+        thread = threading.Thread(target=worker, name="wps-write", daemon=True)
+        app.registry.register_thread(thread)
+        thread.start()
+        self.assertTrue(started.wait(1))
+
+        with (
+            mock.patch("toolbox.app.messagebox.askyesno", return_value=True),
+            mock.patch("toolbox.app.messagebox.showwarning") as warning,
+        ):
+            app._on_close()
+
+        self.assertTrue(app.winfo_exists())
+        warning.assert_called_once()
+        release.set()
+        thread.join(timeout=2)
+        gc.collect()
 
 
 class PageAdapterTests(unittest.TestCase):
@@ -920,12 +965,28 @@ class PageAdapterTests(unittest.TestCase):
             ["--forecast-days", "2", "--training-months", "3"],
         )
 
+    def test_market_mapping_panel_is_complete_and_scrollable(self) -> None:
+        from toolbox.pages import MarketTableUpdatePage
+
+        page = MarketTableUpdatePage(self.root, self.paths, self.registry)
+        text = page.mapping_text.get("1.0", "end")
+
+        self.assertEqual(page.mapping_text.cget("state"), "disabled")
+        self.assertEqual(page.mapping_text.cget("wrap"), "word")
+        self.assertTrue(page.mapping_text.cget("yscrollcommand"))
+        self.assertTrue(page.mapping_scrollbar.cget("command"))
+        for index, description in enumerate(
+            page.MAPPING_DESCRIPTIONS, start=1
+        ):
+            self.assertIn(f"{index}. {description}", text)
+
     def test_wps_writer_page_embeds_writer_frame(self) -> None:
         from toolbox.pages import WpsWriterPage
 
         page = WpsWriterPage(self.root, self.paths, self.registry)
 
         self.assertTrue(hasattr(page, "writer_frame"))
+        self.assertIs(page.writer_frame.task_registry, self.registry)
         self.assertFalse(hasattr(page, "open_button"))
         self.assertFalse(hasattr(page, "build_open_command"))
 
