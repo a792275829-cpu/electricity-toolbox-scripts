@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import ssl
 import subprocess
+import sys
 import tempfile
 import urllib.parse
 import urllib.request
@@ -24,22 +25,24 @@ from openpyxl.utils import get_column_letter
 BASE_URL = "https://xhxt.chng.com.cn"
 PROVINCE_AREA_ID = "044"
 SCRIPT_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = SCRIPT_DIR / "config.json"
-SHARED_CONFIG_PATH = SCRIPT_DIR.parent / "上网电量抓取" / "config.json"
-DEFAULT_MASTER_WORKBOOK = SCRIPT_DIR / "输出" / "广东电价数据总表.xlsx"
-DEFAULT_BASE_WORKBOOK = (
-    Path.home() / "Downloads" / "广东数据" / "广东数据整合_20240101至20260625.xlsx"
-)
+if str(SCRIPT_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR.parent))
+from toolbox_credentials import read_login_config
+from toolbox_dates import normalize_date_input
+
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from gd_price_forecast.paths import DEFAULT_BASE_WORKBOOK, DEFAULT_MASTER_WORKBOOK, resolve_module_path, resolve_paths
+
+from toolbox_storage import data_path
+
+CONFIG_PATH = data_path(SCRIPT_DIR / "config.json")
+SHARED_CONFIG_PATH = data_path(SCRIPT_DIR.parent / "上网电量抓取" / "config.json")
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict[str, object]:
     selected = path if path.is_file() else SHARED_CONFIG_PATH
-    if not selected.is_file():
-        raise FileNotFoundError(
-            f"找不到配置文件：{path} 或 {SHARED_CONFIG_PATH}。"
-            "请从 config.example.json 复制并填写账号密码。"
-        )
-    config = json.loads(selected.read_text(encoding="utf-8"))
+    config = read_login_config(path, SHARED_CONFIG_PATH, workspace=SHARED_CONFIG_PATH.parent.parent)
     if not str(config.get("username") or "").strip() or not str(
         config.get("password") or ""
     ):
@@ -311,17 +314,14 @@ def deduplicate_columns(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[tuple[s
     return cleaned, duplicates
 
 
-def align_to_base_schema(base_path: Path, frame: pd.DataFrame) -> pd.DataFrame:
-    """Use the existing integrated workbook's columns and order as the contract."""
-    base = read_data_workbook(base_path).iloc[:0]
-    base, _ = deduplicate_columns(base)
-    removed_columns = ["日前风电(MW)", "日前光伏(MW)", "日前火电(MW)", "日前水电(MW)"]
-    columns = [column for column in base.columns if column not in removed_columns]
-    return frame.drop(columns=removed_columns, errors="ignore").reindex(columns=columns)
-
-
 def merge_with_base(base_path: Path, increment: pd.DataFrame) -> pd.DataFrame:
-    base = read_data_workbook(base_path)
+    return merge_data_frames(read_data_workbook(base_path), increment)
+
+
+def merge_data_frames(base: pd.DataFrame, increment: pd.DataFrame) -> pd.DataFrame:
+    """Merge existing data without serializing it through a temporary workbook."""
+    base = base.copy()
+    increment = increment.copy()
     removed_columns = ["日前风电(MW)", "日前光伏(MW)", "日前火电(MW)", "日前水电(MW)"]
     base = base.drop(columns=removed_columns, errors="ignore")
     increment = increment.drop(columns=removed_columns, errors="ignore")
@@ -446,99 +446,21 @@ def build_modeling_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return result.drop(columns=empty)
 
 
-def run_update(
-    *,
-    username: str,
-    password: str,
-    start_date: str,
-    end_date: str,
-    base_workbook: Path,
-    output_dir: Path,
-) -> dict[str, Path]:
-    client = GDFireClient()
-    client.login(username, password)
-
-    common = {
-        "startDate": start_date,
-        "endDate": end_date,
-        "provinceAreaId": PROVINCE_AREA_ID,
-    }
-    load_payload = client.get("/gdfire/api/data/net/load", common)
-    price_payload = client.get(
-        "/gdfire/api/data/price/avg/node/price",
-        {"startDate": start_date, "endDate": end_date},
-    )
-    overhaul_payload = client.get(
-        "/gdfire/api/unit/overhaulInfo",
-        {"startDate": start_date, "endDate": end_date},
-    )
-
-    raw_dir = output_dir / "raw"
-    save_json(raw_dir / "load.json", load_payload)
-    save_json(raw_dir / "price.json", price_payload)
-    save_json(raw_dir / "unit_overhaul.json", overhaul_payload)
-
-    increment = build_increment(start_date, end_date, load_payload, price_payload)
-    increment = align_to_base_schema(base_workbook, increment)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    increment_path = output_dir / (
-        f"广东接口增量数据_{start_date.replace('-', '')}至"
-        f"{end_date.replace('-', '')}.xlsx"
-    )
-    write_large_xlsx(
-        increment,
-        increment_path,
-        "Sheet1",
-        format_source=base_workbook,
-    )
-
-    merged = merge_with_base(base_workbook, increment)
-    max_date = merged["日期"].max().strftime("%Y%m%d")
-    merged_path = output_dir / f"广东数据整合_更新至{max_date}.xlsx"
-    write_large_xlsx(
-        merged,
-        merged_path,
-        "整合数据",
-        format_source=base_workbook,
-    )
-
-    modeling_path = output_dir / f"广东数据建模清洗_更新至{max_date}.xlsx"
-    write_large_xlsx(
-        build_modeling_frame(merged),
-        modeling_path,
-        "Sheet1",
-        format_source=base_workbook,
-    )
-
-    overhaul = pd.DataFrame(overhaul_payload["data"])
-    overhaul_path = output_dir / (
-        f"机组检修信息_{start_date.replace('-', '')}至"
-        f"{end_date.replace('-', '')}.xlsx"
-    )
-    overhaul.to_excel(overhaul_path, index=False, sheet_name="机组检修")
-    return {
-        "increment": increment_path.resolve(),
-        "merged": merged_path.resolve(),
-        "modeling": modeling_path.resolve(),
-        "overhaul": overhaul_path.resolve(),
-        "raw": raw_dir.resolve(),
-    }
-
-
 def update_master_workbook(
     *,
     run_date: str | None = None,
     config_path: Path = CONFIG_PATH,
+    master_workbook: Path | None = None,
 ) -> dict[str, object]:
     """Fill missing dates through D into one persistent master workbook."""
     config = load_config(config_path)
-    master_path = Path(
-        str(config.get("masterWorkbook") or DEFAULT_MASTER_WORKBOOK)
-    ).expanduser()
-    if not master_path.is_absolute():
-        master_path = SCRIPT_DIR / master_path
-    base_path = Path(str(config.get("initialWorkbook") or DEFAULT_BASE_WORKBOOK)).expanduser()
-    end_date = run_date or date.today().isoformat()
+    paths = resolve_paths(SCRIPT_DIR, config_path)
+    master_path = (
+        resolve_module_path(master_workbook, SCRIPT_DIR)
+        if master_workbook is not None else paths["masterWorkbook"]
+    )
+    base_path = paths["initialWorkbook"]
+    end_date = normalize_date_input(run_date) if run_date is not None else date.today().isoformat()
 
     if master_path.is_file():
         current = read_data_workbook(master_path)
@@ -561,7 +483,7 @@ def update_master_workbook(
         }
 
     # One API interval keeps the update path simple. Existing values survive because
-    # merge_with_base takes the latest non-empty value per field.
+    # merge_data_frames takes the latest non-empty value per field.
     start = min(gaps).isoformat()
     end = max(gaps).isoformat()
     client = GDFireClient()
@@ -575,13 +497,8 @@ def update_master_workbook(
     increment = build_increment(start, end, load_payload, price_payload)
     increment = increment.reindex(columns=current.columns)
 
-    temporary_base = master_path.with_suffix(".base.xlsx")
-    write_large_xlsx(current, temporary_base, "整合数据")
-    try:
-        merged = merge_with_base(temporary_base, increment)
-    finally:
-        temporary_base.unlink(missing_ok=True)
-    write_large_xlsx(merged, master_path, "整合数据")
+    merged = merge_data_frames(current, increment)
+    write_large_xlsx(merged, master_path, "整合数据", format_source=master_path)
     remaining = missing_dates(merged, end_date)
     return {
         "master": master_path.resolve(),
@@ -595,10 +512,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="补齐广东电价数据总表")
     parser.add_argument("--date", help="运行日 D，默认今天，格式 YYYY-MM-DD")
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
+    parser.add_argument("--master-workbook", type=Path, help="指定数据总表，覆盖模块配置")
     args = parser.parse_args()
     print(
         json.dumps(
-            update_master_workbook(run_date=args.date, config_path=args.config),
+            update_master_workbook(
+                run_date=args.date, config_path=args.config, master_workbook=args.master_workbook
+            ),
             ensure_ascii=False,
             indent=2,
             default=str,

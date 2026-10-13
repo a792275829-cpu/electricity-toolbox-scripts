@@ -11,6 +11,7 @@ from src.build_500kv_map_html import (
     SVG_W,
     _build_diagram_coordinates,
     _build_edge_payloads,
+    _build_flow_directions,
     _parse_node_regions,
     build_map_html,
 )
@@ -127,6 +128,8 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertIn('"processed_rows": 2', html)
             self.assertIn('"severity_basis": "intervals_and_max_abs_diff"', html)
             self.assertIn('"min_section_intervals": 4', html)
+            self.assertIn('"section_interval_basis": "daily_accumulated"', html)
+            self.assertIn('按累计时点', html)
             self.assertIn('累计时点更多、价差更大', html)
             self.assertNotIn('原始数据行数：', html)
             self.assertNotIn('处理后500kV行数：', html)
@@ -138,7 +141,7 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertIn("event.ctrlKey || event.metaKey", html)
             self.assertIn("mapSvg.addEventListener('gesturechange'", html)
             self.assertIn('touch-action: none', html)
-            self.assertIn("event.target.closest?.('.node-group, .edge, .edge-hit')", html)
+            self.assertIn("event.target.closest?.('.node-group, .edge, .edge-hit, .flow-arrow')", html)
             self.assertIn('Math.hypot(moveX, moveY) < 4', html)
             self.assertIn('const shouldClearSelection = !drag.moved;', html)
             self.assertIn('if (shouldClearSelection) clearSelection();', html)
@@ -152,7 +155,7 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertIn('完整拓扑线路，未触发断面判定；以下显示两端节点电价。', html)
             self.assertIn("document.getElementById('chartTitle').textContent = `${edge.a} / ${edge.b} 24小时节点电价曲线`;", html)
             self.assertIn("const command = drawing ? 'L' : 'M';", html)
-            self.assertIn("bindLayerToggle('toggleTopology', '.edge:not(.section), .edge-hit:not(.section-hit)');", html)
+            self.assertIn("'.edge:not(.section), .edge-hit:not(.section-hit), .flow-arrow.non-section-flow'", html)
             self.assertIn('"blocked": true', html)
             self.assertIn('label.setAttribute(\'class\', node.blocked ? \'label blocked-label\' : \'label\');', html)
             self.assertIn('24小时节点电价曲线', html)
@@ -166,9 +169,14 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertNotIn('regionData.forEach(region =>', html)
             self.assertNotIn('119个节点按已确认接线图锚点排布', html)
             self.assertNotIn('灰蓝线为完整拓扑边', html)
-            self.assertIn('id="summaryMaxGap"', html)
+            self.assertNotIn('class="summary-grid"', html)
+            self.assertNotIn('id="summaryMaxGap"', html)
+            self.assertIn('grid-template-columns: minmax(0, 1fr) 380px;', html)
+            self.assertIn('height: calc(100vh - 139px);', html)
             self.assertIn('function renderSectionList()', html)
-            self.assertIn('id="gapRange"', html)
+            self.assertNotIn('id="gapRange"', html)
+            self.assertNotIn('最低最大价差', html)
+            self.assertNotIn('class="quick-filter', html)
             self.assertIn('id="focusSelected"', html)
             self.assertIn('id="focusMode"', html)
             self.assertIn('id="themeToggle"', html)
@@ -190,6 +198,8 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertIn("hit.setAttribute('r', '12');", html)
             self.assertIn("bindLayerToggle('toggleLabels', '.label, .label-leader');", html)
             self.assertIn('function selectNode(node, group)', html)
+            self.assertIn("document.getElementById('detailSubtitle').textContent = '';", html)
+            self.assertIn('.panel-subtitle:empty { display:none; }', html)
             self.assertIn('function clearSelection()', html)
             self.assertIn("element.classList.remove('active', 'neighbor', 'context-dimmed')", html)
             self.assertIn('点击节点或线路查看电价曲线', html)
@@ -201,6 +211,47 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertIn("value.toFixed(2) + ' 元/MWh'", html)
             self.assertIn("series: [{ name: node.name, color: '#168ac0', prices: node.prices }]", html)
             self.assertIn('点击查看电价数据', html)
+            self.assertIn('id="toggleFlow"', html)
+            self.assertIn('id="flowArrows"', html)
+            self.assertIn('id="flowArrowHead"', html)
+            self.assertIn("flowVisible = !flowVisible;", html)
+            self.assertIn("edge.flow_kind === 'bidirectional'", html)
+            self.assertIn("onIndexChange: index => updateFlowForTime(edge, index)", html)
+            self.assertIn('.flow-arrow.non-section-flow .flow-arrow-label { display:none; }', html)
+            self.assertNotIn("不代表实际物理潮流", html)
+
+    def test_flow_direction_requires_four_consecutive_points_per_direction(self):
+        times = [f"{hour:02d}:{minute:02d}" for hour in range(2) for minute in (0, 15, 30, 45)]
+        edges = [
+            TopologyEdge("测试", "甲", "乙"),
+            TopologyEdge("测试", "甲", "丙"),
+            TopologyEdge("测试", "甲", "丁"),
+        ]
+        matched_rows = {
+            "甲": {"prices": dict.fromkeys(times, 100)},
+            "乙": {
+                "prices": {
+                    time: (300 if index < 4 else -100)
+                    for index, time in enumerate(times)
+                }
+            },
+            "丙": {
+                "prices": {
+                    time: (300 if index < 3 else -100)
+                    for index, time in enumerate(times[:6])
+                }
+            },
+        }
+
+        flows = _build_flow_directions(edges, matched_rows, times)
+
+        self.assertEqual(flows["甲-乙"]["kind"], "bidirectional")
+        self.assertEqual(len(flows["甲-乙"]["directions"]), 2)
+        self.assertEqual(flows["甲-乙"]["by_time"]["00:00"], "甲->乙")
+        self.assertEqual(flows["甲-乙"]["by_time"]["01:45"], "乙->甲")
+        self.assertEqual(flows["甲-丙"]["kind"], "single")
+        self.assertEqual(len(flows["甲-丙"]["by_time"]), 6)
+        self.assertNotIn("甲-丁", flows)
 
     def test_edge_color_severity_increases_with_intervals_and_gap(self):
         edges = [

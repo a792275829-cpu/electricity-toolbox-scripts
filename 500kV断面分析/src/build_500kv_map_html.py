@@ -231,7 +231,14 @@ def build_map_html(
             "coordinate_source": "公开站址与片区相对方位",
             "node_positions_path": "",
         }
-    severity_by_edge = _build_edge_payloads(edges, edge_summary, interval_details, coordinates)
+    severity_by_edge = _build_edge_payloads(
+        edges,
+        edge_summary,
+        interval_details,
+        coordinates,
+        time_headers,
+        matched_rows,
+    )
     blocked_nodes = {edge["a"] for edge in severity_by_edge if edge["is_section"]} | {
         edge["b"] for edge in severity_by_edge if edge["is_section"]
     }
@@ -254,6 +261,7 @@ def build_map_html(
             "skipped_duplicate_edges": skipped_duplicates,
             "missing_price_nodes": [node for node in topology_nodes if node not in matched_rows],
             "min_section_intervals": MIN_SECTION_INTERVALS,
+            "section_interval_basis": "daily_accumulated",
             "severity_basis": "intervals_and_max_abs_diff",
             "layout_canvas_width": SVG_W,
             "layout_canvas_height": SVG_H,
@@ -457,6 +465,8 @@ def _build_edge_payloads(
     edge_summary: list[dict[str, object]],
     interval_details: list[dict[str, object]],
     coordinates: dict[str, dict[str, float]],
+    time_headers: list[str] | None = None,
+    matched_rows: dict[str, dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     summary_by_edge = {
         str(row["edge"]): row
@@ -466,6 +476,11 @@ def _build_edge_payloads(
     detail_counts = {}
     for row in interval_details:
         detail_counts[str(row["edge"])] = detail_counts.get(str(row["edge"]), 0) + 1
+    flow_directions_by_edge = _build_flow_directions(
+        edges,
+        matched_rows or {},
+        time_headers or [],
+    )
 
     gap_scores = [float(row["max_abs_diff"]) for row in summary_by_edge.values()]
     interval_scores = [float(row["intervals"]) for row in summary_by_edge.values()]
@@ -479,6 +494,10 @@ def _build_edge_payloads(
     for edge in edges:
         edge_name = f"{edge.a}-{edge.b}"
         summary = summary_by_edge.get(edge_name)
+        flow = flow_directions_by_edge.get(
+            edge_name,
+            {"kind": "none", "directions": [], "by_time": {}},
+        )
         score = 0.0
         severity = 0.0
         gap_severity = 0.0
@@ -513,9 +532,127 @@ def _build_edge_payloads(
                 "interval_severity": interval_severity,
                 "severity_score": severity,
                 "severity": severity,
+                "flow_kind": flow["kind"],
+                "flow_directions": flow["directions"],
+                "flow_by_time": flow["by_time"],
             }
         )
     return payload
+
+
+def _build_flow_directions(
+    edges,
+    matched_rows: dict[str, dict[str, object]],
+    time_headers: list[str],
+) -> dict[str, dict[str, object]]:
+    """Build price-direction summaries for every edge with two usable price series."""
+    if not edges or not matched_rows or not time_headers:
+        return {}
+
+    time_index = {time: index for index, time in enumerate(time_headers)}
+    rows_by_edge: dict[str, list[dict[str, object]]] = {}
+    for edge in edges:
+        price_row_a = matched_rows.get(edge.a)
+        price_row_b = matched_rows.get(edge.b)
+        if not price_row_a or not price_row_b:
+            continue
+        rows = []
+        for time in time_headers:
+            price_a = price_row_a["prices"].get(time)
+            price_b = price_row_b["prices"].get(time)
+            if not isinstance(price_a, (int, float)) or not isinstance(price_b, (int, float)):
+                continue
+            difference = float(price_b) - float(price_a)
+            if abs(difference) < 1e-9:
+                continue
+            low, high = (edge.a, edge.b) if difference > 0 else (edge.b, edge.a)
+            rows.append(
+                {
+                    "edge": f"{edge.a}-{edge.b}",
+                    "time": time,
+                    "direction": f"{low}->{high}",
+                    "abs_diff": abs(difference),
+                }
+            )
+        if rows:
+            rows_by_edge[f"{edge.a}-{edge.b}"] = rows
+
+    result: dict[str, dict[str, object]] = {}
+    for edge_name, rows in rows_by_edge.items():
+        rows.sort(key=lambda row: time_index[str(row["time"])])
+        valid_rows: list[dict[str, object]] = []
+        run: list[dict[str, object]] = []
+
+        def finish_run() -> None:
+            if len(run) >= MIN_SECTION_INTERVALS:
+                valid_rows.extend(run)
+
+        for row in rows:
+            if not run:
+                run = [row]
+                continue
+            previous = run[-1]
+            is_next = time_index[str(row["time"])] == time_index[str(previous["time"])] + 1
+            same_direction = str(row["direction"]) == str(previous["direction"])
+            if is_next and same_direction:
+                run.append(row)
+            else:
+                finish_run()
+                run = [row]
+        finish_run()
+
+        direction_rows: dict[str, list[dict[str, object]]] = {}
+        for row in valid_rows or rows:
+            direction_rows.setdefault(str(row["direction"]), []).append(row)
+
+        if not valid_rows:
+            primary_direction = max(
+                direction_rows,
+                key=lambda direction: (len(direction_rows[direction]), direction),
+            )
+            direction_rows = {primary_direction: direction_rows[primary_direction]}
+
+        directions = []
+        for direction, direction_items in direction_rows.items():
+            direction_items.sort(key=lambda row: time_index[str(row["time"])])
+            directions.append(
+                {
+                    "direction": direction,
+                    "intervals": len(direction_items),
+                    "windows": _flow_windows(
+                        [str(row["time"]) for row in direction_items],
+                        time_headers,
+                    ),
+                    "max_abs_diff": max(
+                        float(row.get("abs_diff", 0) or 0) for row in direction_items
+                    ),
+                }
+            )
+        directions.sort(key=lambda item: (-int(item["intervals"]), str(item["direction"])))
+        result[edge_name] = {
+            "kind": "bidirectional" if len(directions) > 1 else "single",
+            "directions": directions,
+            "by_time": {
+                str(row["time"]): str(row["direction"])
+                for row in rows
+            },
+        }
+    return result
+
+
+def _flow_windows(times: list[str], time_headers: list[str]) -> str:
+    time_index = {time: index for index, time in enumerate(time_headers)}
+    indexes = sorted({time_index[time] for time in times})
+    windows = []
+    start = previous = indexes[0]
+    for index in indexes[1:]:
+        if index == previous + 1:
+            previous = index
+            continue
+        windows.append((time_headers[start], time_headers[previous]))
+        start = previous = index
+    windows.append((time_headers[start], time_headers[previous]))
+    return "; ".join(start if start == end else f"{start}-{end}" for start, end in windows)
 
 
 def _clean_cell(value):
@@ -591,7 +728,7 @@ def _render_html(data: dict[str, object]) -> str:
     .app {{
       min-height: 100vh;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 420px;
+      grid-template-columns: minmax(0, 1fr) 380px;
     }}
     .map-pane {{
       padding: 14px 18px 18px;
@@ -625,26 +762,6 @@ def _render_html(data: dict[str, object]) -> str:
       font-weight: 700; backdrop-filter: blur(14px); transition: .2s ease;
     }}
     .icon-button:hover {{ border-color: var(--cyan); color: var(--cyan); transform: translateY(-1px); }}
-    .summary-grid {{
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      margin-bottom: 8px;
-    }}
-    .summary-card {{
-      min-width: 0;
-      padding: 8px 12px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      box-shadow: 0 5px 18px rgba(29, 50, 78, .04);
-      position: relative; overflow: hidden;
-    }}
-    .summary-card::after {{ content:""; position:absolute; inset:auto 0 0; height:2px; background:linear-gradient(90deg,transparent,var(--cyan),transparent); opacity:.55; }}
-    .summary-card .k {{ color: var(--muted); font-size: 11px; }}
-    .summary-card .v {{ margin-top: 1px; font-size: 18px; font-weight: 800; color: var(--navy); line-height:1.15; }}
-    .summary-card.alert .v {{ color: var(--accent); }}
-    .summary-card .unit {{ font-size: 11px; font-weight: 600; color: var(--muted); margin-left: 3px; }}
     .map-toolbar {{
       min-height: 48px;
       display: flex;
@@ -677,7 +794,7 @@ def _render_html(data: dict[str, object]) -> str:
       border-radius: 14px;
       overflow: hidden;
       position: relative;
-      min-height: calc(100vh - 170px);
+      min-height: calc(100vh - 90px);
       box-shadow: var(--shadow);
     }}
     .zoom-controls {{
@@ -710,7 +827,7 @@ def _render_html(data: dict[str, object]) -> str:
     svg {{
       display: block;
       width: 100%;
-      height: calc(100vh - 218px);
+      height: calc(100vh - 139px);
       min-height: 590px;
       background: #081523;
     }}
@@ -810,6 +927,50 @@ def _render_html(data: dict[str, object]) -> str:
     }}
     .edge.section.connected {{ stroke: var(--accent) !important; }}
     .edge.context-dimmed {{ opacity: .055; }}
+    .flow-arrow {{ cursor: pointer; outline: none; }}
+    .flow-arrow-hit {{
+      stroke: transparent;
+      stroke-width: 20;
+      pointer-events: stroke;
+    }}
+    .flow-arrow-halo {{
+      stroke: #ffffff;
+      stroke-width: 6.2;
+      stroke-linecap: round;
+      opacity: .94;
+      pointer-events: none;
+      vector-effect: non-scaling-stroke;
+    }}
+    .flow-arrow-line {{
+      stroke: #087ca7;
+      stroke-width: 2.8;
+      stroke-linecap: round;
+      pointer-events: none;
+      vector-effect: non-scaling-stroke;
+    }}
+    .flow-arrow-label {{
+      fill: #075b7a;
+      font-size: 9px;
+      font-weight: 800;
+      text-anchor: middle;
+      paint-order: stroke;
+      stroke: #ffffff;
+      stroke-width: 3.5px;
+      stroke-linejoin: round;
+      pointer-events: none;
+      vector-effect: non-scaling-stroke;
+    }}
+    .flow-arrow:focus-visible .flow-arrow-line,
+    .flow-arrow:hover .flow-arrow-line {{ stroke: #ff8a00; stroke-width: 3.6; }}
+    .flow-arrow:focus-visible .flow-arrow-label,
+    .flow-arrow:hover .flow-arrow-label {{ fill: #b84f00; }}
+    .flow-arrow.non-section-flow .flow-arrow-label {{ display:none; }}
+    .flow-arrow.non-section-flow:hover .flow-arrow-label,
+    .flow-arrow.non-section-flow:focus-visible .flow-arrow-label {{ display:block; }}
+    .flow-arrow.context-dimmed {{ opacity: .14; }}
+    body:not([data-theme="light"]) .flow-arrow-halo {{ stroke:#07111f; }}
+    body:not([data-theme="light"]) .flow-arrow-line {{ stroke:#67e8f9; }}
+    body:not([data-theme="light"]) .flow-arrow-label {{ fill:#b9f5ff; stroke:#07111f; }}
     .node {{
       fill: #b9eaff;
       stroke: #62b7d9;
@@ -919,12 +1080,6 @@ def _render_html(data: dict[str, object]) -> str:
     .search:focus {{ border-color: #88ace8; box-shadow: 0 0 0 3px rgba(31,99,211,.11); }}
     .list-head {{ display: flex; align-items: center; justify-content: space-between; margin: 14px 0 8px; }}
     .sort-select {{ border: 0; color: var(--blue); background: transparent; font-size: 12px; }}
-    .filter-block {{ margin:12px 0 4px; padding:12px; border:1px solid var(--line); border-radius:11px; background:var(--soft); }}
-    .filter-row {{ display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; color:var(--muted); }}
-    .range {{ width:100%; margin-top:9px; accent-color:var(--cyan); cursor:pointer; }}
-    .quick-filters {{ display:flex; gap:6px; margin-top:9px; }}
-    .quick-filter {{ flex:1; border:1px solid var(--line); border-radius:8px; padding:5px; color:var(--muted); background:var(--panel); cursor:pointer; font-size:11px; }}
-    .quick-filter.active {{ color:var(--cyan); border-color:var(--cyan); }}
     .section-list {{ display: grid; gap: 7px; max-height: 240px; overflow: auto; padding-right: 3px; }}
     .section-item {{
       width: 100%; text-align: left; border: 1px solid var(--line); background: var(--panel);
@@ -968,6 +1123,7 @@ def _render_html(data: dict[str, object]) -> str:
       color: var(--muted);
       line-height: 1.45;
     }}
+    .panel-subtitle:empty {{ display:none; }}
     .chart-wrap {{
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -1005,7 +1161,7 @@ def _render_html(data: dict[str, object]) -> str:
     }}
     .focus-mode .app {{ grid-template-columns: 1fr; }}
     .focus-mode .side {{ display:none; }}
-    .focus-mode svg {{ height:calc(100vh - 218px); }}
+    .focus-mode svg {{ height:calc(100vh - 139px); }}
     .pulse {{ animation:pulse 1.5s ease-in-out infinite; }}
     @keyframes pulse {{ 50% {{ filter:drop-shadow(0 0 9px var(--accent)); }} }}
     @media (prefers-reduced-motion: reduce) {{ *,*::before,*::after {{ animation:none!important; transition:none!important; }} }}
@@ -1013,7 +1169,6 @@ def _render_html(data: dict[str, object]) -> str:
     @media (max-width: 920px) {{
       .app {{ grid-template-columns: 1fr; }}
       .map-pane {{ padding: 16px; }}
-      .summary-grid {{ grid-template-columns: 1fr 1fr; }}
       .side {{ border-left: 0; border-top: 1px solid var(--line); max-height: none; position: static; }}
       svg {{ height: 62vh; min-height: 480px; }}
       .map-shell {{ min-height: 0; }}
@@ -1024,8 +1179,6 @@ def _render_html(data: dict[str, object]) -> str:
       .title-row {{ margin: 6px 2px 14px; }}
       .title-row {{ flex-direction:column; }}
       .header-actions {{ width:100%; justify-content:flex-start; }}
-      .summary-card {{ padding: 8px 10px; }}
-      .summary-card .v {{ font-size: 18px; }}
       .map-toolbar {{ align-items: flex-start; flex-direction: column; }}
       .node-search {{ width:min(100%, 220px); }}
       .map-hint {{ display: none; }}
@@ -1048,12 +1201,6 @@ def _render_html(data: dict[str, object]) -> str:
           <button class="icon-button" id="themeToggle" type="button">切换浅色</button>
         </div>
       </div>
-      <section class="summary-grid" aria-label="分析总览">
-        <div class="summary-card alert"><div class="k">识别断面</div><div class="v"><span id="summarySections">0</span><span class="unit">条</span></div></div>
-        <div class="summary-card"><div class="k">覆盖节点</div><div class="v"><span id="summaryNodes">0</span><span class="unit">个</span></div></div>
-        <div class="summary-card"><div class="k">最高价差</div><div class="v"><span id="summaryMaxGap">0</span><span class="unit">元/MWh</span></div></div>
-        <div class="summary-card"><div class="k">电气片区</div><div class="v"><span id="summaryRegions">0</span><span class="unit">个</span></div></div>
-      </section>
       <div class="map-shell">
         <div class="map-toolbar">
           <div><strong>{map_layer_title}</strong> <span class="map-hint">触控板双指移动 · 捏合缩放 · 鼠标滚轮缩放 · 点击节点查看详情</span></div>
@@ -1062,13 +1209,20 @@ def _render_html(data: dict[str, object]) -> str:
             <button class="toggle" id="focusSelected" type="button">定位所选</button>
             <button class="toggle" id="toggleTopology" type="button" aria-pressed="true">拓扑</button>
             <button class="toggle" id="toggleLabels" type="button" aria-pressed="true">标签</button>
+            <button class="toggle" id="toggleFlow" type="button" aria-pressed="false">潮流查看</button>
           </div>
         </div>
         <svg id="map" viewBox="0 0 {SVG_W} {SVG_H}" role="img" aria-label="{map_label}">
+          <defs>
+            <marker id="flowArrowHead" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+              <path d="M 0 0 L 8 4 L 0 8 Z" fill="#087ca7"></path>
+            </marker>
+          </defs>
           <g id="mapViewport">
             {substrate}
             <g id="regions"></g>
             <g id="edges"></g>
+            <g id="flowArrows" class="is-hidden"></g>
             <g id="labelLeaders"></g>
             <g id="nodes"></g>
             <g id="nodeLabels"></g>
@@ -1089,21 +1243,12 @@ def _render_html(data: dict[str, object]) -> str:
     <aside class="side">
       <div class="side-header"><span class="side-label">断面导航</span><span class="pill" id="visibleCount">0 条</span></div>
       <input class="search" id="sectionSearch" type="search" placeholder="搜索节点、片区或方向" aria-label="搜索断面">
-      <div class="filter-block">
-        <div class="filter-row"><span>最低最大价差</span><strong><span id="gapValue">0</span> 元/MWh</strong></div>
-        <input class="range" id="gapRange" type="range" min="0" value="0" step="50" aria-label="最低最大价差">
-        <div class="quick-filters" aria-label="快速筛选">
-          <button class="quick-filter active" type="button" data-percent="0">全部</button>
-          <button class="quick-filter" type="button" data-percent="0.5">中高</button>
-          <button class="quick-filter" type="button" data-percent="0.75">高风险</button>
-        </div>
-      </div>
       <div class="list-head">
         <strong>断面列表</strong>
         <select class="sort-select" id="sectionSort" aria-label="断面排序">
           <option value="severity">按严重度</option>
           <option value="gap">按最大价差</option>
-          <option value="duration">按持续时段</option>
+          <option value="duration">按累计时点</option>
           <option value="name">按名称</option>
         </select>
       </div>
@@ -1113,7 +1258,7 @@ def _render_html(data: dict[str, object]) -> str:
       <div class="panel-subtitle" id="detailSubtitle">当前共识别 <span id="sectionCount"></span> 条价差断面；可点击节点查看分时电价和相邻线路。</div>
       <div class="metric-grid">
         <div class="metric"><div class="k" id="metricLabel1">最大价差</div><div class="v" id="maxGap">-</div></div>
-        <div class="metric"><div class="k" id="metricLabel2">持续时段</div><div class="v" id="intervals">-</div></div>
+        <div class="metric"><div class="k" id="metricLabel2">累计时点</div><div class="v" id="intervals">-</div></div>
         <div class="metric"><div class="k" id="metricLabel3">主方向</div><div class="v" id="direction">-</div></div>
         <div class="metric"><div class="k" id="metricLabel4">最大时点</div><div class="v" id="maxTime">-</div></div>
       </div>
@@ -1164,20 +1309,12 @@ def _render_html(data: dict[str, object]) -> str:
     const nodeByName = new Map(DATA.nodes.map(d => [d.name, d]));
     const regionData = DATA.regions || [];
     const sectionEdges = DATA.edges.filter(d => d.is_section);
-    const absoluteMaxGap = sectionEdges.length ? Math.max(...sectionEdges.map(edge => Number(edge.max_abs_diff) || 0)) : 0;
     document.getElementById('sectionCount').textContent = sectionEdges.length;
-    document.getElementById('summarySections').textContent = sectionEdges.length;
-    document.getElementById('summaryNodes').textContent = DATA.nodes.length;
-    document.getElementById('summaryRegions').textContent = regionData.length || new Set(DATA.nodes.map(node => node.region).filter(Boolean)).size;
-    document.getElementById('summaryMaxGap').textContent = sectionEdges.length
-      ? absoluteMaxGap.toLocaleString('zh-CN', {{ maximumFractionDigits: 0 }})
-      : '0';
-    const gapRange = document.getElementById('gapRange');
-    gapRange.max = String(Math.ceil(absoluteMaxGap / 50) * 50 || 1000);
     const mapSvg = document.getElementById('map');
     const mapViewport = document.getElementById('mapViewport');
     const edgeLines = new Map();
     const sectionEdgeLines = new Map();
+    const flowArrowItems = new Map();
     const nodeGroups = new Map();
     const nodeLabelItems = [];
     const edgesByNode = new Map(DATA.nodes.map(node => [node.name, []]));
@@ -1187,10 +1324,12 @@ def _render_html(data: dict[str, object]) -> str:
     }});
     let selectedEdgeName = '';
     let selectedNodeName = '';
+    let visibleSectionNames = new Set(sectionEdges.map(edge => edge.edge));
     let view = {{ scale: 1, x: 0, y: 0 }};
     let drag = null;
     let trackpadUntil = 0;
     let gestureBaseScale = null;
+    let flowVisible = false;
 
     function clampView() {{
       const visibleMarginX = {SVG_W} * .12;
@@ -1273,7 +1412,7 @@ def _render_html(data: dict[str, object]) -> str:
     }}, {{ passive: false }});
     mapSvg.addEventListener('pointerdown', event => {{
       if (event.button !== 0) return;
-      if (event.target.closest?.('.node-group, .edge, .edge-hit')) return;
+      if (event.target.closest?.('.node-group, .edge, .edge-hit, .flow-arrow')) return;
       mapSvg.setPointerCapture(event.pointerId);
       drag = {{ id: event.pointerId, x: event.clientX, y: event.clientY, startX: view.x, startY: view.y, moved: false }};
     }});
@@ -1367,6 +1506,134 @@ def _render_html(data: dict[str, object]) -> str:
       edgesG.appendChild(line);
       edgeLines.set(edge.edge, line);
       if (edge.is_section) sectionEdgeLines.set(edge.edge, line);
+    }});
+
+    const flowArrowsG = document.getElementById('flowArrows');
+
+    function flowTooltip(edge) {{
+      return (edge.flow_directions || []).map(item =>
+        `${{item.direction}}｜${{item.intervals}}个时点｜最大价差${{Number(item.max_abs_diff).toFixed(0)}}元/MWh｜${{item.windows || '无'}}`
+      ).join('\\n');
+    }}
+
+    function flowDirectionLabel(edge) {{
+      if (edge.flow_kind === 'bidirectional') return '双向反转';
+      return edge.flow_directions?.[0]?.direction || edge.main_direction || '-';
+    }}
+
+    function setFlowArrowGeometry(edge, item, direction, gap, time = '') {{
+      const bidirectional = direction === 'bidirectional';
+      let dx = edge.x2 - edge.x1;
+      let dy = edge.y2 - edge.y1;
+      const length = Math.max(Math.hypot(dx, dy), 1);
+      dx /= length;
+      dy /= length;
+      if (!bidirectional && direction === `${{edge.b}}->${{edge.a}}`) {{
+        dx *= -1;
+        dy *= -1;
+      }}
+      const middleX = (edge.x1 + edge.x2) / 2;
+      const middleY = (edge.y1 + edge.y2) / 2;
+      const halfLength = Math.max(8, Math.min(19, length * .22));
+      const x1 = middleX - dx * halfLength;
+      const y1 = middleY - dy * halfLength;
+      const x2 = middleX + dx * halfLength;
+      const y2 = middleY + dy * halfLength;
+      [item.hit, item.halo, item.line].forEach(element => {{
+        element.setAttribute('x1', x1);
+        element.setAttribute('y1', y1);
+        element.setAttribute('x2', x2);
+        element.setAttribute('y2', y2);
+      }});
+      item.line.setAttribute('marker-end', 'url(#flowArrowHead)');
+      if (bidirectional) item.line.setAttribute('marker-start', 'url(#flowArrowHead)');
+      else item.line.removeAttribute('marker-start');
+      item.label.setAttribute('x', middleX - dy * 13);
+      item.label.setAttribute('y', middleY + dx * 13 + 3);
+      item.label.textContent = `${{bidirectional ? '↔' : '→'}} ${{Number(gap || 0).toFixed(0)}}元/MWh`;
+      item.title.textContent = time
+        ? `${{time}}｜${{direction}}｜价差${{Number(gap || 0).toFixed(2)}}元/MWh`
+        : flowTooltip(edge);
+      item.group.style.display = '';
+    }}
+
+    function resetFlowArrow(edge) {{
+      const item = flowArrowItems.get(edge.edge);
+      if (!item) return;
+      if (edge.is_section && !visibleSectionNames.has(edge.edge)) {{
+        item.group.style.display = 'none';
+        return;
+      }}
+      if (edge.flow_kind === 'bidirectional') {{
+        const maximumGap = Math.max(...edge.flow_directions.map(item => Number(item.max_abs_diff) || 0));
+        setFlowArrowGeometry(edge, item, 'bidirectional', maximumGap);
+        return;
+      }}
+      const primary = edge.flow_directions?.[0];
+      if (!primary) {{
+        item.group.style.display = 'none';
+        return;
+      }}
+      setFlowArrowGeometry(edge, item, primary.direction, primary.max_abs_diff);
+    }}
+
+    function resetAllFlowArrows() {{
+      DATA.edges.forEach(resetFlowArrow);
+    }}
+
+    function updateFlowForTime(edge, index) {{
+      const item = flowArrowItems.get(edge.edge);
+      if (!item) return;
+      if (edge.is_section && !visibleSectionNames.has(edge.edge)) {{
+        item.group.style.display = 'none';
+        return;
+      }}
+      const time = DATA.time_headers[index];
+      const direction = edge.flow_by_time?.[time];
+      const a = nodeByName.get(edge.a);
+      const b = nodeByName.get(edge.b);
+      const priceA = a?.prices[index];
+      const priceB = b?.prices[index];
+      if (!direction || typeof priceA !== 'number' || typeof priceB !== 'number') {{
+        item.group.style.display = 'none';
+        return;
+      }}
+      setFlowArrowGeometry(edge, item, direction, Math.abs(priceB - priceA), time);
+    }}
+
+    DATA.edges.filter(edge => edge.flow_kind !== 'none').forEach(edge => {{
+      const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      group.setAttribute('class', edge.is_section ? 'flow-arrow section-flow' : 'flow-arrow non-section-flow');
+      group.setAttribute('tabindex', '0');
+      group.setAttribute('role', 'button');
+      group.setAttribute('aria-label', `${{edge.edge}}潮流方向`);
+      const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      const hit = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      hit.setAttribute('class', 'flow-arrow-hit');
+      const halo = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      halo.setAttribute('class', 'flow-arrow-halo');
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('class', 'flow-arrow-line');
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('class', 'flow-arrow-label');
+      group.append(title, hit, halo, line, label);
+      const activate = event => {{
+        event.preventDefault();
+        event.stopPropagation();
+        const edgeLine = edgeLines.get(edge.edge);
+        if (edgeLine) selectEdge(edge, edgeLine);
+      }};
+      group.addEventListener('pointerdown', event => {{
+        event.preventDefault();
+        event.stopPropagation();
+      }});
+      group.addEventListener('click', activate);
+      group.addEventListener('keydown', event => {{
+        if (event.key === 'Enter' || event.key === ' ') activate(event);
+      }});
+      flowArrowsG.appendChild(group);
+      flowArrowItems.set(edge.edge, {{ group, title, hit, halo, line, label }});
+      resetFlowArrow(edge);
     }});
 
     const nodesG = document.getElementById('nodes');
@@ -1570,6 +1837,8 @@ def _render_html(data: dict[str, object]) -> str:
     }}
 
     function clearSelection() {{
+      resetAllFlowArrows();
+      document.querySelectorAll('.flow-arrow').forEach(element => element.classList.remove('context-dimmed'));
       document.querySelectorAll('.edge').forEach(element =>
         element.classList.remove('active', 'connected', 'context-dimmed')
       );
@@ -1580,7 +1849,7 @@ def _render_html(data: dict[str, object]) -> str:
       selectedEdgeName = '';
       selectedNodeName = '';
       document.getElementById('metricLabel1').textContent = '最大价差';
-      document.getElementById('metricLabel2').textContent = '持续时段';
+      document.getElementById('metricLabel2').textContent = '累计时点';
       document.getElementById('metricLabel3').textContent = '主方向';
       document.getElementById('metricLabel4').textContent = '最大时点';
       document.getElementById('detailTitle').textContent = '未选择节点或线路';
@@ -1602,6 +1871,8 @@ def _render_html(data: dict[str, object]) -> str:
     }}
 
     function selectEdge(edge, line) {{
+      resetAllFlowArrows();
+      document.querySelectorAll('.flow-arrow').forEach(element => element.classList.remove('context-dimmed'));
       document.querySelectorAll('.edge.active').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.edge').forEach(el => el.classList.remove('connected', 'context-dimmed'));
       document.querySelectorAll('.node-group').forEach(el => el.classList.remove('active', 'neighbor', 'context-dimmed'));
@@ -1617,7 +1888,7 @@ def _render_html(data: dict[str, object]) -> str:
       const displayGap = edge.is_section ? edge.max_abs_diff : (observed.maximum?.gap ?? 0);
       const displayTime = edge.is_section ? edge.max_time : (observed.maximum?.time || '-');
       document.getElementById('metricLabel1').textContent = '最大价差';
-      document.getElementById('metricLabel2').textContent = edge.is_section ? '持续时段' : '可比时点';
+      document.getElementById('metricLabel2').textContent = edge.is_section ? '累计时点' : '可比时点';
       document.getElementById('metricLabel3').textContent = edge.is_section ? '主方向' : '线路状态';
       document.getElementById('metricLabel4').textContent = '最大时点';
       document.getElementById('detailTitle').innerHTML = `${{edge.edge}} <span class="pill">${{edge.group}}</span>`;
@@ -1626,15 +1897,16 @@ def _render_html(data: dict[str, object]) -> str:
         : '完整拓扑线路，未触发断面判定；以下显示两端节点电价。';
       document.getElementById('maxGap').textContent = displayGap.toFixed(2);
       document.getElementById('intervals').textContent = edge.is_section
-        ? `${{edge.intervals}} × 15分钟`
+        ? `${{edge.intervals}} 个`
         : `${{observed.comparable.length}} 个`;
-      document.getElementById('direction').textContent = edge.is_section ? (edge.main_direction || '-') : '未触发断面';
+      document.getElementById('direction').textContent = edge.is_section ? flowDirectionLabel(edge) : '未触发断面';
       document.getElementById('maxTime').textContent = displayTime || '-';
       document.getElementById('chartTitle').textContent = `${{edge.a}} / ${{edge.b}} 24小时节点电价曲线`;
       drawChart(a, b, edge);
     }}
 
     function selectNode(node, group) {{
+      resetAllFlowArrows();
       document.querySelectorAll('.edge.active').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.node-group').forEach(el => el.classList.remove('active', 'neighbor', 'context-dimmed'));
       group.classList.add('active');
@@ -1645,6 +1917,10 @@ def _render_html(data: dict[str, object]) -> str:
         const connected = relatedEdges.some(edge => edge.edge === edgeName);
         line.classList.toggle('connected', connected);
         line.classList.toggle('context-dimmed', !connected);
+      }});
+      flowArrowItems.forEach((item, edgeName) => {{
+        const connected = relatedEdges.some(edge => edge.edge === edgeName);
+        item.group.classList.toggle('context-dimmed', !connected);
       }});
       nodeGroups.forEach((candidateGroup, name) => {{
         candidateGroup.classList.toggle('neighbor', neighborNames.has(name));
@@ -1659,7 +1935,7 @@ def _render_html(data: dict[str, object]) -> str:
       const maximum = prices.length ? Math.max(...prices) : null;
       const peakIndex = maximum === null ? -1 : node.prices.indexOf(maximum);
       document.getElementById('detailTitle').innerHTML = `${{escapeHtml(node.name)}} <span class="pill">${{escapeHtml(node.region || '未分片')}}</span>`;
-      document.getElementById('detailSubtitle').textContent = `${{node.location_accuracy}} · ${{node.position_label}} · ${{relatedEdges.length}}条相邻线路`;
+      document.getElementById('detailSubtitle').textContent = '';
       document.getElementById('metricLabel1').textContent = '平均电价';
       document.getElementById('metricLabel2').textContent = '最低电价';
       document.getElementById('metricLabel3').textContent = '最高电价';
@@ -1676,12 +1952,11 @@ def _render_html(data: dict[str, object]) -> str:
     function renderSectionList() {{
       const query = document.getElementById('sectionSearch').value.trim().toLowerCase();
       const sort = document.getElementById('sectionSort').value;
-      const minGap = Number(gapRange.value);
-      document.getElementById('gapValue').textContent = minGap.toLocaleString('zh-CN');
-      const filtered = sectionEdges.filter(edge => Number(edge.max_abs_diff) >= minGap &&
+      const filtered = sectionEdges.filter(edge =>
         [edge.edge, edge.group, edge.main_direction, edge.windows].join(' ').toLowerCase().includes(query));
-      const visibleNames = new Set(filtered.map(edge => edge.edge));
-      sectionEdgeLines.forEach((line, name) => line.style.display = visibleNames.has(name) ? '' : 'none');
+      visibleSectionNames = new Set(filtered.map(edge => edge.edge));
+      sectionEdgeLines.forEach((line, name) => line.style.display = visibleSectionNames.has(name) ? '' : 'none');
+      resetAllFlowArrows();
       filtered.sort((a, b) => {{
         if (sort === 'name') return a.edge.localeCompare(b.edge, 'zh-CN');
         if (sort === 'gap') return b.max_abs_diff - a.max_abs_diff;
@@ -1701,7 +1976,7 @@ def _render_html(data: dict[str, object]) -> str:
         button.className = `section-item${{edge.edge === selectedEdgeName ? ' active' : ''}}`;
         button.dataset.edge = edge.edge;
         button.innerHTML = `<div class="item-top"><span>${{escapeHtml(edge.edge)}}</span><span class="item-gap">${{edge.max_abs_diff.toFixed(0)}}</span></div>
-          <div class="item-meta">${{escapeHtml(edge.group)}} · ${{edge.intervals}} 个时段 · ${{escapeHtml(edge.main_direction || '方向未知')}}</div>`;
+          <div class="item-meta">${{escapeHtml(edge.group)}} · ${{edge.intervals}} 个时点 · ${{escapeHtml(flowDirectionLabel(edge))}}</div>`;
         button.addEventListener('click', () => {{
           const line = edgeLines.get(edge.edge);
           if (line) selectEdge(edge, line);
@@ -1713,15 +1988,6 @@ def _render_html(data: dict[str, object]) -> str:
 
     document.getElementById('sectionSearch').addEventListener('input', renderSectionList);
     document.getElementById('sectionSort').addEventListener('change', renderSectionList);
-    gapRange.addEventListener('input', () => {{
-      document.querySelectorAll('.quick-filter').forEach(button => button.classList.remove('active'));
-      renderSectionList();
-    }});
-    document.querySelectorAll('.quick-filter').forEach(button => button.addEventListener('click', () => {{
-      document.querySelectorAll('.quick-filter').forEach(item => item.classList.toggle('active', item === button));
-      gapRange.value = String(Math.round(absoluteMaxGap * Number(button.dataset.percent) / 50) * 50);
-      renderSectionList();
-    }}));
     function bindLayerToggle(buttonId, selector) {{
       document.getElementById(buttonId).addEventListener('click', event => {{
         const next = event.currentTarget.getAttribute('aria-pressed') !== 'true';
@@ -1729,8 +1995,14 @@ def _render_html(data: dict[str, object]) -> str:
         document.querySelectorAll(selector).forEach(element => element.classList.toggle('is-hidden', !next));
       }});
     }}
-    bindLayerToggle('toggleTopology', '.edge:not(.section), .edge-hit:not(.section-hit)');
+    bindLayerToggle('toggleTopology', '.edge:not(.section), .edge-hit:not(.section-hit), .flow-arrow.non-section-flow');
     bindLayerToggle('toggleLabels', '.label, .label-leader');
+    document.getElementById('toggleFlow').addEventListener('click', event => {{
+      flowVisible = !flowVisible;
+      event.currentTarget.setAttribute('aria-pressed', String(flowVisible));
+      flowArrowsG.classList.toggle('is-hidden', !flowVisible);
+      if (flowVisible) resetAllFlowArrows();
+    }});
     const nodeSearch = document.getElementById('nodeSearch');
     function matchingNodes() {{
       const query = nodeSearch.value.trim().toLowerCase();
@@ -1794,7 +2066,7 @@ def _render_html(data: dict[str, object]) -> str:
     renderSectionList();
 
     function attachPriceCrosshair(svg, options) {{
-      const {{ series, x, y, count, margin, width, height, make }} = options;
+      const {{ series, x, y, count, margin, width, height, make, onIndexChange, onLeave }} = options;
       if (!count || !series.length) return;
       const plotLeft = margin.left;
       const plotRight = width - margin.right;
@@ -1868,6 +2140,7 @@ def _render_html(data: dict[str, object]) -> str:
           : guideX + 10;
         tooltip.setAttribute('transform', `translate(${{tooltipX}} ${{plotTop + 6}})`);
         layer.setAttribute('visibility', 'visible');
+        onIndexChange?.(safeIndex);
       }}
 
       function showFromPointer(event) {{
@@ -1889,7 +2162,10 @@ def _render_html(data: dict[str, object]) -> str:
       hit.addEventListener('pointerenter', showFromPointer);
       hit.addEventListener('pointermove', showFromPointer);
       hit.addEventListener('pointerdown', showFromPointer);
-      hit.addEventListener('pointerleave', () => layer.setAttribute('visibility', 'hidden'));
+      hit.addEventListener('pointerleave', () => {{
+        layer.setAttribute('visibility', 'hidden');
+        onLeave?.();
+      }});
       svg.appendChild(hit);
     }}
 
@@ -2009,7 +2285,9 @@ def _render_html(data: dict[str, object]) -> str:
           {{ name: a.name, color: '#1261d1', prices: a.prices }},
           {{ name: b.name, color: '#e02020', prices: b.prices }}
         ],
-        x, y, count: DATA.time_headers.length, margin, width, height, make
+        x, y, count: DATA.time_headers.length, margin, width, height, make,
+        onIndexChange: index => updateFlowForTime(edge, index),
+        onLeave: () => resetFlowArrow(edge)
       }});
 
       document.getElementById('sourceText').textContent = '';

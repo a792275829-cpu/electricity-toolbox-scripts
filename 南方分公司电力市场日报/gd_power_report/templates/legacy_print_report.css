@@ -1,0 +1,13 @@
+@page { size:A4 portrait; margin:12mm 10mm 14mm; }
+@page:first { margin-top:4mm; }
+/* Print the daily report in its original sequence and at its original type sizes. */
+.market-section, .legacy-table-block, .appendix-table,
+.appendix-table tbody, .strategy-item { break-inside:auto; page-break-inside:auto; }
+h2, h3, .legacy-table-heading,
+.day-ahead-company-subtitle, .realtime-company-subtitle { break-after:avoid; page-break-after:avoid; }
+.metric-grid { break-inside:avoid; page-break-inside:avoid; }
+.appendix-table tr, .operation-table tr { break-inside:avoid; page-break-inside:avoid; }
+.appendix-table thead, .operation-table thead { display:table-header-group; break-inside:avoid; }
+.strategy-text { display:block; }
+.strategy-item > strong { display:block; break-after:avoid; page-break-after:avoid; }
+.strategy-item + .strategy-item { margin-top:8px; }

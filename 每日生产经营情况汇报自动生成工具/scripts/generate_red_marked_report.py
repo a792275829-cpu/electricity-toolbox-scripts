@@ -21,7 +21,12 @@ from docx.text.paragraph import Paragraph
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 APP_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name in {"scripts", "\u811a\u672c"} else SCRIPT_DIR
-OUTPUT_DIR = APP_ROOT / "\u8f93\u51fa"
+if str(APP_ROOT.parent) not in sys.path:
+    sys.path.insert(0, str(APP_ROOT.parent))
+from toolbox_dates import normalize_date_input
+from toolbox_storage import data_path
+
+OUTPUT_DIR = data_path(APP_ROOT / "\u8f93\u51fa")
 CLEARING_WORKBOOK_DIR = Path.home() / "Downloads"
 LOCAL_TEMPLATE_PATH = APP_ROOT / "\u6a21\u677f" / "\u6bcf\u65e5\u751f\u4ea7\u7ecf\u8425\u60c5\u51b5\u6c47\u62a5\uff08\u81ea\u52a8\uff09.docx"
 TEMPLATE_PATH = LOCAL_TEMPLATE_PATH if LOCAL_TEMPLATE_PATH.exists() else (
@@ -37,19 +42,30 @@ GUANGDONG_WEATHER_LATITUDE = 23.1291
 GUANGDONG_WEATHER_LONGITUDE = 113.2644
 QINGYUAN_DAILY_CLEARING_VALUES = [
     "清  远",
-    "220",
+    "清  远",
+    "0",
     "669",
     "/",
     "/",
     "/",
     "/",
-    "220",
-    "13",
+    "0",
     "/",
-    "13",
-    "669",
-    "756",
+    "/",
+    "/",
+    "/",
+    "0",
+    "/",
+    "0",
+    "#DIV/0!",
+    "#DIV/0!",
 ]
+
+DAILY_CLEARING_REQUIRED_HEADERS = (
+    "实时偏差（较日前）",
+    "实际上网偏差（较实时）",
+    "中长期+现货偏差浮盈",
+)
 
 
 def log(message: str) -> None:
@@ -89,10 +105,7 @@ def resolve_template_path(
 
 
 def validate_date(date_text: str) -> str:
-    try:
-        return datetime.strptime(date_text, "%Y-%m-%d").strftime("%Y-%m-%d")
-    except ValueError as exc:
-        raise ValueError(f"invalid date: {date_text}, expected YYYY-MM-DD") from exc
+    return normalize_date_input(date_text)
 
 
 def trend_word(value: float) -> str:
@@ -113,6 +126,11 @@ def fmt_number(value: float | None, digits: int = 0) -> str:
     if digits == 0:
         return str(int(round(value)))
     return f"{value:.{digits}f}".rstrip("0").rstrip(".")
+
+
+def fmt_mw_as_10k_kw(value_mw: float | None) -> str:
+    """Format an optional MW value as ten-thousand kW without crashing on missing API data."""
+    return fmt_number(value_mw / 10 if value_mw is not None else None)
 
 
 def weather_code_label(code: Any) -> str:
@@ -230,6 +248,35 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
     if sheet_name is None:
         raise KeyError(f"{workbook_path} 中未找到快报（日前）工作表")
     sheet = workbook[sheet_name]
+    basic_info_sheet = (
+        workbook["\u57fa\u7840\u4fe1\u606f"]
+        if "\u57fa\u7840\u4fe1\u606f" in workbook.sheetnames
+        else None
+    )
+    qingyuan_raw_values = (
+        {
+            "AA64": basic_info_sheet["AA64"].value,
+            "AC64": basic_info_sheet["AC64"].value,
+        }
+        if basic_info_sheet is not None
+        else {"AA64": 0, "AC64": 0}
+    )
+    if basic_info_sheet is not None:
+        missing_qingyuan_cells = [
+            cell
+            for cell, value in qingyuan_raw_values.items()
+            if value is None
+        ]
+        if missing_qingyuan_cells:
+            raise ValueError(
+                f"{workbook_path} 的基础信息!{'/'.join(missing_qingyuan_cells)}没有可用计算结果，"
+                "请先在 Excel 中重新计算并保存"
+            )
+    qingyuan_components = {
+        cell: parse_float(value)
+        for cell, value in qingyuan_raw_values.items()
+    }
+    qingyuan_energy = sum(qingyuan_components.values())
 
     rows = {
         "company": 7,
@@ -240,10 +287,16 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
         "\u9b80\u83b2": find_first_column_row(sheet, ("\u9b80\u83b2\u5149\u4f0f", "\u9b80\u83b2")),
         "\u5f52\u6e56": find_first_column_row(sheet, ("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56")),
     }
+    base_total_energy = parse_float(sheet.cell(rows["company"], 6).value)
     return {
         "workbook": str(workbook_path),
         "sheet": sheet_name,
-        "totalEnergy": parse_float(sheet.cell(rows["company"], 6).value),
+        "qingyuanSource": {
+            "sheet": basic_info_sheet.title if basic_info_sheet is not None else None,
+            "cells": qingyuan_components,
+        },
+        "baseTotalEnergy": base_total_energy,
+        "totalEnergy": base_total_energy + qingyuan_energy,
         "averagePrice": parse_float(sheet.cell(rows["company"], 7).value),
         "companies": {
             "\u6c55\u5934": {
@@ -269,6 +322,9 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
             "\u5f52\u6e56": {
                 "energy": parse_float(sheet.cell(rows["\u5f52\u6e56"], 7).value),
                 "price": parse_float(sheet.cell(rows["\u5f52\u6e56"], 8).value),
+            },
+            "\u6e05\u8fdc": {
+                "energy": qingyuan_energy,
             },
         },
     }
@@ -431,11 +487,54 @@ def ensure_qingyuan_daily_clearing_row(table) -> None:
         replace_cell_text(cell, value)
 
 
-def ensure_qingyuan_template_content(document) -> None:
-    ensure_qingyuan_startup_paragraphs(document)
+def is_current_daily_clearing_table(table) -> bool:
+    if len(table.columns) != len(QINGYUAN_DAILY_CLEARING_VALUES):
+        return False
+    header_text = "".join(cell.text.replace("\n", "") for row in table.rows[:2] for cell in row.cells)
+    labels = {re.sub(r"\s+", "", row.cells[0].text) for row in table.rows}
+    detail_labels = {re.sub(r"\s+", "", row.cells[1].text) for row in table.rows}
+    return (
+        all(header in header_text for header in DAILY_CLEARING_REQUIRED_HEADERS)
+        and {"分公司火电", "汕头", "海门", "东莞", "清远", "分公司新能源", "海风"}.issubset(labels)
+        and {"#1", "#2#3"}.issubset(detail_labels)
+    )
+
+
+def ensure_daily_clearing_table_structure(document, canonical_template_path: Path = LOCAL_TEMPLATE_PATH) -> None:
     if not document.tables:
         raise ValueError("模板中未找到日清分表")
+    if is_current_daily_clearing_table(document.tables[0]):
+        return
+
+    canonical = Document(canonical_template_path)
+    if not canonical.tables or not is_current_daily_clearing_table(canonical.tables[0]):
+        raise ValueError("标准模板中的日清分表结构不完整")
+    target = document.tables[0]._tbl
+    target.getparent().replace(target, deepcopy(canonical.tables[0]._tbl))
+
+
+def ensure_spot_deviation_analysis(document, canonical_template_path: Path = LOCAL_TEMPLATE_PATH) -> None:
+    if any(paragraph.text.strip() == "3.现货偏差分析" for paragraph in document.paragraphs):
+        return
+
+    target_forecast = find_exact_paragraph(document, "五、短期市场预测")
+    canonical = Document(canonical_template_path)
+    source_heading = find_exact_paragraph(canonical, "3.现货偏差分析")
+    source_forecast = find_exact_paragraph(canonical, "五、短期市场预测")
+    source_start = paragraph_index(canonical, source_heading)
+    source_end = paragraph_index(canonical, source_forecast)
+    parent = target_forecast._element.getparent()
+    insertion_index = parent.index(target_forecast._element)
+    for paragraph in canonical.paragraphs[source_start:source_end]:
+        parent.insert(insertion_index, deepcopy(paragraph._element))
+        insertion_index += 1
+
+
+def ensure_qingyuan_template_content(document, canonical_template_path: Path = LOCAL_TEMPLATE_PATH) -> None:
+    ensure_qingyuan_startup_paragraphs(document)
+    ensure_daily_clearing_table_structure(document, canonical_template_path)
     ensure_qingyuan_daily_clearing_row(document.tables[0])
+    ensure_spot_deviation_analysis(document, canonical_template_path)
 
 
 def replace_red_runs(paragraph, values: list[str]) -> None:
@@ -574,9 +673,9 @@ def build_day_ahead_market_text(payload: dict[str, Any]) -> str:
     selected = load["selected"]
     return (
         f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{trend_word(load.get('maxDiff') or 0)}\uff0c"
-        f"\u5168\u5929\u6700\u5927\u503c{mw_to_10k_kw(selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
+        f"\u5168\u5929\u6700\u5927\u503c{fmt_mw_as_10k_kw(selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
         f"\u73af\u6bd4{trend_word(load.get('maxDiff') or 0)}{abs(mw_to_10k_kw(load.get('maxDiff') or 0))}\u4e07\u5343\u74e6\uff0c"
-        f"\u6700\u5c0f\u503c{mw_to_10k_kw(selected.get('min'))}\u4e07\uff0c"
+        f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(selected.get('min'))}\u4e07\uff0c"
         f"\u73af\u6bd4{trend_word(load.get('minDiff') or 0)}{abs(mw_to_10k_kw(load.get('minDiff') or 0))}\u4e07\u5343\u74e6\uff1b"
         f"A\u7c7b\u7535\u51fa\u529b{change_word(a_power.get('avgDiff') or 0)}\u3001"
         f"\u5730\u65b9\u7535\u51fa\u529b{change_word(local.get('avgDiff') or 0)}\uff0c"
@@ -599,12 +698,12 @@ def build_actual_market_text(payload: dict[str, Any]) -> str:
     b_selected = b_space["selected"]
     return (
         f"\u5b9e\u65f6\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{trend_word(load.get('maxDiff') or 0)}\uff0c"
-        f"\u5168\u5929\u6700\u5927\u503c{mw_to_10k_kw(selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
-        f"\u6700\u5c0f\u503c{mw_to_10k_kw(selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
+        f"\u5168\u5929\u6700\u5927\u503c{fmt_mw_as_10k_kw(selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
+        f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
         f"A\u7c7b\u7535\u51fa\u529b{change_word(a_power.get('avgDiff') or 0)}\u3001"
         f"\u5730\u65b9\u7535\u51fa\u529b{change_word(local.get('avgDiff') or 0)}\uff0c"
-        f"B\u7c7b\u7ade\u4ef7\u7a7a\u95f4\u5168\u5929\u6700\u5927\u503c{mw_to_10k_kw(b_selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
-        f"\u6700\u5c0f\u503c{mw_to_10k_kw(b_selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
+        f"B\u7c7b\u7ade\u4ef7\u7a7a\u95f4\u5168\u5929\u6700\u5927\u503c{fmt_mw_as_10k_kw(b_selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
+        f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(b_selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
         f"\u5168\u5929\u5b9e\u65f6\u5747\u4ef7{fmt_number(price['selectedDailyAvgPrice'], 2)}\u5143/\u5146\u74e6\u65f6\u3002"
     )
 
@@ -655,6 +754,7 @@ def build_day_ahead_clearing_text(date_text: str, summary: dict[str, Any]) -> st
     offshore = companies["\u6d77\u4e0a\u98ce\u7535"]
     tuolian = companies["\u9b80\u83b2"]
     guihu = companies["\u5f52\u6e56"]
+    qingyuan = companies.get("\u6e05\u8fdc", {"energy": 0})
     return (
         f"{date_label(date_text)}\u5206\u516c\u53f8\u65e5\u524d\u51fa\u6e05\u7535\u91cf{fmt_number(summary['totalEnergy'])}\u4e07\u5343\u74e6\u65f6\u3002"
         f"\u5176\u4e2d\uff0c\u6c55\u5934{fmt_number(shantou['energy'])}\u4e07\u3001"
@@ -662,7 +762,8 @@ def build_day_ahead_clearing_text(date_text: str, summary: dict[str, Any]) -> st
         f"\u4e1c\u839e{fmt_number(dongguan['energy'])}\u4e07\u3001"
         f"\u6d77\u4e0a\u98ce\u7535{fmt_number(offshore['energy'])}\u4e07\u3001"
         f"\u9b80\u83b2{fmt_number(tuolian['energy'])}\u4e07\u3001"
-        f"\u5f52\u6e56{fmt_number(guihu['energy'])}\u4e07\u5343\u74e6\u65f6\u3001\u6e05\u8fdc\uff08\u8ba1\u5212\uff090\u4e07\u5343\u74e6\u65f6\uff1b"
+        f"\u5f52\u6e56{fmt_number(guihu['energy'])}\u4e07\u5343\u74e6\u65f6\u3001"
+        f"\u6e05\u8fdc\uff08\u8ba1\u5212\uff09{fmt_number(qingyuan['energy'])}\u4e07\u5343\u74e6\u65f6\uff1b"
         f"\u5206\u516c\u53f8\u65e5\u524d\u5747\u4ef7{fmt_number(summary['averagePrice'])}\u5398/\u5343\u74e6\u65f6\uff0c"
         f"\u5176\u4e2d\u6c55\u5934{fmt_number(shantou['price'])}\u5398\u3001"
         f"\u6d77\u95e8{fmt_number(haimen['price'])}\u5398\u3001"
@@ -799,12 +900,17 @@ def generate(
         "onlineWorkbook": str(online_workbook) if online_workbook else None,
         "onlinePriceWorkbook": online_prices["workbook"],
         "dayAheadClearingWorkbook": day_ahead_clearing["workbook"],
+        "qingyuanDayAheadSource": day_ahead_clearing["qingyuanSource"],
+        "qingyuanDayAheadEnergy": day_ahead_clearing["companies"]["\u6e05\u8fdc"]["energy"],
+        "dayAheadBaseTotalEnergy": day_ahead_clearing["baseTotalEnergy"],
+        "dayAheadTotalEnergy": day_ahead_clearing["totalEnergy"],
         "dailyClearingWorkbook": str(daily_clearing_workbook) if daily_clearing_workbook else None,
         "weatherError": weather_error,
         "knownGaps": [
             "P13 上网电量来源尚未确认，电量暂保留模板原文；日前均价来自报告日出清情况 Excel 的快报（日前）工作表。",
-            "P14 日前出清电量和日前价格来自出清情况 Excel 的快报（日前）工作表；火电取 F/G，新能源按日前出清表头取 G/H。",
+            "P14 日前出清电量和日前价格来自报告日出清情况 Excel；火电取快报（日前）F/G，新能源按表头取 G/H，清远计划电量取基础信息!AA64+AC64，并计入分公司总电量。",
             "P29 未来三天最高负荷来源尚未确认，暂不替换。",
+            "日清分表和现货偏差分析已按新版模板保留，自动填充数据源尚未接入。",
         ],
     }
     audit_path.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from toolbox_storage import data_path
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -17,12 +18,9 @@ _MODULE_CACHE_LOCK = threading.RLock()
 _MISSING_MODULE = object()
 
 
-PREFERRED_PYTHON = Path(
-    r"C:\Users\lllg\AppData\Local\Programs\Python\Python311\python.exe"
-)
-PREFERRED_PYTHONW = Path(
-    r"C:\Users\lllg\AppData\Local\Programs\Python\Python311\pythonw.exe"
-)
+_LOCAL_PYTHON = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Programs" / "Python" / "Python311"
+PREFERRED_PYTHON = _LOCAL_PYTHON / "python.exe"
+PREFERRED_PYTHONW = _LOCAL_PYTHON / "pythonw.exe"
 
 
 @dataclass(frozen=True)
@@ -39,6 +37,42 @@ class ToolPaths:
     @property
     def online_energy_dir(self) -> Path:
         return self.online_energy.parent
+
+    @property
+    def wind_forecast(self) -> Path:
+        return self.workspace / "风力预测截图" / "wind_forecast_screenshot.py"
+
+    @property
+    def wind_forecast_dir(self) -> Path:
+        return self.wind_forecast.parent
+
+    @property
+    def wind_forecast_output_dir(self) -> Path:
+        return data_path(self.wind_forecast_dir / "输出")
+
+    @property
+    def spot_price_update(self) -> Path:
+        return self.workspace / "现货价格更新" / "update_spot_prices.py"
+
+    @property
+    def spot_price_update_dir(self) -> Path:
+        return self.spot_price_update.parent
+
+    @property
+    def transaction_info_update(self) -> Path:
+        return self.workspace / "交易系统信息更新" / "update_transaction_info.py"
+
+    @property
+    def transaction_info_update_dir(self) -> Path:
+        return self.transaction_info_update.parent
+
+    @property
+    def power_benefit_update(self) -> Path:
+        return self.workspace / "功率调整收益统计表更新" / "update_power_benefit.py"
+
+    @property
+    def power_benefit_update_dir(self) -> Path:
+        return self.power_benefit_update.parent
 
     @property
     def trade_analysis(self) -> Path:
@@ -64,6 +98,26 @@ class ToolPaths:
     @property
     def section_analysis_topology(self) -> Path:
         return self.section_analysis_dir / "500kV节点拓扑.md"
+
+    @property
+    def daily_pdf_parser_dir(self) -> Path:
+        return self.workspace / "广东运行日报PDF解析"
+
+    @property
+    def daily_pdf_parser(self) -> Path:
+        return self.daily_pdf_parser_dir / "run_daily_pdf_parser.py"
+
+    @property
+    def market_report_dir(self) -> Path:
+        return self.workspace / "南方分公司电力市场日报"
+
+    @property
+    def market_report_runner(self) -> Path:
+        return self.market_report_dir / "run_market_report.py"
+
+    @property
+    def market_report_output_dir(self) -> Path:
+        return data_path(self.market_report_dir / "输出")
 
     @property
     def summary(self) -> Path:
@@ -127,7 +181,7 @@ class ToolPaths:
 
     @property
     def wps_writer_logs_dir(self) -> Path:
-        return self.wps_writer_dir / "logs"
+        return data_path(self.wps_writer_dir / "logs")
 
     @property
     def market_table_update(self) -> Path:
@@ -151,11 +205,27 @@ class ToolPaths:
 
     @property
     def guangdong_price_output_dir(self) -> Path:
-        return self.guangdong_price_dir / "输出"
+        return data_path(self.guangdong_price_dir / "输出")
+
+    @property
+    def guangdong_price_paths(self) -> dict[str, Path]:
+        module = load_module(
+            "toolbox_guangdong_paths",
+            Path(__file__).resolve().parents[2] / "广东电价预测" / "gd_price_forecast" / "paths.py",
+        )
+        return module.resolve_paths(self.guangdong_price_dir)
+
+    @property
+    def guangdong_price_master_workbook(self) -> Path:
+        return self.guangdong_price_paths["masterWorkbook"]
+
+    @property
+    def guangdong_prediction_output_dir(self) -> Path:
+        return self.guangdong_price_paths["predictionOutputDir"]
 
     @property
     def file_dialog_settings(self) -> Path:
-        return self.workspace / "电力工具箱" / "file_dialog_settings.json"
+        return data_path(self.workspace / "电力工具箱" / "file_dialog_settings.json")
 
 
 def _module_is_local(module: object, roots: tuple[Path, ...]) -> bool:
@@ -165,6 +235,14 @@ def _module_is_local(module: object, roots: tuple[Path, ...]) -> bool:
     try:
         resolved = Path(module_file).resolve()
     except (OSError, TypeError):
+        return False
+    interpreter_roots = {Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve()}
+    if any(
+        resolved == interpreter_root or interpreter_root in resolved.parents
+        for interpreter_root in interpreter_roots
+    ):
+        # The project virtual environment lives below the workspace root. Its
+        # packages must remain registered or class identities split on re-import.
         return False
     return any(resolved == root or root in resolved.parents for root in roots)
 
@@ -254,10 +332,13 @@ def portable_runtime_root() -> Path:
 def configure_portable_environment() -> None:
     bundled_browsers = portable_runtime_root() / "ms-playwright"
     if bundled_browsers.is_dir():
-        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(bundled_browsers))
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(bundled_browsers)
 
 
 def python_executable() -> str:
+    configured = os.environ.get("TOOLBOX_PYTHON")
+    if configured and Path(configured).is_file():
+        return configured
     bundled = portable_runtime_root() / "python311" / "python.exe"
     if bundled.is_file():
         return str(bundled)
@@ -281,6 +362,9 @@ def pythonw_executable() -> str:
 
 
 def node_executable() -> str:
+    configured = os.environ.get("TOOLBOX_NODE")
+    if configured and Path(configured).is_file():
+        return configured
     bundled = portable_runtime_root() / "node" / "node.exe"
     if bundled.is_file():
         return str(bundled)

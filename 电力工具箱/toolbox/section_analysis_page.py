@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 import tkinter as tk
@@ -22,11 +21,6 @@ def open_path(path: Path) -> None:
         subprocess.run(["open", str(path)], check=False)
     else:
         subprocess.run(["xdg-open", str(path)], check=False)
-
-
-def result_folder_name(source: Path) -> str:
-    cleaned = re.sub(r'[\\/:*?"<>|]+', "_", Path(source).stem).strip()
-    return cleaned or "500kV断面分析结果"
 
 
 def result_html_name(source: Path) -> str:
@@ -51,13 +45,13 @@ class SectionAnalysisPage(ToolPage):
         self.files: list[Path] = []
         self.output_root = tk.StringVar(
             master=self,
-            value=str(paths.section_analysis_dir / "result"),
+            value=str(Path.home() / "Downloads"),
         )
         self.topology_path = tk.StringVar(
             master=self,
             value=str(paths.section_analysis_topology),
         )
-        self.threshold = tk.StringVar(master=self, value="100")
+        self.threshold = tk.StringVar(master=self, value="80")
         self.latest_html: Path | None = None
 
         self.add_button = ttk.Button(self.actions, text="添加电价文件", command=self.add_files)
@@ -146,9 +140,9 @@ class SectionAnalysisPage(ToolPage):
         self.append_log("请添加日前或实时节点电价 Excel 后开始分析。")
 
     def _sync_rule_summary(self, *_args) -> None:
-        threshold = self.threshold.get().strip() or "100"
+        threshold = self.threshold.get().strip() or "80"
         self.rule_summary.set(
-            f"相邻节点一涨一跌  ＋  价差 > {threshold}元/MWh  ＋  连续至少4个时点"
+            f"相邻节点一涨一跌  ＋  价差 > {threshold}元/MWh  ＋  全天累计至少4个时点"
         )
 
     def set_files(self, paths: list[Path]) -> None:
@@ -258,11 +252,7 @@ class SectionAnalysisPage(ToolPage):
         )
 
         def on_success(_code: int) -> None:
-            self.latest_html = (
-                output_root
-                / result_folder_name(selected_files[-1])
-                / result_html_name(selected_files[-1])
-            )
+            self.latest_html = output_root / result_html_name(selected_files[-1])
             if self.latest_html.is_file():
                 self.open_latest_button.configure(state="normal")
             messagebox.showinfo(

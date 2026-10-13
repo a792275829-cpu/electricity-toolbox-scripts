@@ -1,0 +1,71 @@
+# Tauri 桌面版
+
+Tauri 2 负责安装、单实例、系统托盘和签名更新；主窗口直接运行原来的 `toolbox.app.ToolboxApp`，React 只用于独立的更新窗口。目标仅为 Apple 芯片 Mac（macOS 14+）和 Windows 10 22H2 / Windows 11 x64，不包含 32 位 Windows、Windows ARM 或 Intel Mac。
+
+主界面没有另一套网页实现：原来的布局、控件、字体主题、日期选择、文件对话框、快捷键、任务取消、账号保存、日志、WPS 配置表格和弹窗，都由原版代码执行。Mac 发行包固定携带 Tcl/Tk 8.6.18，与本机原版一致，避免 Tk 9 的字体／缩放差异。桌面版主窗口右下角的“检查更新”会打开更新窗口并立即检查 GitHub Releases；系统托盘／Mac 菜单栏图标的“应用更新…”入口同时保留。现有 Tk 启动器保留。
+
+## 日常维护
+
+Mac 双击仓库的 `00_启动/Tauri开发版.command`。Windows 使用同目录的 `.bat`。
+
+首次开发需要 Node 22.23.3、Rust stable、项目根目录 `.venv`。Mac 需要 Xcode Command Line Tools；Windows 需要 Visual Studio Build Tools 的“使用 C++ 的桌面开发”及 WebView2。Mac 的 Python 依赖仍由根目录 `setup_macos.command` 初始化；Windows 开发机可执行 `uv venv --python 3.11 .venv` 后 `uv pip install --python .venv/Scripts/python.exe -r requirements.txt`。前端首次执行 `cd desktop && npm ci`。
+
+开发启动器运行 `npm run dev`，自动编译必要的 Rust 改动。日常业务和界面仍维护原 Python 文件，修改已加载的界面代码后关闭并重新启动即可，无需制作安装包；脚本任务在下一次运行时读取脚本源码。React/CSS 只影响更新窗口并支持即时刷新。修改 `desktop/python/native_bridge.py` 或依赖后重启应用。
+
+接收电脑安装发行包即可使用，内置 Python 3.11.15、Node 22.23.3、Playwright 1.55.0 和 Chromium。Windows NSIS 安装器带离线 WebView2 安装器。浏览器登录和网站取数仍需要网络。
+
+## 本地构建
+
+在目标原生构建机执行：
+
+```sh
+python packaging/tauri/prepare_payload.py --target aarch64-apple-darwin
+cd desktop
+npm ci
+npm run build -- --bundles app,dmg
+```
+
+Windows 将 target 改为 `x86_64-pc-windows-msvc`，bundles 改为 `nsis`。构建机需要 `uv`、Node/npm、Rust 和根目录 Python 依赖；不支持用 Mac 编译 Windows 的 Python/浏览器运行环境。资源输出到 Git 忽略的 `desktop/src-tauri/payload/`；安装包位于 `desktop/src-tauri/target/release/bundle/`，指定 `--target` 时多一层目标目录。
+
+本地生成签名包需要设置 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；不要把私钥写入仓库、命令行参数或日志。首次生成的本机私钥保存在 `~/.config/electricity-toolbox/signing/updater.key`，目录权限 700、文件权限 600。请单独备份，不能每次发版重新生成。其公钥已写入 `src-tauri/tauri.conf.json`。
+
+## GitHub 发布与应用内更新
+
+仓库：a792275829-cpu/electricity-toolbox-scripts。`.github/workflows/desktop-ci.yml` 执行双端原生检查；`desktop-release.yml` 由版本标签或指定已有标签触发。
+
+1. 提交需要分发的源码和桌面相关文件，先让 Desktop checks 通过。当前工作区中的未提交、未跟踪业务源码不会自动出现在 GitHub 的构建机上。
+2. `python packaging/tauri/version.py set 0.1.2` 同步 npm、Tauri、Cargo 和锁文件的版本；提交这些修改。
+3. 创建并推送对应标签 `v0.1.2`。
+4. Actions 创建草稿 → Mac arm64 / Windows x64 原生构建 → 上传安装包及签名 → 检查两端更新资源齐全 → 生成 `latest.json` → 发布。
+5. 已安装应用启动后静默检查更新；系统托盘／Mac 菜单栏图标的“应用更新…”中可手动检查、下载、安装并重启。没有成功发布首个版本前，更新检查可能返回 404。
+
+GitHub Actions 使用仓库 Secrets `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（当前私钥无密码，后者可留空）。本次已配置前者；发布流程缺少签名私钥时会失败，不会发布无签名更新。不要在客户端内置 GitHub PAT。更新索引只有 `darwin-aarch64` 和 `windows-x86_64`，构建失败保留草稿，不发布不完整版本。
+
+Mac 当前采用 ad-hoc 签名，尚未使用 Apple Developer ID 或公证；外部分发首次打开仍可能需要在系统“隐私与安全性”中允许。Windows 尚未配置 Authenticode 证书，首次安装可能显示发布者未知。更新包的 Tauri 签名与系统发行证书是两个独立机制。
+
+## 数据与更新行为
+
+发行版从应用资源中运行内置环境，用户目录使用以下结构：
+
+- `app/`：清单管理的业务源码。
+- `data/`：账号配置、各工具独立登录态／profile、数据总表和输出。
+- `samples/`：全部模块的独立测试样例。
+- `state/`、`backups/`、`logs/`、`cache/`：更新记录、备份、日志和缓存。
+
+Mac 根目录为 `~/Library/Application Support/com.electricity.toolbox`；Windows 为 `%APPDATA%\com.electricity.toolbox`。开发版直接执行仓库源码，使用根目录下 `development/data/`，与已安装版本分开。业务模块的中文名称、相对路径、输出文件名及原版源码启动方式保留。
+
+首次新版启动会按旧安装清单迁移原 `workspace/`，备份并修正内部绝对路径，失败回滚。更新仅替换 `app/` 的清单文件，保留 `data/` 和 `samples/`；本地源码修改仍阻止覆盖。完整目录职责及迁移说明见 [目录约定](docs/directory-layout.md)。
+
+更新开始前直接检查原版任务注册表；有运行任务时拒绝更新。准备安装时临时隐藏原版窗口，防止启动新任务；更新失败重新显示原窗口，保留当前页面与输入。关闭主窗口／系统托盘退出均调用原版退出处理器，保留任务确认、不可安全中断的写入保护和账号保存行为。关闭更新窗口只隐藏更新窗口。开发模式可以检查版本，禁用安装更新。
+
+## 验证
+
+```sh
+python -m unittest discover -s desktop/tests/python -v
+npm --prefix desktop test
+npm --prefix desktop run web:build
+```
+
+原版交互回归在 `电力工具箱/` 中运行 `../.venv/bin/python -m unittest tests.test_platform_ui tests.test_date_inputs tests.test_task_widgets tests.test_wind_forecast_page tests.test_summary_upload_page tests.test_spot_price_page tests.test_transaction_info_page tests.test_login_ui tests.test_catalog_loading`。
+
+真实取数、账号登录、Excel/WPS 写入、上传和 Windows 安装／更新，需要对应系统和有效账号进行业务验收。自动测试不会向生产网站上传测试数据。

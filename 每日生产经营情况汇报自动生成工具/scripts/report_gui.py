@@ -14,6 +14,11 @@ from tkinter import filedialog, messagebox, ttk
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 APP_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name in {"scripts", "\u811a\u672c"} else SCRIPT_DIR
+if str(APP_ROOT.parent) not in sys.path:
+    sys.path.insert(0, str(APP_ROOT.parent))
+from toolbox_storage import data_path
+from toolbox_dates import DATE_INPUT_ERROR, normalize_date_input, parse_date_input
+from toolbox_date_input import DateInput
 DOWNLOADS_DIR = Path.home() / "Downloads"
 PREFERRED_PYTHON = Path(r"C:\Users\lllg\AppData\Local\Programs\Python\Python311\python.exe")
 
@@ -67,8 +72,8 @@ class ReportTool(tk.Tk):
         form = ttk.Frame(root)
         form.pack(fill=tk.X)
         ttk.Label(form, text="报告日期：").pack(side=tk.LEFT)
-        ttk.Entry(form, textvariable=self.report_date, width=18).pack(side=tk.LEFT, padx=(4, 12))
-        ttk.Label(form, text="格式 YYYY-MM-DD，例如 2026-05-13").pack(side=tk.LEFT)
+        DateInput(form, textvariable=self.report_date, width=16).pack(side=tk.LEFT, padx=(4, 12))
+        ttk.Label(form, text="可输入或粘贴日期").pack(side=tk.LEFT)
         ttk.Button(form, text="按日期自动匹配 Excel", command=self.auto_fill_workbooks).pack(side=tk.LEFT, padx=(16, 0))
 
         workbook_box = ttk.LabelFrame(root, text="Excel 数据源")
@@ -130,7 +135,7 @@ class ReportTool(tk.Tk):
             variable.set(path)
 
     def choose_template_report(self, variable: tk.StringVar) -> None:
-        output_dir = APP_ROOT / "输出"
+        output_dir = data_path(APP_ROOT) / "输出"
         path = filedialog.askopenfilename(
             title="选择 Word 模板报告",
             initialdir=str(output_dir if output_dir.exists() else APP_ROOT),
@@ -141,9 +146,9 @@ class ReportTool(tk.Tk):
 
     def auto_fill_workbooks(self) -> None:
         try:
-            report_day = datetime.strptime(self.report_date.get().strip(), "%Y-%m-%d").date()
+            report_day = parse_date_input(self.report_date.get())
         except ValueError:
-            messagebox.showerror("日期格式错误", "请填写 YYYY-MM-DD 格式，例如 2026-05-13。")
+            messagebox.showerror("日期格式错误", DATE_INPUT_ERROR)
             return
 
         mapping = [
@@ -177,7 +182,7 @@ class ReportTool(tk.Tk):
         return max(candidates, key=lambda path: path.stat().st_mtime)
 
     def open_exports(self) -> None:
-        path = APP_ROOT / "\u8f93\u51fa"
+        path = data_path(APP_ROOT) / "\u8f93\u51fa"
         open_directory(path)
 
     def start(self) -> None:
@@ -186,6 +191,11 @@ class ReportTool(tk.Tk):
         report_date = self.report_date.get().strip()
         if not report_date:
             messagebox.showerror("缺少日期", "请填写报告日期。")
+            return
+        try:
+            report_date = normalize_date_input(report_date)
+        except ValueError:
+            messagebox.showerror("日期格式错误", DATE_INPUT_ERROR)
             return
         if not self.fetch_data.get() and not self.generate_word.get():
             messagebox.showerror("未选择任务", "请至少选择一个任务。")

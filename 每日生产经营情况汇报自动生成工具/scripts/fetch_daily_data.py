@@ -744,10 +744,11 @@ def save_output(payload: dict[str, Any], output_dir: Path) -> Path:
     raw_ws["A1"] = json.dumps(payload, ensure_ascii=False, indent=2)
     raw_ws.column_dimensions["A"].width = 120
 
+    body_alignment = Alignment(vertical="center")
     for ws in wb.worksheets:
         for row in ws.iter_rows():
             for cell in row:
-                cell.alignment = Alignment(vertical="center")
+                cell.alignment = body_alignment
 
     try:
         wb.save(path)

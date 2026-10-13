@@ -10,6 +10,7 @@ import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+from uuid import uuid4
 
 try:
     import tkinter as tk
@@ -108,7 +109,7 @@ def run_summary(
     log(f"开始扫描文件夹：{input_dir}")
     units = collect_units(input_dir, log)
     if not units:
-        raise ValueError("没有找到可汇总的 Excel 数据，请确认文件夹结构和 5-11 类似。")
+        raise ValueError("没有找到可汇总的 Excel 数据，请选择包含交易结果文件的场站文件夹或其上级文件夹。")
 
     log(f"共识别 {len(units)} 台机组，开始生成汇总表。")
     final_output = write_workbook(units, output_path, log)
@@ -122,13 +123,25 @@ def collect_units(
 ) -> list[UnitData]:
     units: dict[tuple[str, str], UnitData] = {}
 
-    for station_dir in sorted(path for path in input_dir.iterdir() if path.is_dir()):
+    station_dirs = sorted(path for path in input_dir.iterdir() if path.is_dir())
+    # Accept a station folder itself as well as the usual date/station layout.
+    if any(
+        not path.name.startswith("~$")
+        for pattern in FILE_TYPE_PATTERNS.values()
+        for path in input_dir.glob(f"*{pattern}*.xlsx")
+    ):
+        station_dirs.insert(0, input_dir)
+
+    for station_dir in station_dirs:
         station_key = station_dir.name
         station_name = STATION_DISPLAY_NAMES.get(station_key, station_key)
         logger(f"处理场站：{station_name}")
 
         for market, pattern in FILE_TYPE_PATTERNS.items():
-            files = sorted(station_dir.glob(f"*{pattern}*.xlsx"))
+            files = sorted(
+                path for path in station_dir.glob(f"*{pattern}*.xlsx")
+                if not path.name.startswith("~$")
+            )
             for file_path in files:
                 logger(f"  读取文件：{file_path.name}")
                 for unit_name, energy, price in parse_workbook(file_path):
@@ -150,38 +163,47 @@ def collect_units(
 
 
 def parse_workbook(file_path: Path) -> list[tuple[str, list[NumericCell], list[NumericCell]]]:
-    workbook = load_workbook(file_path, data_only=True)
-    result: list[tuple[str, list[float], list[float]]] = []
+    workbook = load_workbook(file_path, data_only=True, read_only=True)
+    result: list[tuple[str, list[NumericCell], list[NumericCell]]] = []
+    try:
+        for worksheet in workbook.worksheets:
+            # Some exported files contain stale worksheet dimensions.
+            worksheet.reset_dimensions()
+            rows = worksheet.iter_rows()
+            header_row = next(rows, ())
+            headers = [str(cell.value or "").strip() for cell in header_row]
+            time_col = find_column(headers, "时刻")
+            energy_col = find_column(headers, "电量")
+            price_col = find_price_column(headers)
 
-    for sheet_name in workbook.sheetnames:
-        worksheet = workbook[sheet_name]
-        headers = [str(worksheet.cell(1, col).value or "").strip() for col in range(1, worksheet.max_column + 1)]
-        time_col = find_column(headers, "时刻")
-        energy_col = find_column(headers, "电量")
-        price_col = find_price_column(headers)
-
-        if time_col is None or energy_col is None or price_col is None:
-            continue
-
-        energy_by_hour = {slot: NumericCell(0.0) for slot in TIME_SLOTS}
-        price_by_hour = {slot: NumericCell(0.0) for slot in TIME_SLOTS}
-
-        for row in range(2, worksheet.max_row + 1):
-            slot = normalize_time(worksheet.cell(row, time_col).value)
-            if slot not in energy_by_hour:
+            if time_col is None or energy_col is None or price_col is None:
                 continue
-            energy_by_hour[slot] = read_numeric_cell(worksheet.cell(row, energy_col))
-            price_by_hour[slot] = read_numeric_cell(worksheet.cell(row, price_col))
 
-        result.append(
-            (
-                extract_unit_name(sheet_name),
-                [energy_by_hour[slot] for slot in TIME_SLOTS],
-                [price_by_hour[slot] for slot in TIME_SLOTS],
+            energy_by_hour = {slot: NumericCell(0.0) for slot in TIME_SLOTS}
+            price_by_hour = {slot: NumericCell(0.0) for slot in TIME_SLOTS}
+            for row in rows:
+                if len(row) < time_col:
+                    continue
+                slot = normalize_time(row[time_col - 1].value)
+                if slot not in energy_by_hour:
+                    continue
+                energy_by_hour[slot] = (
+                    read_numeric_cell(row[energy_col - 1]) if len(row) >= energy_col else NumericCell(0.0)
+                )
+                price_by_hour[slot] = (
+                    read_numeric_cell(row[price_col - 1]) if len(row) >= price_col else NumericCell(0.0)
+                )
+
+            result.append(
+                (
+                    extract_unit_name(worksheet.title),
+                    [energy_by_hour[slot] for slot in TIME_SLOTS],
+                    [price_by_hour[slot] for slot in TIME_SLOTS],
+                )
             )
-        )
-
-    return result
+        return result
+    finally:
+        workbook.close()
 
 
 def find_column(headers: list[str], keyword: str) -> int | None:
@@ -223,10 +245,23 @@ def to_float(value: object) -> float:
 
 
 def read_numeric_cell(cell) -> NumericCell:
-    number_format = cell.number_format or "General"
+    number_format = normalize_number_format(cell.number_format)
     if number_format == "General" and isinstance(cell.value, str):
         number_format = infer_text_number_format(cell.value)
     return NumericCell(to_float(cell.value), number_format)
+
+
+def normalize_number_format(value: object) -> str:
+    """Return the format code expected by openpyxl's cell style descriptor."""
+    if isinstance(value, str):
+        return value or "General"
+
+    # Some third-party generated workbooks expose the parsed NumberFormat
+    # object instead of its format-code string through Cell.number_format.
+    format_code = getattr(value, "formatCode", None)
+    if isinstance(format_code, str) and format_code:
+        return format_code
+    return "General"
 
 
 def infer_text_number_format(value: str) -> str:
@@ -391,7 +426,7 @@ def write_station_block(
                 for row_offset, source_cell in enumerate(values):
                     body_cell = worksheet.cell(data_start + row_offset, col + offset, source_cell.value)
                     style_body(body_cell, bold=False)
-                    body_cell.number_format = source_cell.number_format
+                    body_cell.number_format = normalize_number_format(source_cell.number_format)
             col += 2
 
         if market_index < len(MARKET_ORDER) - 1:
@@ -455,12 +490,48 @@ def set_widths(worksheet) -> None:
 
 def save_workbook_with_fallback(workbook: Workbook, output_path: Path) -> Path:
     try:
-        workbook.save(output_path)
+        save_workbook_atomically(workbook, output_path)
         return output_path
     except PermissionError:
         fallback_path = output_path.with_name(f"{output_path.stem}_new{output_path.suffix}")
-        workbook.save(fallback_path)
+        save_workbook_atomically(workbook, fallback_path)
         return fallback_path
+
+
+def sanitize_workbook_number_formats(workbook: Workbook) -> int:
+    """Replace invalid objects in openpyxl's custom number-format table."""
+    formats = getattr(workbook, "_number_formats", None)
+    if formats is None:
+        return 0
+
+    normalized = [normalize_number_format(value) for value in formats]
+    replacement_count = sum(
+        not isinstance(value, str) or value != normalized_value
+        for value, normalized_value in zip(formats, normalized)
+    )
+    if replacement_count:
+        # Preserve list positions because cell style IDs refer to these indexes.
+        workbook._number_formats = type(formats)(normalized)
+    return replacement_count
+
+
+def save_workbook_atomically(workbook: Workbook, output_path: Path) -> None:
+    """Publish a workbook only after a complete file can be reopened."""
+    temporary_path = output_path.with_name(
+        f".{output_path.stem}.{uuid4().hex}.tmp{output_path.suffix}"
+    )
+    try:
+        sanitize_workbook_number_formats(workbook)
+        workbook.save(temporary_path)
+        verification = load_workbook(temporary_path, read_only=True, data_only=False)
+        try:
+            if not verification.sheetnames:
+                raise ValueError("生成的汇总工作簿不包含任何工作表")
+        finally:
+            verification.close()
+        temporary_path.replace(output_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def launch_gui() -> int:

@@ -49,12 +49,15 @@ class ToolPage(ttk.Frame):
                 style="PageTitle.TLabel",
             ).pack(anchor="w")
         if description:
-            ttk.Label(
+            self._description_wraplength = 820
+            self.description_label = ttk.Label(
                 header,
                 text=description,
                 style="Muted.TLabel",
                 wraplength=820,
-            ).pack(anchor="w", pady=(4, 0))
+            )
+            self.description_label.pack(anchor="w", pady=(6, 0))
+            header.bind("<Configure>", self._resize_description)
 
         self.actions = ttk.Frame(self)
         self.actions.grid(row=1, column=0, sticky="ew", pady=(0, 12))
@@ -68,6 +71,7 @@ class ToolPage(ttk.Frame):
         self.footer.columnconfigure(0, weight=1)
         self.progress = ttk.Progressbar(self.footer, mode="indeterminate")
         self.progress.grid(row=0, column=0, sticky="ew")
+        self.progress.grid_remove()
         self.cancel_button = ttk.Button(
             self.footer, text="取消任务", command=self.cancel_current_task, state="disabled"
         )
@@ -82,9 +86,9 @@ class ToolPage(ttk.Frame):
         log_frame.rowconfigure(0, weight=1)
         self.log_text = tk.Text(
             log_frame,
-            height=9,
+            height=6,
             wrap="word",
-            font=("Microsoft YaHei UI", 9),
+            font="TkFixedFont",
             borderwidth=0,
         )
         self.log_text.grid(row=0, column=0, sticky="nsew")
@@ -95,6 +99,12 @@ class ToolPage(ttk.Frame):
         self.log_text.configure(yscrollcommand=scrollbar.set)
         self._schedule_poll()
 
+    def _resize_description(self, event) -> None:
+        wraplength = max(180, event.width - 8)
+        if wraplength != self._description_wraplength:
+            self._description_wraplength = wraplength
+            self.description_label.configure(wraplength=wraplength)
+
     def set_task_console_visible(self, visible: bool) -> None:
         """Show or hide this module's generic task controls and log console."""
         if visible:
@@ -104,6 +114,13 @@ class ToolPage(ttk.Frame):
 
     def register_busy_widgets(self, *widgets: tk.Widget) -> None:
         self._busy_widgets.extend(widgets)
+        primary = tuple(getattr(self, name, None) for name in (
+            "run_button", "export_button", "generate_button", "update_button",
+            "upload_button", "predict_button",
+        ))
+        for widget in widgets:
+            if widget in primary and isinstance(widget, ttk.Button):
+                widget.configure(style="Primary.TButton")
 
     def set_busy(self, busy: bool, status: str = "") -> None:
         self.busy = busy
@@ -114,9 +131,11 @@ class ToolPage(ttk.Frame):
             except tk.TclError:
                 pass
         if busy:
+            self.progress.grid()
             self.progress.start(10)
         else:
             self.progress.stop()
+            self.progress.grid_remove()
         if status:
             self.status_var.set(status)
         self.cancel_button.configure(state="normal" if busy and self._current_cancellable else "disabled")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import queue
-import re
 import sys
 import threading
 import traceback
@@ -17,12 +16,7 @@ from src.generate_500kv_blockage_map import generate_blockage_map
 
 MODULE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TOPOLOGY = MODULE_ROOT / "500kV节点拓扑.md"
-DEFAULT_OUTPUT_DIR = MODULE_ROOT / "result"
-
-
-def safe_folder_name(name: str) -> str:
-    cleaned = re.sub(r'[\\/:*?"<>|]+', "_", name).strip()
-    return cleaned or "analysis"
+DEFAULT_OUTPUT_DIR = Path.home() / "Downloads"
 
 
 def main() -> None:
@@ -33,7 +27,7 @@ def main() -> None:
     topology_var = tk.StringVar(value=str(DEFAULT_TOPOLOGY))
     DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_dir_var = tk.StringVar(value=str(DEFAULT_OUTPUT_DIR))
-    threshold_var = tk.StringVar(value="100")
+    threshold_var = tk.StringVar(value="80")
     selected_files: list[Path] = []
     running = tk.BooleanVar(value=False)
     ui_queue: queue.Queue[tuple[str, str, str | None]] = queue.Queue()
@@ -156,12 +150,11 @@ def main() -> None:
             for index, raw_path in enumerate(raw_files, start=1):
                 write_log_async("")
                 write_log_async(f"[{index}/{len(raw_files)}] {raw_path.name}")
-                case_dir = output_dir / safe_folder_name(raw_path.stem)
                 try:
                     result = generate_blockage_map(
                         topology_path=topology_path,
                         raw_price_path=raw_path,
-                        output_dir=case_dir,
+                        output_dir=output_dir,
                         threshold=threshold,
                     )
                 except Exception as exc:

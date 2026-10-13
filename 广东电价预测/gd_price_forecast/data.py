@@ -50,6 +50,13 @@ def validate_quarter_hour_grain(frame: pd.DataFrame) -> None:
     bad = counts[counts != 96]
     if not bad.empty:
         raise ValueError(f"每天必须有96个时点，异常日期: {bad.to_dict()}")
+    expected_slots = {f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)}
+    if set(normalized["时刻"]) != expected_slots:
+        raise ValueError("时刻必须为00:00至23:45的标准15分钟时点")
+    dates = pd.DatetimeIndex(normalized["日期"].unique()).sort_values()
+    missing = pd.date_range(dates.min(), dates.max()).difference(dates)
+    if len(missing):
+        raise ValueError(f"日期不连续，缺少: {missing.strftime('%Y-%m-%d').tolist()}")
 
 
 def split_labeled_prediction_dates(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:

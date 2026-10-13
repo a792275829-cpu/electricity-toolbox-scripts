@@ -31,7 +31,7 @@ class DiagnosticCenterPanel(ttk.Frame):
 
         header = ttk.Frame(self)
         header.pack(fill="x")
-        ttk.Label(header, text="运行诊断", style="PageTitle.TLabel").pack(side="left")
+        ttk.Label(header, text="运行诊断", style="PanelTitle.TLabel").pack(side="left")
         ttk.Button(header, text="重新检查", command=self.refresh).pack(side="right")
 
         self.health_var = tk.StringVar(self, "正在检查…")
@@ -41,15 +41,20 @@ class DiagnosticCenterPanel(ttk.Frame):
         )
         ttk.Label(self, textvariable=self.summary_var, style="Muted.TLabel").pack(anchor="w")
 
+        self.checks_frame = ttk.Frame(self)
+        self.checks_frame.columnconfigure(0, weight=1)
         self.check_list = tk.Listbox(
-            self,
+            self.checks_frame,
             width=30,
-            height=5,
+            height=3,
             borderwidth=0,
             activestyle="none",
             exportselection=False,
         )
-        self.check_list.pack(fill="x", pady=(8, 4))
+        self.check_list.grid(row=0, column=0, sticky="ew")
+        self.check_scrollbar = ttk.Scrollbar(self.checks_frame, orient="vertical", command=self.check_list.yview)
+        self.check_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.check_list.configure(yscrollcommand=self.check_scrollbar.set)
         self.check_list.bind("<<ListboxSelect>>", self._show_selected)
 
         self.detail_var = tk.StringVar(self, "")
@@ -60,10 +65,10 @@ class DiagnosticCenterPanel(ttk.Frame):
             wraplength=250,
             justify="left",
         )
-        self.detail_label.pack(fill="x", pady=(2, 8))
 
         actions = ttk.Frame(self)
-        actions.pack(fill="x")
+        self.actions = actions
+        actions.pack(fill="x", pady=(8, 0))
         actions.columnconfigure(0, weight=1)
         actions.columnconfigure(1, weight=1)
         ttk.Button(actions, text="检查文件…", command=self._check_file).grid(
@@ -80,7 +85,6 @@ class DiagnosticCenterPanel(ttk.Frame):
 
     def _render(self, report: DiagnosticReport) -> None:
         self.report = report
-        normal = len(report.passed)
         warnings = len(report.warnings)
         errors = len(report.errors)
         if errors:
@@ -88,30 +92,25 @@ class DiagnosticCenterPanel(ttk.Frame):
         elif warnings:
             self.health_var.set(f"! 环境可用，有 {warnings} 项提醒")
         else:
-            self.health_var.set("✓ 运行环境正常")
-        self.summary_var.set(f"{normal} 正常 · {warnings} 提醒 · {errors} 异常  ·  {report.generated_at:%H:%M}")
+            self.health_var.set("✓ 未发现问题")
+        self.summary_var.set(f"{warnings} 提醒 · {errors} 异常  ·  {report.generated_at:%H:%M}" if warnings or errors else f"检查于 {report.generated_at:%H:%M}")
 
         issues = [*report.errors, *report.warnings]
-        self._visible_checks = issues[:5] if issues else self._normal_highlights(report)
+        self._visible_checks = issues
         self.check_list.delete(0, "end")
         for check in self._visible_checks:
             self.check_list.insert("end", f"{_STATUS_ICON[check.status]}  {check.name}")
 
         if issues:
+            self.check_list.configure(height=min(3, len(issues)))
+            self.checks_frame.pack(fill="x", pady=(8, 4), before=self.actions)
+            self.detail_label.pack(fill="x", pady=(2, 4), before=self.actions)
             self.check_list.selection_set(0)
             self._show_check(self._visible_checks[0])
         else:
-            self.detail_var.set("关键运行条件均正常，不影响现有脚本使用。")
-
-    @staticmethod
-    def _normal_highlights(report: DiagnosticReport) -> list[DiagnosticCheck]:
-        preferred = ("Python", "工具箱工作目录", "工作目录写入权限", "Node.js")
-        highlights: list[DiagnosticCheck] = []
-        for prefix in preferred:
-            match = next((item for item in report.passed if item.name.startswith(prefix)), None)
-            if match is not None:
-                highlights.append(match)
-        return highlights[:5]
+            self.checks_frame.pack_forget()
+            self.detail_label.pack_forget()
+            self.detail_var.set("")
 
     def _show_selected(self, _event=None) -> None:
         selected = self.check_list.curselection()

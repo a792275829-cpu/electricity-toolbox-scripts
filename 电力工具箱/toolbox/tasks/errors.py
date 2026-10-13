@@ -39,7 +39,7 @@ def classify_error(exc: BaseException) -> UserFacingError:
     if isinstance(exc, (ImportError, ModuleNotFoundError)):
         return UserFacingError(ErrorCategory.DEPENDENCY, "缺少运行依赖", "请重新运行 setup_macos.command。", exc)
     if any(marker in text for marker in ("登录", "login", "auth", "认证")):
-        return UserFacingError(ErrorCategory.AUTHENTICATION, "登录状态不可用", "请先执行登录或刷新登录状态，再手动重试。", exc)
+        return UserFacingError(ErrorCategory.AUTHENTICATION, "登录状态不可用", "请检查对应网站的账号配置和网络后重新运行任务。", exc)
     if any(marker in text for marker in ("timeout", "timed out", "network", "socket", "连接")):
         return UserFacingError(ErrorCategory.NETWORK, "网络请求失败", "请检查网络和代理后重试。上传任务需重新确认。", exc)
     return UserFacingError(ErrorCategory.UNKNOWN, str(exc) or exc.__class__.__name__, "请查看完整日志和 traceback。", exc)

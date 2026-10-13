@@ -4,10 +4,13 @@ import path from 'node:path';
 import process from 'node:process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { loadSharedAccount, markAccountSession, prepareAccountSession } from './qingneng-account.mjs';
+import { dataPath } from './storage-paths.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
-const defaultConfigPath = path.join(rootDir, 'upload.config.json');
+const dataDir = dataPath(rootDir);
+const defaultConfigPath = path.join(dataDir, 'upload.config.json');
 
 const targets = [
   {
@@ -96,17 +99,19 @@ async function readJson(filePath, fallback = undefined) {
 
 async function loadConfig(args) {
   const config = await readJson(args.configPath);
-  const loginConfigPath = path.resolve(config.loginConfigPath ?? path.join(rootDir, 'config.json'));
+  const loginConfigPath = dataPath(path.resolve(config.loginConfigPath ?? path.join(dataDir, 'config.json')));
   const loginConfig = await readJson(loginConfigPath, {});
+  const sharedAccount = await loadSharedAccount(path.resolve(rootDir, '../..'));
   return {
     ...config,
     loginConfigPath,
-    username: loginConfig.username,
-    password: loginConfig.password,
+    username: sharedAccount.username ?? loginConfig.username,
+    password: sharedAccount.password ?? loginConfig.password,
+    accountRevision: sharedAccount.revision ?? '',
     headless: args.headless ?? config.headless ?? loginConfig.headless ?? true,
     sourceDir: path.resolve(args.source ?? config.sourceDir),
-    authStatePath: path.resolve(config.authStatePath ?? path.join(rootDir, 'auth_state.json')),
-    userDataDir: path.resolve(config.userDataDir ?? path.join(rootDir, '.browser-profile-uploader')),
+    authStatePath: dataPath(path.resolve(config.authStatePath ?? path.join(dataDir, 'auth_state.json'))),
+    userDataDir: dataPath(path.resolve(config.userDataDir ?? path.join(dataDir, '.browser-profile-uploader'))),
     chromeExecutablePath: config.chromeExecutablePath,
     baseUrl: config.baseUrl ?? 'https://xhxt.chng.com.cn',
   };
@@ -122,6 +127,9 @@ async function pathExists(filePath) {
 }
 
 async function defaultChromeExecutablePath() {
+  if (process.env.TOOLBOX_PORTABLE === '1' && await pathExists(chromium.executablePath())) {
+    return chromium.executablePath();
+  }
   const candidates = [];
   if (process.platform === 'darwin') {
     candidates.push(
@@ -209,6 +217,7 @@ function isExcelFile(name) {
 async function collectPlan(sourceDir) {
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
   const dirs = entries.filter((entry) => entry.isDirectory());
+  const entriesByDirectory = new Map();
   const plan = [];
 
   for (const target of targets) {
@@ -217,7 +226,10 @@ async function collectPlan(sourceDir) {
 
     for (const dir of matchedDirs) {
       const unitDir = path.join(sourceDir, dir.name);
-      const unitEntries = await fs.readdir(unitDir, { withFileTypes: true });
+      if (!entriesByDirectory.has(unitDir)) {
+        entriesByDirectory.set(unitDir, await fs.readdir(unitDir, { withFileTypes: true }));
+      }
+      const unitEntries = entriesByDirectory.get(unitDir);
       for (const entry of unitEntries) {
         if (entry.isFile() && isExcelFile(entry.name)) {
           files.push(path.join(unitDir, entry.name));
@@ -291,7 +303,8 @@ async function launchContext(config) {
     ...launchOptions,
     acceptDownloads: true,
   });
-  if (await pathExists(config.authStatePath)) {
+  await prepareAccountSession(context, config);
+  if (!context.qingnengAccountChanged && await pathExists(config.authStatePath)) {
     try {
       const state = await readJson(config.authStatePath);
       if (Array.isArray(state?.cookies) && state.cookies.length > 0) {
@@ -308,6 +321,7 @@ async function launchContext(config) {
 async function saveAuthState(context, config) {
   await fs.mkdir(path.dirname(config.authStatePath), { recursive: true });
   await context.storageState({ path: config.authStatePath });
+  await markAccountSession(context, config);
 }
 
 async function isLoggedIn(context, config) {
@@ -372,7 +386,7 @@ async function apiLogin(context, config) {
 }
 
 async function ensureLogin(context, config) {
-  if (await isLoggedIn(context, config)) {
+  if (!context.qingnengAccountChanged && await isLoggedIn(context, config)) {
     log('登录态有效。');
     return;
   }
