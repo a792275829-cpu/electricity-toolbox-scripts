@@ -31,15 +31,17 @@ Windows 将 target 改为 `x86_64-pc-windows-msvc`，bundles 改为 `nsis`。构
 
 ## GitHub 发布与应用内更新
 
-仓库：a792275829-cpu/electricity-toolbox-scripts。`.github/workflows/desktop-ci.yml` 执行双端原生检查；`desktop-release.yml` 由版本标签或指定已有标签触发。
+仓库：a792275829-cpu/electricity-toolbox-scripts。本 Windows 维护环境默认只检查、打包和发布 Windows。`.github/workflows/desktop-ci.yml` 和 `desktop-release.yml` 的手动入口均可选择 `windows`、`macos`、`both`；未选择时均为 `windows`。Mac 发版仅在用户明确要求时执行。
 
 1. 提交需要分发的源码和桌面相关文件，先让 Desktop checks 通过。当前工作区中的未提交、未跟踪业务源码不会自动出现在 GitHub 的构建机上。
 2. `python packaging/tauri/version.py set 0.1.2` 同步 npm、Tauri、Cargo 和锁文件的版本；提交这些修改。
 3. 将提升版本号的 `desktop/package.json` 提交到 `main` 后自动创建对应版本标签并构建；也可以继续手动创建并推送对应版本标签。
-4. Actions 创建草稿 → Mac arm64 / Windows x64 原生构建 → 上传安装包及签名 → 检查两端更新资源齐全 → 生成 `latest.json` → 发布。
+4. Actions 创建草稿 → 所选平台原生构建 → 上传安装包及签名 → 校验所选平台更新资源 → 生成 `latest.json` → 发布。默认只构建 Windows NSIS，不依赖 Mac 构建完成；不会把旧 Mac 安装包标记为新的 Mac 版本。
 5. 右下角或系统托盘／Mac 菜单栏图标的“检查更新”可检查版本，确认后下载、安装并重启。没有成功发布首个版本前，更新检查可能返回 404。
 
-GitHub Actions 使用仓库 Secrets `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（当前私钥无密码，后者可留空）。本次已配置前者；发布流程缺少签名私钥时会失败，不会发布无签名更新。不要在客户端内置 GitHub PAT。更新索引只有 `darwin-aarch64` 和 `windows-x86_64`，构建失败保留草稿，不发布不完整版本。
+GitHub Actions 使用仓库 Secrets `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（当前私钥无密码，后者可留空）。本次已配置前者；发布流程缺少签名私钥时会失败，不会发布无签名更新。不要在客户端内置 GitHub PAT。更新索引仅包含所选平台；所选平台的构建或签名缺失时保留草稿。
+
+已发布的 0.1.3 双端附件保留，本次调整发版默认值不重新打包已发布版本。现有旧客户端共用 `releases/latest/download/latest.json`；Windows 单独发版后，旧 Mac 客户端检查该索引可能提示平台不可用。Mac 用户可继续使用已有版本，后续 Mac 独立维护时需要迁移到独立更新地址。静态索引使用一个顶层版本号，不能将旧 Mac 包冒充更高版本来填充缺失平台，见 [Tauri 更新索引格式](https://v2.tauri.app/plugin/updater/#static-json-file)。
 
 Mac 当前采用 ad-hoc 签名，尚未使用 Apple Developer ID 或公证；外部分发首次打开仍可能需要在系统“隐私与安全性”中允许。Windows 尚未配置 Authenticode 证书，首次安装可能显示发布者未知。更新包的 Tauri 签名与系统发行证书是两个独立机制。
 

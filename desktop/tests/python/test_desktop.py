@@ -34,12 +34,13 @@ class DesktopTests(unittest.TestCase):
             },
         ]
         signatures = {a["name"] + ".sig": "signature" for a in assets}
-        index = module.build_index("v0.1.0", assets, signatures)
+        targets = tuple(module.PLATFORMS)
+        index = module.build_index("v0.1.0", assets, signatures, targets=targets)
         self.assertEqual(set(index["platforms"]), {"darwin-aarch64", "windows-x86_64"})
         with self.assertRaises(ValueError):
-            module.build_index("v0.1.0", assets[:1], signatures)
+            module.build_index("v0.1.0", assets[:1], signatures, targets=targets)
         with self.assertRaises(ValueError):
-            module.build_index("v0.1.0", assets, {})
+            module.build_index("v0.1.0", assets, {}, targets=targets)
 
 
     def test_draft_asset_urls_use_the_final_release_tag(self):
@@ -52,10 +53,42 @@ class DesktopTests(unittest.TestCase):
         names = ["工具_aarch64.app.tar.gz", "tool_x64-setup.exe"]
         assets = [{"name": name, "browser_download_url": prefix + "untagged-temporary/" + name}
                   for name in names]
-        index = module.build_index("v0.1.2", assets, {name + ".sig": "signed" for name in names})
+        index = module.build_index("v0.1.2", assets, {name + ".sig": "signed" for name in names}, targets=tuple(module.PLATFORMS))
         from urllib.parse import unquote
         self.assertEqual({unquote(v["url"]) for v in index["platforms"].values()},
                          {prefix + "v0.1.2/" + name for name in names})
+
+    def test_windows_release_plan_and_index_do_not_require_mac_build(self):
+        spec = importlib.util.spec_from_file_location("release_windows_test", ROOT / "packaging/tauri/release_index.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        targets, matrix = module.release_plan()
+        self.assertEqual(("windows-x86_64",), targets)
+        self.assertEqual(["windows-2022"], [row["runner"] for row in matrix["include"]])
+        assets = [{"name": "tool_x64-setup.exe", "browser_download_url": "https://example.com/tool_x64-setup.exe"}]
+        index = module.build_index("v0.1.4", assets, {"tool_x64-setup.exe.sig": "signed"})
+        self.assertEqual({"windows-x86_64"}, set(index["platforms"]))
+        with self.assertRaises(ValueError):
+            module.build_index("v0.1.4", assets, {})
+        with self.assertRaises(ValueError):
+            module.build_index("v0.1.4", [], {})
+
+    def test_other_platforms_require_explicit_selection_and_valid_targets(self):
+        spec = importlib.util.spec_from_file_location("release_selection_test", ROOT / "packaging/tauri/release_index.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        targets, matrix = module.release_plan("macos")
+        self.assertEqual(("darwin-aarch64",), targets)
+        self.assertEqual("macos-14", matrix["include"][0]["runner"])
+        self.assertEqual(2, len(module.release_plan("both")[1]["include"]))
+        for selection in ("linux", "", None):
+            with self.assertRaises(ValueError):
+                module.release_plan(selection)
+        for targets in ((), ("linux",), ("windows-x86_64", "windows-x86_64")):
+            with self.assertRaises(ValueError):
+                module.build_index("v0.1.4", [], {}, targets=targets)
+        notes = "| Windows 10 | exe |\n| macOS | dmg |\n当前 Mac 安装包不支持 Intel 芯片。\n"
+        self.assertEqual("| Windows 10 | exe |\n", module.selected_notes(notes, ("windows-x86_64",)))
 
 
 class UpdateWorkspaceTests(unittest.TestCase):

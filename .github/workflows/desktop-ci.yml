@@ -4,23 +4,34 @@ on:
   push:
     branches: [main, master, "codex/**"]
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to check
+        required: true
+        default: windows
+        type: choice
+        options: [windows, macos, both]
 env:
   PYTHONUTF8: "1"
   PYTHONIOENCODING: utf-8
 permissions:
   contents: read
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.platforms.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: platforms
+        env:
+          CHECK_PLATFORM: ${{ inputs.platform || 'windows' }}
+        run: python packaging/tauri/release_index.py --plan "$CHECK_PLATFORM" --github-output "$GITHUB_OUTPUT"
   native:
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            target: aarch64-apple-darwin
-            requirements: packaging/tauri/requirements-macos.lock
-          - runner: windows-2022
-            target: x86_64-pc-windows-msvc
-            requirements: packaging/windows/requirements.lock
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4

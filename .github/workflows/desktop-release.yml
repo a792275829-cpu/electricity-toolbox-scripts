@@ -10,6 +10,12 @@ on:
         description: Existing version tag (for example v0.1.0)
         required: true
         type: string
+      platform:
+        description: Platform to release (this maintenance environment defaults to Windows)
+        required: true
+        default: windows
+        type: choice
+        options: [windows, macos, both]
 env:
   PYTHONUTF8: "1"
   PYTHONIOENCODING: utf-8
@@ -24,6 +30,8 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       release: ${{ steps.draft.outputs.release }}
+      matrix: ${{ steps.platforms.outputs.matrix }}
+      platforms: ${{ steps.platforms.outputs.platforms }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,6 +45,13 @@ jobs:
           else
             python packaging/tauri/version.py check --github-output "$GITHUB_OUTPUT"
           fi
+      - id: platforms
+        env:
+          RELEASE_PLATFORM: ${{ inputs.platform || 'windows' }}
+        run: >-
+          python packaging/tauri/release_index.py --plan "$RELEASE_PLATFORM"
+          --github-output "$GITHUB_OUTPUT" --notes-file packaging/tauri/release_notes.md
+          --notes-output release-notes-selected.md
       - name: Create version tag for a main-branch release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
@@ -54,7 +69,7 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           if ! gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > draft-state.txt 2>/dev/null; then
-            gh release create "$RELEASE_TAG" --verify-tag --draft --title "电力工具箱 $RELEASE_TAG" --notes-file packaging/tauri/release_notes.md
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "电力工具箱 $RELEASE_TAG" --notes-file release-notes-selected.md
           elif [ "$(cat draft-state.txt)" != "true" ]; then
             echo 'Refusing to replace an already published release.' >&2
             exit 1
@@ -64,16 +79,7 @@ jobs:
     needs: prepare
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            target: aarch64-apple-darwin
-            requirements: packaging/tauri/requirements-macos.lock
-            bundles: app,dmg
-          - runner: windows-2022
-            target: x86_64-pc-windows-msvc
-            requirements: packaging/windows/requirements.lock
-            bundles: nsis
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -112,7 +118,7 @@ jobs:
           releaseId: ${{ needs.prepare.outputs.release }}
           tagName: ${{ needs.prepare.outputs.tag }}
           releaseDraft: true
-          uploadUpdaterJson: false
+          includeUpdaterJson: false
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
   publish:
     needs: [prepare, build]
@@ -121,12 +127,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.tag }}
-      - name: Generate and validate complete updater index
+      - name: Generate and validate selected platform updater index
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-        run: python packaging/tauri/release_index.py "$RELEASE_TAG"
-      - name: Publish only after both platforms succeeded
+          RELEASE_PLATFORMS: ${{ needs.prepare.outputs.platforms }}
+        run: python packaging/tauri/release_index.py "$RELEASE_TAG" --platforms "$RELEASE_PLATFORMS"
+      - name: Publish only after selected platforms succeeded
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
