@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 
 def run(*args):
@@ -30,7 +31,13 @@ def build_index(tag, assets, signatures, notes="", date=None):
         signature = signatures.get(asset["name"] + ".sig", "").strip()
         if not signature:
             raise ValueError(f"更新包缺少签名：{asset['name']}")
-        platforms[key] = {"url": asset["browser_download_url"], "signature": signature}
+        url = asset["browser_download_url"]
+        # Draft assets can carry an untagged-* URL which disappears on publish.
+        marker = "/releases/download/"
+        if marker in url:
+            url = (url.split(marker, 1)[0] + marker + quote(tag, safe="")
+                   + "/" + quote(asset["name"], safe=""))
+        platforms[key] = {"url": url, "signature": signature}
     return {
         "version": tag.removeprefix("v"),
         "notes": notes,

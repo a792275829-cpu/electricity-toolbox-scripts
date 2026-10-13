@@ -42,6 +42,22 @@ class DesktopTests(unittest.TestCase):
             module.build_index("v0.1.0", assets, {})
 
 
+    def test_draft_asset_urls_use_the_final_release_tag(self):
+        spec = importlib.util.spec_from_file_location(
+            "release_index", ROOT / "packaging/tauri/release_index.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        prefix = "https://github.com/owner/repo/releases/download/"
+        names = ["工具_aarch64.app.tar.gz", "tool_x64-setup.exe"]
+        assets = [{"name": name, "browser_download_url": prefix + "untagged-temporary/" + name}
+                  for name in names]
+        index = module.build_index("v0.1.2", assets, {name + ".sig": "signed" for name in names})
+        from urllib.parse import unquote
+        self.assertEqual({unquote(v["url"]) for v in index["platforms"].values()},
+                         {prefix + "v0.1.2/" + name for name in names})
+
+
 class UpdateWorkspaceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
