@@ -162,7 +162,8 @@ class ToolPage(ttk.Frame):
 
     def _drain_log_queue(self) -> None:
         chunks: list[str] = []
-        while True:
+        # Yield back to Tk between batches even if a task continuously logs.
+        for _ in range(200):
             try:
                 chunks.append(self._log_queue.get_nowait())
             except queue.Empty:

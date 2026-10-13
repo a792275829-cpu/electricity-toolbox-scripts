@@ -56,3 +56,8 @@ Thumbs.db
 # Local Codex/Superpowers workspaces
 .worktrees/
 .superpowers/
+
+# Windows maintenance runtime and local data
+/runtime/
+/development/
+/维护包清单.json

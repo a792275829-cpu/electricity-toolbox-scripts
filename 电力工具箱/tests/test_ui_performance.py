@@ -177,7 +177,7 @@ class UiRefreshTests(unittest.TestCase):
         self.assertIs(page, app.pages["WPS写入工具"])
         self.assertEqual("grid", page.winfo_manager())
 
-    def test_wps_warmup_caches_hidden_page_without_changing_navigation(self) -> None:
+    def test_startup_stays_on_dashboard_and_creates_wps_only_on_first_visit(self) -> None:
         from toolbox.app import PAGE_NAMES, ToolboxApp
 
         self.root.destroy()
@@ -191,13 +191,17 @@ class UiRefreshTests(unittest.TestCase):
             app = ToolboxApp()
         app.withdraw()
         self.root = app
+        # Pump real timers beyond the former 300 ms automatic warmup.
+        app.after(450, app.quit)
+        app.mainloop()
         self.assertEqual({}, app.pages)
-        app._warm_heavy_page()
+        self.assertEqual([], created)
         self.assertEqual("今日概览", app.current_page)
         self.assertEqual("grid", app.dashboard.winfo_manager())
+        app.show_page("WPS写入工具")
         page = app.pages["WPS写入工具"]
+        app.show_page("今日概览")
         self.assertEqual("", page.winfo_manager())
-        app._warm_heavy_page()
         app.show_page("WPS写入工具")
         self.assertIs(page, app.pages["WPS写入工具"])
         self.assertEqual([threading.main_thread()], created)

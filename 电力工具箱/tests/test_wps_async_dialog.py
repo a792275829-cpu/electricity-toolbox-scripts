@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 import tkinter as tk
@@ -462,7 +463,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         ):
             frame = module.WpsWriterFrame(self.root)
 
-        self.assertEqual(frame.browser_mode.get(), "managed_cdp")
+        self.assertEqual(frame.browser_mode.get(), "managed_cdp" if sys.platform == "darwin" else "persistent")
         def descendants(widget):
             for child in widget.winfo_children():
                 yield child

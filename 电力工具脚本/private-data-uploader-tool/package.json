@@ -9,6 +9,6 @@
     "login": "node scripts/upload-private-data.mjs --login"
   },
   "dependencies": {
-    "playwright": "^1.54.2"
+    "playwright": "1.55.0"
   }
 }

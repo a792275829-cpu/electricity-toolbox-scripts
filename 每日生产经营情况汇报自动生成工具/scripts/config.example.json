@@ -1,6 +1,6 @@
 {
-  "username": "your-username",
-  "password": "your-password",
+  "username": "",
+  "password": "",
   "headless": true,
   "unitIdsMode": "all",
   "skipExisting": true,

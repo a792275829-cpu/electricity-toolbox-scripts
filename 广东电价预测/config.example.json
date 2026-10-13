@@ -1,6 +1,6 @@
 {
-  "username": "your-username",
-  "password": "your-password",
+  "username": "",
+  "password": "",
   "masterWorkbook": "输出/广东电价数据总表.xlsx",
   "predictionOutputDir": "输出/D+1预测",
   "initialWorkbook": "输入/广东数据初始总表.xlsx",

@@ -24,10 +24,6 @@ class NativeLifecycleTests(unittest.TestCase):
         cls.update_requests = []
         cls.app = ToolboxApp(workspace=Path(cls.temp.name),
                              check_updates=lambda: cls.update_requests.append("check"))
-        # This lifecycle fixture has no business files; page loading is covered
-        # separately by the existing original GUI tests on the full workspace.
-        cls.app.after_cancel(cls.app._warmup_after_id)
-        cls.app._warmup_after_id = None
         cls.app.update_idletasks()
 
     @classmethod
@@ -54,6 +50,14 @@ class NativeLifecycleTests(unittest.TestCase):
             release.set()
             self.app.registry.shutdown(timeout=2)
 
+    def test_activate_restores_hidden_main_window_without_loading_business_pages(self):
+        self.app.withdraw()
+        self.assertTrue(self.service.call("activate", {}))
+        self.app.update_idletasks()
+        self.assertEqual(self.app.state(), "normal")
+        self.assertEqual(self.app.current_page, "今日概览")
+        self.assertEqual(self.app.pages, {})
+
     def test_failed_account_save_blocks_update(self):
         with (
             patch.object(self.app.credentials_panel, "dirty", True),
@@ -66,7 +70,8 @@ class NativeLifecycleTests(unittest.TestCase):
     def test_download_failure_restores_original_window_and_form_values(self):
         self.app.search_var.set("风力")
         self.service.call("prepare_update", {})
-        self.assertEqual(self.app.state(), "withdrawn")
+        self.assertNotEqual(self.app.state(), "withdrawn")
+        self.assertTrue(self.service._locked_widgets)
         self.assertFalse(self.service.call("activate", {}))
         self.service.call("abort_update", {})
         self.app.update_idletasks()
@@ -75,6 +80,35 @@ class NativeLifecycleTests(unittest.TestCase):
         self.app.search_var.set("")
         with self.assertRaises(ValueError):
             self.service.call("finish_update", {})
+
+    def test_update_progress_is_visible_in_footer_and_failure_restores_input(self):
+        tags = self.app.search_entry.bindtags()
+        self.service.call("prepare_update", {})
+        try:
+            self.service.call("update_status", {"phase": "downloading", "progress": 42})
+            self.app.update_idletasks()
+            self.assertNotEqual(self.app.state(), "withdrawn")
+            self.assertTrue(self.app.update_progress.winfo_ismapped())
+            self.assertEqual(self.app.update_status_var.get(), "正在下载 42%")
+            self.assertTrue(self.app.update_button.instate(["disabled"]))
+            self.assertNotEqual(self.app.search_entry.bindtags(), tags)
+            with patch("native_bridge.messagebox.showinfo") as notice:
+                self.assertFalse(self.service.call("request_close", {}))
+                notice.assert_called_once()
+        finally:
+            self.service.call("abort_update", {})
+            self.service.call("update_status", {"phase": "idle"})
+        self.assertEqual(self.app.search_entry.bindtags(), tags)
+        self.assertTrue(self.app.update_button.instate(["!disabled"]))
+        self.assertFalse(self.app.update_progress.winfo_ismapped())
+
+    def test_update_dialogs_are_concise_and_use_original_window(self):
+        with patch("native_bridge.messagebox.askyesno", return_value=False) as ask:
+            self.assertFalse(self.service.call("update_prompt", {"version": "0.1.3"}))
+            ask.assert_called_once_with("检查更新", "发现新版本 0.1.3，是否开始更新？", parent=self.app)
+        with patch("native_bridge.messagebox.showinfo") as info:
+            self.service.call("update_message", {"message": "当前已是最新版本"})
+            info.assert_called_once_with("检查更新", "当前已是最新版本", parent=self.app)
 
     def test_native_close_retains_original_cancel_confirmation(self):
         release = threading.Event()

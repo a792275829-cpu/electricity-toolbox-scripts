@@ -167,8 +167,9 @@ def prepare(python_root: Path, cache: Path):
         )
     # Give the Tk process its own macOS application identity. Sharing the
     # hidden Tauri updater's identity breaks Dock activation/accessibility.
-    contents = python_root / "ToolboxUI.app/Contents"
-    executable = contents / "MacOS/ToolboxUI"
+    shutil.rmtree(python_root / "ToolboxUI.app", ignore_errors=True)
+    contents = python_root / "电力工具箱.app/Contents"
+    executable = contents / "MacOS/电力工具箱"
     executable.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(python.resolve(), executable)
     executable.chmod(0o755)
@@ -183,7 +184,7 @@ def prepare(python_root: Path, cache: Path):
         plistlib.dumps(
             {
                 "CFBundleIdentifier": "com.electricity.toolbox.native",
-                "CFBundleExecutable": "ToolboxUI",
+                "CFBundleExecutable": "电力工具箱",
                 "CFBundleName": "电力工具箱",
                 "CFBundleDisplayName": "电力工具箱",
                 "CFBundleIconFile": "icon.icns",

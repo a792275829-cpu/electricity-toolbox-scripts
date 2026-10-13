@@ -46,6 +46,10 @@ class ToolPageTaskTests(unittest.TestCase):
         thread.start()
         thread.join()
         self.page._drain_log_queue()
+        self.assertFalse(self.page._log_queue.empty())
+        self.assertEqual(200, len(self.page.log_text.get("1.0", "end-1c").splitlines()))
+        while not self.page._log_queue.empty():
+            self.page._drain_log_queue()
         lines = self.page.log_text.get("1.0", "end-1c").splitlines()
         self.assertEqual(5_000, len(lines))
         self.assertEqual("line-9999", lines[-1])

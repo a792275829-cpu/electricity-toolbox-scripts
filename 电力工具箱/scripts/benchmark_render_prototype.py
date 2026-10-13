@@ -54,9 +54,6 @@ def main() -> None:
     args = parser.parse_args()
     with patch("toolbox.ui.credentials_panel.CredentialStore.load", return_value={}):
         app = ToolboxApp(render_prototype=args.mode == "prototype")
-    # Exclude unrelated WPS imports from this controlled rendering experiment.
-    app.after_cancel(app._warmup_after_id)
-    app._warmup_after_id = None
     app.geometry("1440x820+0+40")
     app.attributes("-topmost", True)
     app.lift()

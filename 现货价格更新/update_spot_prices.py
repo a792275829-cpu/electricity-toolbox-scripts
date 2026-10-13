@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import openpyxl
-from openpyxl.utils.datetime import from_excel
+from openpyxl.utils.cell import get_column_letter, range_boundaries
+from openpyxl.utils.datetime import from_excel, to_excel
 from playwright.sync_api import sync_playwright
 from xml.etree import ElementTree
 
@@ -85,12 +86,21 @@ class CellExpectation:
 
 
 @dataclass(frozen=True, slots=True)
+class DateExpectation:
+    sheet_name: str
+    row: int
+    value: date
+    number_format: str
+
+
+@dataclass(frozen=True, slots=True)
 class PreparedWorkbook:
     original: Path
     temporary: Path
     expectations: tuple[CellExpectation, ...]
     updated_dates: tuple[date, ...]
     skipped_dates: tuple[date, ...]
+    date_expectations: tuple[DateExpectation, ...] = ()
 
 
 def log(message: str) -> None:
@@ -456,12 +466,42 @@ def effective_number_format(sheet, row: int, column: int) -> str:
     return "General"
 
 
+def plan_date_extensions(sheet, prices: dict[date, tuple[float, ...]], *, epoch) -> dict[int, date]:
+    if not prices:
+        return {}
+    dated_rows = {}
+    content_rows = set()
+    for row, cells, parsed in _iter_dated_rows(
+        sheet, epoch=epoch, max_column=max(sheet.max_column or 1, 25)
+    ):
+        if parsed is not None:
+            dated_rows[parsed] = row
+        if any(cell.value not in (None, "") for cell in cells):
+            content_rows.add(row)
+    if not dated_rows:
+        raise RuntimeError(f"{sheet.title} 没有可接续的日期行。")
+    last_date = max(dated_rows)
+    if max(prices) <= last_date:
+        return {}
+    last_row = dated_rows[last_date]
+    if last_row != max(dated_rows.values()) or any(row > last_row for row in content_rows):
+        raise RuntimeError(f"{sheet.title} 日期表尾后存在其他内容，不能自动接续日期行。")
+    missing_history = sorted(day for day in prices if day <= last_date and day not in dated_rows)
+    if missing_history:
+        raise RuntimeError(f"{sheet.title} 中间缺少日期 {missing_history[0].isoformat()}，不会猜测行位置。")
+    count = (max(prices) - last_date).days
+    if last_row + count > 1_048_576:
+        raise RuntimeError(f"{sheet.title} 接续日期将超出 Excel 行数限制。")
+    return {last_row + offset: last_date + timedelta(days=offset) for offset in range(1, count + 1)}
+
+
 def plan_price_sheet(
     workbook,
     sheet_name: str,
     prices: dict[date, tuple[float, ...]],
     *,
     overwrite: bool,
+    date_extensions: dict[int, date] | None = None,
 ) -> tuple[
     list[CellExpectation],
     list[date],
@@ -476,12 +516,17 @@ def plan_price_sheet(
         return [], [], [], {}
     snapshots = {}
     inherited_formats = ["General"] * 24
+    date_extensions = date_extensions or {}
     for row, cells, parsed in _iter_dated_rows(sheet, epoch=workbook.epoch, max_column=25):
         for index, cell in enumerate(cells[1:]):
             if getattr(cell, "has_style", False):
                 inherited_formats[index] = str(cell.number_format or "General")
+        parsed = date_extensions.get(row, parsed)
         if parsed in prices:
             snapshots[parsed] = (row, [cell.value for cell in cells[1:]], tuple(inherited_formats))
+    for row, day in date_extensions.items():
+        if day in prices and day not in snapshots:
+            snapshots[day] = (row, [None] * 24, tuple(inherited_formats))
     expectations: list[CellExpectation] = []
     updated: list[date] = []
     skipped: list[date] = []
@@ -551,7 +596,7 @@ def _column_name(number: int) -> str:
 def _cell_pattern(cell_ref: str) -> re.Pattern[str]:
     escaped = re.escape(cell_ref)
     return re.compile(
-        rf'<c\b(?=[^>]*\br="{escaped}")[^>]*(?:>.*?</c>|/>)',
+        rf'<c\b(?=[^>]*\br="{escaped}")[^>]*?(?:/>|>.*?</c>)',
         flags=re.DOTALL,
     )
 
@@ -563,7 +608,7 @@ def _style_from_cell_xml(cell_xml: str) -> str | None:
 
 def _nearest_prior_style(xml_text: str, column: str, row_number: int) -> str | None:
     pattern = re.compile(
-        rf'<c\b(?=[^>]*\br="{re.escape(column)}(\d+)")[^>]*(?:>.*?</c>|/>)',
+        rf'<c\b(?=[^>]*\br="{re.escape(column)}(\d+)")[^>]*?(?:/>|>.*?</c>)',
         flags=re.DOTALL,
     )
     best_row = -1
@@ -582,6 +627,64 @@ def _nearest_prior_style(xml_text: str, column: str, row_number: int) -> str | N
 def _numeric_cell_xml(cell_ref: str, value: float, style: str | None) -> str:
     style_attribute = f' s="{style}"' if style is not None else ""
     return f'<c r="{cell_ref}"{style_attribute}><v>{format(value, ".15g")}</v></c>'
+
+
+def extend_sheet_dates(xml_bytes: bytes, dates: dict[int, date], *, epoch) -> bytes:
+    if not dates:
+        return xml_bytes
+    xml_text = xml_bytes.decode("utf-8")
+    first_row = min(dates)
+    for merged in re.finditer(r'<mergeCell\b[^>]*\bref="([^"]+)"', xml_text):
+        min_col, min_row, _, max_row = range_boundaries(merged.group(1))
+        if min_col <= 25 and any(min_row <= row <= max_row for row in dates):
+            raise RuntimeError(f"接续日期区域包含合并单元格 {merged.group(1)}，停止写入。")
+    template = re.search(
+        rf'<row\b(?=[^>]*\br="{first_row - 1}")[^>]*?(?:/>|>.*?</row>)', xml_text, re.DOTALL
+    )
+    if template is None:
+        raise RuntimeError(f"工作表 XML 未找到接续模板第 {first_row - 1} 行。")
+    # Reuse the tail row's height and other row formatting, without copying prices.
+    template_opening = template.group(0).split(">", 1)[0].rstrip("/") + ">"
+    for row, day in sorted(dates.items()):
+        pattern = re.compile(rf'<row\b(?=[^>]*\br="{row}")[^>]*?(?:/>|>.*?</row>)', re.DOTALL)
+        match = pattern.search(xml_text)
+        if match:
+            row_xml = match.group(0)
+            if row_xml.endswith("/>"):
+                row_xml = row_xml[:-2] + "></row>"
+        else:
+            opening = re.sub(r'\br="\d+"', f'r="{row}"', template_opening, count=1)
+            row_xml = opening + "</row>"
+        cell_ref = f"A{row}"
+        cell = _cell_pattern(cell_ref).search(row_xml)
+        style = (_style_from_cell_xml(cell.group(0)) if cell else None) or _nearest_prior_style(xml_text, "A", row)
+        replacement = _numeric_cell_xml(cell_ref, to_excel(day, epoch), style)
+        if cell:
+            row_xml = row_xml[:cell.start()] + replacement + row_xml[cell.end():]
+        else:
+            end_opening = row_xml.index(">") + 1
+            row_xml = row_xml[:end_opening] + replacement + row_xml[end_opening:]
+        for column in range(2, 26):
+            reference = f"{_column_name(column)}{row}"
+            if not _cell_pattern(reference).search(row_xml):
+                style = _nearest_prior_style(xml_text, _column_name(column), row)
+                if style is not None:
+                    row_xml = row_xml.replace("</row>", f'<c r="{reference}" s="{style}"/></row>', 1)
+        if match:
+            xml_text = xml_text[:match.start()] + row_xml + xml_text[match.end():]
+        else:
+            next_row = next((item for item in re.finditer(r'<row\b[^>]*\br="(\d+)"', xml_text)
+                             if int(item.group(1)) > row), None)
+            position = next_row.start() if next_row else xml_text.find("</sheetData>")
+            if position < 0:
+                raise RuntimeError("工作表 XML 缺少 sheetData 结束标记。")
+            xml_text = xml_text[:position] + row_xml + xml_text[position:]
+    dimension = re.search(r'<dimension\s+ref="([^"]+)"', xml_text)
+    if dimension:
+        min_col, min_row, max_col, max_row = range_boundaries(dimension.group(1))
+        reference = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max(max_col, 25))}{max(max_row, max(dates))}"
+        xml_text = xml_text[:dimension.start(1)] + reference + xml_text[dimension.end(1):]
+    return xml_text.encode("utf-8")
 
 
 def patch_sheet_xml(
@@ -640,26 +743,36 @@ def patch_xlsx_values(
     original: Path,
     temporary: Path,
     changes: dict[str, dict[int, tuple[float, ...]]],
+    *,
+    date_extensions: dict[str, dict[int, date]] | None = None,
+    epoch=None,
 ) -> None:
     sheet_paths = xlsx_sheet_paths(original)
     part_changes: dict[str, dict[int, tuple[float, ...]]] = {}
+    part_dates = {}
     for sheet_name, rows in changes.items():
         part = sheet_paths.get(sheet_name)
         if not part:
             raise RuntimeError(f"XLSX 包内未找到工作表：{sheet_name}")
         part_changes[part] = rows
+        part_dates[part] = (date_extensions or {}).get(sheet_name, {})
 
     with zipfile.ZipFile(original, "r") as source, zipfile.ZipFile(temporary, "w") as output:
         for info in source.infolist():
             data = source.read(info.filename)
             if info.filename in part_changes:
+                data = extend_sheet_dates(data, part_dates[info.filename], epoch=epoch)
                 data = patch_sheet_xml(data, part_changes[info.filename])
             output.writestr(info, data)
     verify_package_preservation(original, temporary, set(part_changes))
 
 
-def verify_workbook(path: Path, expectations: Iterable[CellExpectation]) -> None:
+def verify_workbook(
+    path: Path, expectations: Iterable[CellExpectation],
+    date_expectations: Iterable[DateExpectation] = (),
+) -> None:
     expectations = tuple(expectations)
+    date_expectations = tuple(date_expectations)
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
@@ -670,10 +783,16 @@ def verify_workbook(path: Path, expectations: Iterable[CellExpectation]) -> None
             path, data_only=False, read_only=True, keep_links=True
         )
     try:
-        snapshots = read_cell_snapshots(workbook, (
+        references = [
             (item.sheet_name, f"{_column_name(column)}{item.row}")
             for item in expectations for column in range(2, 26)
-        ))
+        ]
+        references.extend((item.sheet_name, f"A{item.row}") for item in date_expectations)
+        snapshots = read_cell_snapshots(workbook, references)
+        for item in date_expectations:
+            value, number_format = snapshots[(item.sheet_name, f"A{item.row}")]
+            if excel_cell_date(value, epoch=workbook.epoch) != item.value or number_format != item.number_format:
+                raise RuntimeError(f"日期回读失败：{path.name} / {item.sheet_name} / A{item.row}")
         for expectation in expectations:
             cells = [snapshots[(expectation.sheet_name, f"{_column_name(column)}{expectation.row}")]
                      for column in range(2, 26)]
@@ -709,11 +828,23 @@ def prepare_workbook(prices: TargetPrices, *, overwrite: bool) -> PreparedWorkbo
             path, data_only=False, read_only=True, keep_links=True
         )
     try:
+        epoch = workbook.epoch
+        extensions = {
+            name: plan_date_extensions(workbook[name], values, epoch=epoch)
+            for name, values in ((DAY_AHEAD_SHEET, prices.day_ahead), (REAL_TIME_SHEET, prices.real_time))
+            if name in workbook.sheetnames
+        }
+        date_expectations = tuple(
+            DateExpectation(name, row, day, effective_number_format(workbook[name], row, 1))
+            for name, dates in extensions.items() for row, day in dates.items()
+        )
         day_expectations, day_updated, day_skipped, day_rows = plan_price_sheet(
-            workbook, DAY_AHEAD_SHEET, prices.day_ahead, overwrite=overwrite
+            workbook, DAY_AHEAD_SHEET, prices.day_ahead, overwrite=overwrite,
+            date_extensions=extensions.get(DAY_AHEAD_SHEET),
         )
         real_expectations, real_updated, real_skipped, real_rows = plan_price_sheet(
-            workbook, REAL_TIME_SHEET, prices.real_time, overwrite=overwrite
+            workbook, REAL_TIME_SHEET, prices.real_time, overwrite=overwrite,
+            date_extensions=extensions.get(REAL_TIME_SHEET),
         )
         expectations = tuple(day_expectations + real_expectations)
     finally:
@@ -726,17 +857,23 @@ def prepare_workbook(prices: TargetPrices, *, overwrite: bool) -> PreparedWorkbo
                 DAY_AHEAD_SHEET: day_rows,
                 REAL_TIME_SHEET: real_rows,
             },
+            date_extensions=extensions,
+            epoch=epoch,
         )
+        verify_workbook(temporary, expectations, date_expectations)
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
-    verify_workbook(temporary, expectations)
+    for name, dates in extensions.items():
+        if dates:
+            log(f"{name}：已准备接续 {min(dates.values())} 至 {max(dates.values())}，共 {len(dates)} 行。")
     return PreparedWorkbook(
         original=path,
         temporary=temporary,
         expectations=expectations,
         updated_dates=tuple(sorted(set(day_updated + real_updated))),
         skipped_dates=tuple(sorted(set(day_skipped + real_skipped))),
+        date_expectations=date_expectations,
     )
 
 
@@ -744,7 +881,7 @@ def commit_prepared_workbooks(
     prepared: tuple[PreparedWorkbook, ...], *, create_backup: bool
 ) -> dict[Path, Path | None]:
     return commit_workbooks(
-        prepared, lambda path, item: verify_workbook(path, item.expectations),
+        prepared, lambda path, item: verify_workbook(path, item.expectations, item.date_expectations),
         create_backup=create_backup,
     )
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -284,6 +285,128 @@ class SpotPriceUpdateTests(unittest.TestCase):
             self.module.date_range(start, start + timedelta(days=2)),
             (start, start + timedelta(days=1), start + timedelta(days=2)),
         )
+
+    def test_extend_tail_preserves_formats_existing_values_and_package(self) -> None:
+        start = date(2026, 10, 8)
+        for styled_tail in (False, True):
+            with self.subTest(styled_tail=styled_tail), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "归湖.xlsx"
+                self._build_fixture(path, start)
+                workbook = openpyxl.load_workbook(path)
+                for sheet in workbook:
+                    sheet["B2"] = 999
+                    sheet.row_dimensions[2].height = 26
+                    if styled_tail:
+                        sheet["A50"].number_format = "m/d/yy"
+                        sheet["B50"].number_format = "0.0000"
+                workbook.save(path)
+                workbook.close()
+                with zipfile.ZipFile(path, "a") as archive:
+                    archive.writestr("customXml/keep.xml", b"<keep/>")
+                before = path.read_bytes()
+                target = self.module.default_targets(path, Path("unused.xlsx"), selected_stations=("归湖",))[0]
+                points = tuple(float(index - 12) for index in range(24))
+                prices = self.module.TargetPrices(target, "company", "unit", "name",
+                    {start: points, start + timedelta(days=3): points},
+                    {start + timedelta(days=1): points})
+                prepared = self.module.prepare_workbook(prices, overwrite=False)
+                self.assertEqual(path.read_bytes(), before)
+                self.module.commit_prepared_workbooks((prepared,), create_backup=False)
+                workbook = openpyxl.load_workbook(path)
+                try:
+                    day = workbook[self.module.DAY_AHEAD_SHEET]
+                    real = workbook[self.module.REAL_TIME_SHEET]
+                    self.assertEqual(day["B2"].value, 999)
+                    self.assertEqual([day.cell(row, 1).value.date() for row in range(2, 6)],
+                        [start + timedelta(days=offset) for offset in range(4)])
+                    self.assertEqual(tuple(day.cell(5, column).value for column in range(2, 26)), points)
+                    self.assertIsNone(day["B4"].value)
+                    self.assertEqual(day["B4"].number_format, "0.0000")
+                    self.assertEqual(day["A5"].number_format, "m/d/yy")
+                    self.assertEqual(day["Y5"].number_format, "0.0000")
+                    self.assertEqual(day.row_dimensions[5].height, 26)
+                    self.assertEqual(real["A3"].value.date(), start + timedelta(days=1))
+                    self.assertIsNone(real["A4"].value)
+                    self.assertEqual(real["Y3"].value, points[-1])
+                finally:
+                    workbook.close()
+                with zipfile.ZipFile(path) as archive:
+                    self.assertEqual(archive.read("customXml/keep.xml"), b"<keep/>")
+                self.module.verify_workbook(path, prepared.expectations, prepared.date_expectations)
+
+    def test_extension_respects_1904_epoch_and_date_readback(self) -> None:
+        start = date(2026, 10, 8)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "prices.xlsx"
+            self._build_fixture(path, start)
+            workbook = openpyxl.load_workbook(path)
+            workbook.epoch = openpyxl.utils.datetime.MAC_EPOCH
+            workbook.save(path)
+            workbook.close()
+            target = self.module.default_targets(path, Path("unused.xlsx"), selected_stations=("归湖",))[0]
+            prices = self.module.TargetPrices(target, "company", "unit", "name",
+                {start + timedelta(days=1): (0.0,) * 24}, {})
+            prepared = self.module.prepare_workbook(prices, overwrite=True)
+            self.module.commit_prepared_workbooks((prepared,), create_backup=False)
+            workbook = openpyxl.load_workbook(path)
+            self.assertEqual(workbook[self.module.DAY_AHEAD_SHEET]["A3"].value.date(), start + timedelta(days=1))
+            workbook[self.module.DAY_AHEAD_SHEET]["A3"].number_format = "yyyy-mm"
+            workbook.save(path)
+            workbook.close()
+            with self.assertRaisesRegex(RuntimeError, "日期回读失败"):
+                self.module.verify_workbook(path, prepared.expectations, prepared.date_expectations)
+
+    def test_extension_rejects_missing_history_duplicates_and_footer(self) -> None:
+        for problem in ("gap", "duplicate", "footer"):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "prices.xlsx"
+                start = date(2026, 10, 8)
+                self._build_fixture(path, start)
+                workbook = openpyxl.load_workbook(path)
+                sheet = workbook[self.module.DAY_AHEAD_SHEET]
+                if problem == "gap":
+                    sheet["A3"] = start + timedelta(days=2)
+                elif problem == "duplicate":
+                    sheet["A3"] = start
+                else:
+                    sheet["Z3"] = "合计"
+                workbook.save(path)
+                workbook.close()
+                before = path.read_bytes()
+                target = self.module.default_targets(path, Path("unused.xlsx"), selected_stations=("归湖",))[0]
+                prices = self.module.TargetPrices(target, "company", "unit", "name",
+                    {start + timedelta(days=offset): (300.0,) * 24 for offset in (1, 3)}, {})
+                with self.assertRaisesRegex(RuntimeError, "缺少日期|日期重复|其他内容"):
+                    self.module.prepare_workbook(prices, overwrite=True)
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(list(path.parent.glob(".*.tmp.xlsx")), [])
+
+    def test_extension_cleans_temporary_file_when_verification_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "prices.xlsx"
+            start = date(2026, 10, 8)
+            self._build_fixture(path, start)
+            target = self.module.default_targets(path, Path("unused.xlsx"), selected_stations=("归湖",))[0]
+            prices = self.module.TargetPrices(target, "company", "unit", "name",
+                {start + timedelta(days=1): (300.0,) * 24}, {})
+            before = path.read_bytes()
+            with patch.object(self.module, "verify_workbook", side_effect=RuntimeError("readback failed")):
+                with self.assertRaisesRegex(RuntimeError, "readback failed"):
+                    self.module.prepare_workbook(prices, overwrite=True)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(list(path.parent.glob(".*.tmp.xlsx")), [])
+
+    def test_xml_extension_handles_self_closing_rows_and_cells(self) -> None:
+        source = b'<worksheet><dimension ref="A1:Z50"/><sheetData><row r="2" ht="26"><c r="A2" s="1"><v>46303</v></c><c r="B2" s="2"/></row><row r="3"/><row r="4"><c r="A4" s="1"/><c r="B4" s="2"/><c r="Z4" s="3"/></row><row r="50"/></sheetData></worksheet>'
+        extended = self.module.extend_sheet_dates(source, {3: date(2026, 10, 9), 4: date(2026, 10, 10)},
+            epoch=openpyxl.utils.datetime.WINDOWS_EPOCH)
+        patched = self.module.patch_sheet_xml(extended, {3: (300.0,) * 24, 4: (400.0,) * 24})
+        root = self.module.ElementTree.fromstring(patched)
+        rows = root.findall("sheetData/row")
+        self.assertEqual([int(row.attrib["r"]) for row in rows], [2, 3, 4, 50])
+        self.assertEqual(root.find("dimension").attrib["ref"], "A1:Z50")
+        self.assertIsNotNone(rows[2].find('c[@r="Z4"]'))
+        self.assertEqual(rows[2].find('c[@r="B4"]/v').text, "400")
 
 
 if __name__ == "__main__":

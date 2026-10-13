@@ -2358,6 +2358,8 @@ class WpsWriterFrame(ttk.Frame):
         self.browser_event_queue: queue.Queue[tuple[bool, str, bool]] = queue.Queue()
         self.login_event_queue: queue.Queue[tuple[str, str, WpsLoginStatus]] = queue.Queue()
         self.worker: threading.Thread | None = None
+        self._selection_task_busy = False
+        self._selection_results: queue.Queue[tuple[str, str | None]] = queue.Queue()
         self.browser_worker: threading.Thread | None = None
         self.configs: list[DocumentConfig] = []
         self._drain_after_id: str | None = None
@@ -2473,7 +2475,7 @@ class WpsWriterFrame(ttk.Frame):
 
         self.mapping_sort_toolbar = ttk.Frame(self.mapping_toolbar)
         self.mapping_sort_toolbar.grid(
-            row=0, column=3, sticky="e", padx=(12, 0)
+            row=0, column=3, sticky="e", padx=(4, 0)
         )
         ttk.Button(
             self.mapping_sort_toolbar, text="上移", command=self.move_config_up, width=0
@@ -2484,7 +2486,7 @@ class WpsWriterFrame(ttk.Frame):
 
         self.mapping_secondary_toolbar = ttk.Frame(self.mapping_toolbar)
         self.mapping_secondary_toolbar.grid(
-            row=0, column=1, sticky="w", padx=(12, 0)
+            row=0, column=1, sticky="w", padx=(4, 0)
         )
         ttk.Button(
             self.mapping_secondary_toolbar, text="导入", command=self.import_config, width=0
@@ -2545,12 +2547,14 @@ class WpsWriterFrame(ttk.Frame):
             textvariable=self.selection_status,
             style="Muted.TLabel",
         ).pack(side="left")
-        ttk.Button(
+        self.write_button = ttk.Button(
             self.execution_toolbar, text="开始写入", command=self.write, style="Primary.TButton"
-        ).pack(side="right")
-        ttk.Button(
+        )
+        self.write_button.pack(side="right")
+        self.preview_button = ttk.Button(
             self.execution_toolbar, text="预览", command=self.preview
-        ).pack(side="right", padx=(0, 6))
+        )
+        self.preview_button.pack(side="right", padx=(0, 6))
 
         self.module_log_frame = ttk.LabelFrame(root, text="操作日志")
         self.module_log_frame.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
@@ -2858,6 +2862,20 @@ class WpsWriterFrame(ttk.Frame):
             )
 
     def drain_logs(self) -> None:
+        if self._drain_after_id is not None:
+            self.after_cancel(self._drain_after_id)
+            self._drain_after_id = None
+        while True:
+            try:
+                action, error = self._selection_results.get_nowait()
+            except queue.Empty:
+                break
+            self._selection_task_busy = False
+            self.preview_button.configure(state="normal")
+            self.write_button.configure(state="normal")
+            self.update_selection_status()
+            if error is not None:
+                messagebox.showerror(f"{action}失败", error, parent=self)
         while True:
             try:
                 browser_mode, cdp_url, login = self.login_event_queue.get_nowait()
@@ -2881,12 +2899,18 @@ class WpsWriterFrame(ttk.Frame):
             self.browser_status.set(status if success else "检查失败，请重试")
             if not quiet:
                 self.log(status if success else "检查失败：" + status)
-        while True:
+        chunks = []
+        for _ in range(200):
             try:
                 message = self.log_queue.get_nowait()
             except queue.Empty:
                 break
-            self.log_text.insert("end", f"{message}\n")
+            chunks.append(f"{message}\n")
+        if chunks:
+            self.log_text.insert("end", "".join(chunks))
+            excess = int(self.log_text.index("end-1c").split(".")[0]) - 1 - 5_000
+            if excess > 0:
+                self.log_text.delete("1.0", f"{excess + 1}.0")
             self.log_text.see("end")
         self.schedule_drain_logs()
 
@@ -3126,50 +3150,69 @@ class WpsWriterFrame(ttk.Frame):
         return mappings
 
     def prepare_selected(self) -> list[PreparedMapping]:
+        mappings, browser_mode, cdp_url = self._selected_inputs()
+        return prepare_mappings(mappings, browser_mode=browser_mode, cdp_url=cdp_url)
+
+    def _selected_inputs(self) -> tuple[list[MappingRow], str, str]:
+        """Capture Tk inputs before starting work; the worker never reads widgets."""
         indexes = self.selected_config_indexes()
         if not indexes:
             raise ValueError("请先选择至少一项配置，再预览或写入。")
         configs = [self.configs[index] for index in indexes]
-        return prepare_mappings(
-            self.flatten_configs(configs),
-            browser_mode=self.browser_mode.get(),
-            cdp_url=self.cdp_url.get().strip(),
-            log=lambda _message: None,
-        )
+        return self.flatten_configs(configs), self.browser_mode.get(), self.cdp_url.get().strip()
 
     def preview(self) -> None:
-        try:
-            prepared = self.prepare_selected()
-        except Exception as exc:
-            messagebox.showerror("预览失败", str(exc), parent=self)
-            self.log(f"预览失败：{exc}")
-            self.detail_log(f"PREVIEW ERROR: {exc}")
-            self.detail_log(traceback.format_exc())
-            return
-        urls = len({item.kdocs_url for item in prepared})
-        self.detail_log_prepared("PREVIEW OK", prepared)
-        self.log(f"预览通过：共 {len(prepared)} 个写入区域，涉及 {urls} 份目标表格。")
+        self._start_selection_task(write=False)
 
     def write(self) -> None:
-        if self.worker and self.worker.is_alive():
-            messagebox.showinfo("正在写入", "写入任务正在进行，请等待完成。", parent=self)
-            return
-        try:
-            prepared = self.prepare_selected()
-        except Exception as exc:
-            messagebox.showerror("暂时无法写入", str(exc), parent=self)
-            self.log(f"暂时无法写入：{exc}")
-            self.detail_log(f"WRITE BLOCKED: {exc}")
-            self.detail_log(traceback.format_exc())
-            return
+        self._start_selection_task(write=True)
 
-        self.save_current_config()
-        self.detail_log_prepared("WRITE PREPARED", prepared)
-        self.worker = self._start_tracked_thread(
-            self.write_worker,
-            args=(prepared, self.browser_mode.get(), self.cdp_url.get().strip()),
-            name="wps-write",
-        )
+    def _start_selection_task(self, *, write: bool) -> None:
+        if self._selection_task_busy or (self.worker and self.worker.is_alive()):
+            return
+        action = "写入" if write else "预览"
+        try:
+            mappings, browser_mode, cdp_url = self._selected_inputs()
+            if write:
+                self.save_current_config()
+        except Exception as exc:
+            messagebox.showerror(f"{action}失败", str(exc), parent=self)
+            self.log(f"{action}失败：{exc}")
+            return
+        self._selection_task_busy = True
+        self.preview_button.configure(state="disabled")
+        self.write_button.configure(state="disabled")
+        self.selection_status.set(f"正在读取来源并准备{action}…")
+        self.log(f"正在后台读取来源并准备{action}…")
+
+        def worker() -> None:
+            error = None
+            try:
+                prepared = prepare_mappings(
+                    mappings, browser_mode=browser_mode, cdp_url=cdp_url, log=self.log,
+                )
+                if write:
+                    self.detail_log_prepared("WRITE PREPARED", prepared)
+                    self.write_worker(prepared, browser_mode, cdp_url)
+                else:
+                    urls = len({item.kdocs_url for item in prepared})
+                    self.detail_log_prepared("PREVIEW OK", prepared)
+                    self.log(f"预览通过：共 {len(prepared)} 个写入区域，涉及 {urls} 份目标表格。")
+            except Exception as exc:
+                error = str(exc)
+                self.log(f"{action}失败：{exc}")
+                self.detail_log(f"{action} ERROR: {exc}\n{traceback.format_exc()}")
+            finally:
+                self._selection_results.put((action, error))
+
+        try:
+            self.worker = self._start_tracked_thread(worker, name="wps-write" if write else "wps-preview")
+        except Exception:
+            self._selection_task_busy = False
+            self.preview_button.configure(state="normal")
+            self.write_button.configure(state="normal")
+            self.update_selection_status()
+            raise
 
     def write_worker(self, prepared: list[PreparedMapping], browser_mode: str, cdp_url: str) -> None:
         try:

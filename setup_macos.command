@@ -21,7 +21,6 @@ if [[ ! -x "$venv_python" ]]; then
 fi
 
 print -r -- "Installing Python dependencies..."
-"$venv_python" -m pip install --upgrade pip
 "$venv_python" -m pip install -r requirements.txt
 
 print -r -- "Installing Playwright Chromium browser..."
@@ -30,8 +29,13 @@ print -r -- "Installing Playwright Chromium browser..."
 uploader_dir="$launcher_dir/电力工具脚本/private-data-uploader-tool"
 if [[ -f "$uploader_dir/package.json" ]]; then
   if command -v npm >/dev/null 2>&1; then
-    print -r -- "Installing Node dependencies for private data uploader..."
-    (cd "$uploader_dir" && npm install)
+    if [[ ! -d "$uploader_dir/node_modules" || \
+          "$uploader_dir/package-lock.json" -nt "$uploader_dir/node_modules/.package-lock.json" ]]; then
+      print -r -- "Installing Node dependencies for private data uploader..."
+      (cd "$uploader_dir" && npm ci)
+    else
+      print -r -- "Private data uploader Node dependencies are already installed."
+    fi
   else
     print -r -- "Node.js/npm not found. Skipping private data uploader dependencies."
     print -r -- "Install Node.js and run: cd \"$uploader_dir\" && npm install"
@@ -39,10 +43,9 @@ if [[ -f "$uploader_dir/package.json" ]]; then
 fi
 
 chmod +x \
-  "$launcher_dir/电力工具箱.command" \
   "$launcher_dir/00_启动/电力工具箱.command" \
   "$launcher_dir/wps自动/启动WPS专用Chrome.command" \
   2>/dev/null || true
 
 print -r -- ""
-print -r -- "Setup complete. You can launch the toolbox with: ./电力工具箱.command"
+print -r -- "Setup complete. You can launch the toolbox with: ./00_启动/电力工具箱.command"

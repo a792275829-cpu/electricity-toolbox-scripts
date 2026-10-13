@@ -23,6 +23,15 @@ class TaskModelTests(unittest.TestCase):
 
 
 class EventBufferTests(unittest.TestCase):
+    def test_missing_subscriber_retains_only_recent_events(self) -> None:
+        from toolbox.tasks import EventBuffer, TaskEvent, TaskEventKind
+
+        buffer = EventBuffer(max_pending=100)
+        for index in range(1000):
+            buffer.publish(TaskEvent("task", TaskEventKind.LOG, str(index)))
+        self.assertEqual(100, buffer.pending_count)
+        self.assertEqual([str(i) for i in range(900, 1000)], [e.message for e in buffer.drain()])
+
     def test_buffer_batches_events_in_order(self) -> None:
         from toolbox.tasks import EventBuffer, TaskEvent, TaskEventKind
 

@@ -31,6 +31,8 @@ class WpsToolbarLayoutTests(unittest.TestCase):
         frame = module.WpsWriterFrame(root)
         frame.pack(fill="both", expand=True)
         root.update_idletasks()
+        # Windows maps the native window during a full event-loop iteration.
+        root.update()
 
         expected = {
             "添加配置", "编辑", "复制", "删除", "上移", "下移",

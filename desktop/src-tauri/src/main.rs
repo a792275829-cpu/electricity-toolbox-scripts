@@ -103,7 +103,7 @@ impl Backend {
                 return Err(String::from_utf8_lossy(&output.stderr).to_string());
             }
         }
-        let gui_python = runtime.join("python/ToolboxUI.app/Contents/MacOS/ToolboxUI");
+        let gui_python = runtime.join("python/电力工具箱.app/Contents/MacOS/电力工具箱");
         let native_bundle =
             cfg!(target_os = "macos") && !cfg!(debug_assertions) && gui_python.is_file();
         let mut command = Command::new(if native_bundle { &gui_python } else { &python });
@@ -172,8 +172,7 @@ impl Backend {
                     } else if let Some(event) = value.get("event") {
                         let _ = handle.emit("backend-event", event);
                         if event["kind"] == "check-updates" {
-                            show_updater(&handle);
-                            let _ = handle.emit("check-updates", ());
+                            request_update_check(&handle);
                         }
                         if event["kind"] == "native-closed" {
                             if let Some(state) = handle.try_state::<State>() {
@@ -229,7 +228,12 @@ impl Backend {
             self.pending.lock().unwrap().remove(&id);
             return Err(error.to_string());
         }
-        let response = rx.recv_timeout(Duration::from_secs(30)).map_err(|e| {
+        let timeout = if matches!(method, "update_prompt" | "update_message") {
+            Duration::from_secs(24 * 60 * 60)
+        } else {
+            Duration::from_secs(30)
+        };
+        let response = rx.recv_timeout(timeout).map_err(|e| {
             self.pending.lock().unwrap().remove(&id);
             e.to_string()
         })?;
@@ -257,6 +261,28 @@ struct State {
     backend: Result<Arc<Backend>, String>,
     native_closed: AtomicBool,
     restarting: AtomicBool,
+    updater_ready: AtomicBool,
+    update_pending: AtomicBool,
+}
+
+fn request_update_check(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<State>() {
+        state.update_pending.store(true, Ordering::Release);
+        if state.updater_ready.load(Ordering::Acquire)
+            && state.update_pending.swap(false, Ordering::AcqRel)
+        {
+            let _ = app.emit("check-updates", ());
+        }
+    }
+}
+
+#[tauri::command]
+fn updater_ready(app: tauri::AppHandle) {
+    let state = app.state::<State>();
+    state.updater_ready.store(true, Ordering::Release);
+    if state.update_pending.swap(false, Ordering::AcqRel) {
+        let _ = app.emit("check-updates", ());
+    }
 }
 
 fn show_updater(app: &tauri::AppHandle) {
@@ -370,7 +396,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             if args.iter().any(|arg| arg == "--show-updater") {
-                show_updater(app);
+                request_update_check(app);
             } else if args.iter().any(|arg| arg == "--quit") {
                 request_native(app, "request_close");
             } else {
@@ -388,11 +414,13 @@ fn main() {
                 backend,
                 native_closed: AtomicBool::new(false),
                 restarting: AtomicBool::new(false),
+                updater_ready: AtomicBool::new(false),
+                update_pending: AtomicBool::new(false),
             });
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let open = MenuItem::with_id(app, "open", "打开工具箱", true, None::<&str>)?;
-            let update = MenuItem::with_id(app, "update", "应用更新…", true, None::<&str>)?;
+            let update = MenuItem::with_id(app, "update", "检查更新", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出工具箱", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &update, &quit])?;
             TrayIconBuilder::new()
@@ -402,7 +430,9 @@ fn main() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => request_native(app, "activate"),
-                    "update" => show_updater(app),
+                    "update" => {
+                        request_update_check(app);
+                    }
                     "quit" => request_native(app, "request_close"),
                     _ => {}
                 })
@@ -416,7 +446,8 @@ fn main() {
             backend_call,
             open_path,
             native_activate,
-            restart_app
+            restart_app,
+            updater_ready
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

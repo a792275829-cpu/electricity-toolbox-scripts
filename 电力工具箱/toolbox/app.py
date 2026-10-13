@@ -64,7 +64,6 @@ class ToolboxApp(tk.Tk):
         self.nav_buttons: dict[str, ttk.Button] = {}
         self.current_page = ""
         self.status_var = tk.StringVar(master=self, value="就绪")
-        self._warmup_after_id: str | None = None
         injected = page_factories is not None
         self._factories = dict(page_factories or catalog_factories())
         self._lazy_pages = (not injected) if lazy_pages is None else lazy_pages
@@ -77,16 +76,20 @@ class ToolboxApp(tk.Tk):
             self.surface_cache.prepare_styles({"Nav.TButton": 2, "NavSelected.TButton": 2,
                                                "TLabelframe": 2, "TEntry": 3,
                                                "TButton": 6, "Primary.TButton": 2})
+        # Keep startup limited to the shell and dashboard. Business pages are
+        # created on first navigation; WPS imports its dependencies in a worker.
         self._build_shell()
         if self.surface_cache is not None:
             for button in self.nav_buttons.values():
                 self.surface_cache.track(button)
         self._fit_initial_window()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        if self._lazy_pages and not injected:
-            # Warm only the expensive embedded module once the shell is visible.
-            # Its Python imports run in a worker, and the cached page stays hidden.
-            self._warmup_after_id = self.after(300, self._warm_heavy_page)
+        self._hang_monitor = None
+        data_root = os.environ.get("TOOLBOX_DATA_ROOT")
+        if os.name == "nt" and data_root:
+            from .hang_monitor import TkHangMonitor
+            self._hang_monitor = TkHangMonitor(Path(data_root).parent / "logs")
+            self._hang_monitor.start(self)
 
     def _configure_style(self) -> None:
         configure_theme(ttk.Style(self))
@@ -187,10 +190,42 @@ class ToolboxApp(tk.Tk):
         self.rail_toggle = ttk.Button(status, text="收起辅助面板", command=self.toggle_right_rail, style="Quiet.TButton")
         self.rail_toggle.grid(row=0, column=1, sticky="e")
         if self._check_updates is not None:
-            self.update_button = ttk.Button(status, text="检查更新", command=self._check_updates,
+            self.update_area = ttk.Frame(status, style="Status.TFrame")
+            self.update_area.grid(row=0, column=2, sticky="e", padx=(8, 0))
+            self.update_status_var = tk.StringVar(master=self)
+            self.update_status_label = ttk.Label(self.update_area, textvariable=self.update_status_var,
+                                                 style="Status.TLabel")
+            self.update_progress = ttk.Progressbar(self.update_area, length=90, maximum=100)
+            self.update_button = ttk.Button(self.update_area, text="检查更新", command=self._check_updates,
                                             style="Quiet.TButton")
-            self.update_button.grid(row=0, column=2, sticky="e", padx=(8, 0))
+            self.update_button.grid(row=0, column=2, sticky="e")
         self.show_page("今日概览" if self._lazy_pages else PAGE_NAMES[0])
+
+    def set_update_status(self, phase: str, progress: float | None = None) -> None:
+        if not hasattr(self, "update_button"):
+            return
+        self.update_progress.stop()
+        self.update_button.state(["!disabled"] if phase == "idle" else ["disabled"])
+        if phase == "idle":
+            self.update_status_var.set("")
+            self.update_status_label.grid_remove()
+            self.update_progress.grid_remove()
+            return
+        text = {"checking": "正在检查更新…", "downloading": "正在下载…",
+                "installing": "正在安装…"}[phase]
+        if phase == "downloading" and progress is not None:
+            text = f"正在下载 {progress:.0f}%"
+        self.update_status_var.set(text)
+        self.update_status_label.grid(row=0, column=0, padx=(0, 8))
+        if phase == "checking":
+            self.update_progress.grid_remove()
+        else:
+            self.update_progress.grid(row=0, column=1, padx=(0, 8))
+            self.update_progress.configure(mode="determinate" if progress is not None else "indeterminate")
+            if progress is not None:
+                self.update_progress["value"] = max(0, min(100, progress))
+            else:
+                self.update_progress.start(20)
 
     def _focus_search(self, _event=None) -> str:
         self.search_entry.focus_set()
@@ -280,12 +315,6 @@ class ToolboxApp(tk.Tk):
                 self.surface_cache.track_tree(page)
         return page
 
-    def _warm_heavy_page(self) -> None:
-        if self._warmup_after_id is not None:
-            self.after_cancel(self._warmup_after_id)
-            self._warmup_after_id = None
-        self._create_page("WPS写入工具")
-
     def show_page(self, name: str) -> None:
         if name and name == self.current_page:
             return
@@ -331,9 +360,8 @@ class ToolboxApp(tk.Tk):
         self.destroy()
 
     def destroy(self) -> None:
-        if self._warmup_after_id is not None:
-            self.after_cancel(self._warmup_after_id)
-            self._warmup_after_id = None
+        if self._hang_monitor is not None:
+            self._hang_monitor.stop(self)
         if self.surface_cache is not None:
             self.surface_cache.close()
         super().destroy()
