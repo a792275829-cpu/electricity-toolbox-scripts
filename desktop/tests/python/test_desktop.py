@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -59,7 +60,7 @@ class UpdateWorkspaceTests(unittest.TestCase):
             path.write_text(content)
         hashes = {n: workspace.digest(self.payload / "workspace" / n) for n in files}
         (self.payload / "manifest.json").write_text(
-            json.dumps({"files": hashes, "build": str(hashes), "version": "test"})
+            json.dumps({"files": hashes, "build": hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest(), "version": "test"})
         )
 
     def test_update_preserves_data_and_removes_only_managed(self):
