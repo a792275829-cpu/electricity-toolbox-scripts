@@ -32,6 +32,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11.15"
+          activate-environment: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -39,7 +40,7 @@ jobs:
         with:
           workspaces: desktop/src-tauri -> target
       - run: >-
-          uv pip install --python python --break-system-packages --require-hashes --no-deps --only-binary :all: -r ${{ matrix.requirements }}
+          uv pip install --python python --require-hashes --no-deps --only-binary :all: -r ${{ matrix.requirements }}
       - run: npm ci
         working-directory: desktop
       - run: npm test
