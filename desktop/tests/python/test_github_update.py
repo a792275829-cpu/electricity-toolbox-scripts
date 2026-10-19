@@ -20,9 +20,9 @@ PAYLOAD = b"test installer bytes"
 def release():
     return {"tag_name": "v1.2.0", "html_url": f"https://github.com/{REPO}/releases/tag/v1.2.0",
             "draft": False, "prerelease": False, "body": "测试更新说明", "assets": [
-                {"name": "ElectricityToolbox-1.2.0-apple-silicon.pkg", "size": len(PAYLOAD),
+                {"name": "ElectricityToolbox-1.2.0-aarch64.app.tar.gz", "size": len(PAYLOAD),
                  "digest": "sha256:" + hashlib.sha256(PAYLOAD).hexdigest(),
-                 "browser_download_url": f"https://github.com/{REPO}/releases/download/v1.2.0/test.pkg"}]}
+                 "browser_download_url": f"https://github.com/{REPO}/releases/download/v1.2.0/test.app.tar.gz"}]}
 
 
 class Response(io.BytesIO):
@@ -83,7 +83,7 @@ class GitHubUpdateTests(unittest.TestCase):
             shutil.rmtree(path.parent)
         for field, value in (("size", len(PAYLOAD) + 1), ("size", len(PAYLOAD) - 1),
                              ("digest", "sha256:" + "0" * 64), ("digest", None),
-                             ("browser_download_url", "http://github.com/test.pkg")):
+                             ("browser_download_url", "http://github.com/test.app.tar.gz")):
             data = release()
             data["assets"][0][field] = value
             with self.subTest(field=field, value=value), self.assertRaises(UpdateError):
@@ -93,10 +93,11 @@ class GitHubUpdateTests(unittest.TestCase):
         with self.assertRaises(Cancelled):
             updater.download(candidate, cancelled, lambda _: None)
 
-    def test_publication_requires_matching_pkg_and_checksum(self):
+    def test_publication_requires_matching_dmg_and_checksum(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packaging/tauri"))
         from validate_installer import validate
         data = release()
+        data["assets"][0]["name"] = "ElectricityToolbox-1.2.0-apple-silicon.dmg"
         data["assets"].append({"name": data["assets"][0]["name"] + ".sha256"})
         validate(data)
         for field, value in (("digest", None), ("size", 0), ("name", "wrong.pkg")):

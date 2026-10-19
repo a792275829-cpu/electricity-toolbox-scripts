@@ -11,8 +11,9 @@
 - `migrate_samples.py`：按原版本地 `.toolbox/migration-samples.json` 清单迁移全部模块的独立测试副本，校验哈希，保留已修改样例。参数为 `--source 原版工作目录 --destination 新版用户数据工作目录`，可加 `--zip 样例包.zip` 生成带相对路径说明的伴随分发包。增加 `--app-home` 时样例存放在新版 `samples/`（兼容旧目标的 `测试样例/`），本机来源快照位于原版 `.toolbox/`，均不进入源码发行包。
 - `version.py`：统一版本号并核对发布标签。
 - `release_index.py`：继续为旧版客户端生成签名更新索引。
-- `build_pkg.py`、`pkg-scripts/`：生成固定安装到 `/Applications` 的 PKG，安装前检查退出，安装后清理已确认的旧应用副本。
-- `validate_installer.py`：发布前核对 PKG 附件、校验文件、大小与 GitHub SHA-256 digest。
+- `build_dmg.py`、`install_user_app.py`：生成用户安装 DMG；首次复制到 `~/Applications`，保留数据、校验签名、替换失败回滚，不请求管理员权限。
+- `build_pkg.py`、`pkg-scripts/`：历史 PKG 兼容代码，不再用于当前发行流程。
+- `validate_installer.py`：发布前核对 DMG 附件、校验文件、大小与 GitHub SHA-256 digest。
 - `requirements-macos.lock`：锁定 Mac 发行包的 Python 依赖与校验哈希。
 
 流程参考 [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev) 的 Tauri/GitHub Releases 分发方式，并按 [Tauri 官方发布文档](https://v2.tauri.app/distribute/pipelines/github/) 实现；没有复制其界面。

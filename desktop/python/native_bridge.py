@@ -21,11 +21,12 @@ from toolbox.app import ToolboxApp
 
 
 class NativeService:
-    def __init__(self, app: ToolboxApp):
+    def __init__(self, app: ToolboxApp, emit=None):
         self.app = app
         self.maintenance = False
         self._locked_widgets = {}
         self.updater = None
+        self.emit = emit
 
     def _lock_inputs(self, locked: bool):
         tag = f"ToolboxUpdateLock{id(self.app)}"
@@ -48,6 +49,17 @@ class NativeService:
 
     def call(self, method: str, params: dict):
         app = self.app
+        if method in ("begin_update", "cancel_update"):
+            if self.emit is None:
+                raise ValueError("源码启动模式不自动更新，请使用 DMG 安装的桌面版")
+            self.emit({"event": {"kind": method, "version": params.get("version")}})
+            return True
+        if method in ("update_progress", "update_failed", "update_cancelled"):
+            if method != "update_progress":
+                self.call("abort_update", {})
+            if self.updater:
+                self.updater.update_event(method, params)
+            return True
         if method == "ping":
             return {
                 "protocol": 2,
@@ -92,7 +104,7 @@ class NativeService:
                 app.deiconify()
                 app.lift()
             return True
-        if method == "installer_close":
+        if method in ("installer_close", "finish_update"):
             if app.registry.has_running_tasks():
                 raise ValueError("请等待正在运行的任务完成后安装")
             if app.credentials_panel.dirty and not app.credentials_panel.save():
@@ -121,7 +133,7 @@ def serve(root: Path = ROOT):
             protocol.flush()
 
     app = ToolboxApp(workspace=root, check_updates=lambda: service.updater.show())
-    service = NativeService(app)
+    service = NativeService(app, emit=send)
     from update_ui import UpdateController
     service.updater = UpdateController(app, service)
     close = lambda: service.call("request_close", {})

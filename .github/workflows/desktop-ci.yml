@@ -47,5 +47,6 @@ jobs:
         working-directory: desktop
       - run: python -m unittest discover -s desktop/tests/python -v
       - run: python packaging/tauri/prepare_payload.py --target ${{ matrix.target }}
+      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
       - run: npm run tauri build -- --no-bundle --target ${{ matrix.target }}
         working-directory: desktop

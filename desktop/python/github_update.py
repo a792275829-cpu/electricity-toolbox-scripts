@@ -1,4 +1,4 @@
-"""GitHub release discovery and verified PKG downloads; no Tk or business data."""
+"""GitHub release discovery and digest-verified app archives; no business data."""
 from __future__ import annotations
 
 import hashlib
@@ -55,7 +55,7 @@ def parse_release(data: dict, current: str, repository: str = REPOSITORY) -> Rel
             raise UpdateError("版本发布页面无效")
         if data["draft"] or data["prerelease"] or latest <= version_parts(current):
             return None
-        name = f"ElectricityToolbox-{tag.removeprefix('v')}-apple-silicon.pkg"
+        name = f"ElectricityToolbox-{tag.removeprefix('v')}-aarch64.app.tar.gz"
         assets = [a for a in data["assets"] if a["name"] == name]
         if len(assets) > 1:
             raise UpdateError("版本安装包重复")
@@ -110,7 +110,7 @@ class GitHubUpdater:
         if not valid:
             raise UpdateError("安装包链接、摘要或大小无效")
         directory = Path(tempfile.mkdtemp(prefix="ElectricityToolboxUpdate-"))
-        path = directory / "ElectricityToolbox.pkg"
+        path = directory / "ElectricityToolbox.app.tar.gz"
         try:
             count = 0
             checksum = hashlib.sha256()

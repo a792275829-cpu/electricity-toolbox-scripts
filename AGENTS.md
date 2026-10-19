@@ -68,3 +68,5 @@
 - `CHANGELOG.md` 是逐版本更新内容的唯一来源；`packaging/tauri/release_notes.md` 只维护通用安装说明。发布时由版本脚本提取当前版本内容并拼接安装说明，用于 GitHub Release 与应用内更新说明。
 - 发布前执行 `version.py check --tag vX.Y.Z --require-notes`，确认版本一致且更新内容非空；缺少对应日志时禁止打包发布。已发布版本不得覆盖，下一次发布递增版本号。
 - 仅构建和发布 macOS Apple 芯片安装包，完成针对性测试、安装包与摘要校验后再发布 GitHub 正式版；生成物和签名私钥不进入 Git。
+
+- 桌面发行默认使用 DMG，首次安装到 `~/Applications/电力工具箱.app`；应用内使用 Tauri 签名应用包自动更新，不恢复 PKG 作为当前安装入口或要求重复管理员授权。旧系统安装版需手动从 DMG 迁移一次，保留原用户数据目录。

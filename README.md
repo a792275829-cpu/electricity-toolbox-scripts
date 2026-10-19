@@ -4,6 +4,14 @@
 
 仓库公开地址：[a792275829-cpu/electricity-toolbox-scripts](https://github.com/a792275829-cpu/electricity-toolbox-scripts)
 
+## DMG 桌面版
+
+macOS 14+、Apple 芯片电脑使用 DMG 桌面版，已内置 Python、Node、Chromium 与 Tcl/Tk。打开 DMG，先退出旧工具箱，再双击“安装到我的应用程序.command”，安装到 `~/Applications/电力工具箱.app` 并自动打开；也可手动拖入个人用户目录的 Applications 文件夹。
+
+后续在应用中点击“下载并更新”，自动下载、验签、检查任务、保存配置、替换及重启。旧 PKG 版需要从 DMG 迁移一次；原账号、登录态、业务数据和样例保留。确认新版正常后，可手动清理 `/Applications` 的旧副本并更新 Dock 图标。详细说明见 [桌面版安装与更新](desktop/README.md)。
+
+以下环境要求和初始化步骤适用于源码运行方式。
+
 ## 目录
 
 - [环境要求](#环境要求)

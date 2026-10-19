@@ -52,7 +52,7 @@ jobs:
           - runner: macos-14
             target: aarch64-apple-darwin
             requirements: packaging/tauri/requirements-macos.lock
-            bundles: app,dmg
+            bundles: app
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -81,25 +81,23 @@ jobs:
         working-directory: desktop
       - run: python -m unittest discover -s desktop/tests/python -v
       - run: python packaging/tauri/prepare_payload.py --target ${{ matrix.target }}
-      - uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
+      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
+      - name: Build signed application
+        working-directory: desktop
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          projectPath: desktop
-          releaseId: ${{ needs.prepare.outputs.release }}
-          tagName: ${{ needs.prepare.outputs.tag }}
-          releaseDraft: true
-          uploadUpdaterJson: false
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-      - name: Build and upload system installer
+        run: npm run build -- --target ${{ matrix.target }} --bundles app
+      - name: Build and upload user-install DMG
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          python packaging/tauri/build_pkg.py desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/电力工具箱.app --output dist
-          gh release upload "$RELEASE_TAG" dist/*.pkg dist/*.pkg.sha256 --clobber
+          python packaging/tauri/build_dmg.py desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/电力工具箱.app --output dist
+          version="${RELEASE_TAG#v}"
+          cp desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz "dist/ElectricityToolbox-${version}-aarch64.app.tar.gz"
+          cp desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig "dist/ElectricityToolbox-${version}-aarch64.app.tar.gz.sig"
+          gh release upload "$RELEASE_TAG" dist/*.dmg dist/*.dmg.sha256 dist/*.app.tar.gz dist/*.app.tar.gz.sig --clobber
   publish:
     needs: [prepare, build]
     runs-on: ubuntu-latest

@@ -22,7 +22,7 @@ class UpdateUiTests(unittest.TestCase):
         self.app = ToolboxApp(workspace=Path(self.temp.name), page_factories={
             name: lambda parent, paths, registry: tk.Frame(parent) for name in PAGE_NAMES
         }, check_updates=lambda: self.controller.show())
-        self.service = NativeService(self.app)
+        self.service = NativeService(self.app, emit=Mock())
         self.updater = Mock(current="0.1.3")
         self.updater.check.return_value = None
         self.controller = UpdateController(self.app, self.service, self.updater)
@@ -47,7 +47,7 @@ class UpdateUiTests(unittest.TestCase):
         self.updater.check.return_value = self.release
         self.controller.check(manual=True)
         self.pump(lambda: self.controller.window is not None)
-        self.assertEqual(self.controller.window.primary.cget("text"), "下载更新")
+        self.assertEqual(self.controller.window.primary.cget("text"), "下载并更新")
         self.assertIs(self.controller.window.controller.app, self.app)
 
     def test_automatic_errors_are_silent_but_manual_errors_are_visible(self):
@@ -58,39 +58,48 @@ class UpdateUiTests(unittest.TestCase):
             self.controller.checked(None, ValueError("离线"))
             error.assert_called_once()
 
-    def test_verified_download_waits_for_install_click_and_dismiss_removes_pkg(self):
-        folder = Path(self.temp.name) / "download"
-        folder.mkdir()
-        path = folder / "test.pkg"
-        path.write_bytes(b"verified")
-        self.updater.download.return_value = path
+    def test_one_click_starts_native_signed_update_and_cancel_waits_for_ack(self):
         self.controller.release = self.release
         self.controller.show()
         window = self.controller.window
-        with patch("update_ui.subprocess.run") as install:
-            window.perform()
-            self.pump(lambda: window.installer is not None)
-            self.assertEqual(window.primary.cget("text"), "安装更新")
-            install.assert_not_called()
+        window.perform()
+        self.service.emit.assert_called_once_with({"event": {"kind": "begin_update", "version": "v0.2.0"}})
+        self.assertTrue(window.downloading)
         window.dismiss()
-        self.assertFalse(folder.exists())
+        self.assertTrue(window.winfo_exists())
+        self.assertEqual(self.service.emit.call_args.args[0]["event"]["kind"], "cancel_update")
+        self.service.call("update_cancelled", {})
+        self.assertFalse(window.winfo_exists())
 
-    def test_install_checks_tasks_and_cancelled_installer_restores_inputs(self):
+    def test_automatic_install_keeps_task_guard_and_failure_unlocks_inputs(self):
         self.controller.release = self.release
         self.controller.show()
         window = self.controller.window
-        window.installer = Path(self.temp.name) / "test.pkg"
         with patch.object(self.app.registry, "has_running_tasks", return_value=True):
-            window.install()
+            with self.assertRaisesRegex(ValueError, "等待"):
+                self.service.call("prepare_update", {})
+        self.assertFalse(self.service.maintenance)
+        self.service.call("prepare_update", {})
+        self.service.call("update_progress", {"stage": "installing", "percent": 100})
+        self.assertTrue(window.installing)
+        self.assertTrue(self.service.maintenance)
+        window.dismiss()
+        self.assertTrue(window.winfo_exists())
+        self.service.call("update_failed", {"error": "签名校验失败"})
         self.assertFalse(window.installing)
         self.assertFalse(self.service.maintenance)
-        with patch.dict("os.environ", {}, clear=True), patch("update_ui.subprocess.run") as install:
-            window.install()
-            self.assertTrue(self.service.maintenance)
-            self.pump(lambda: not window.installing)
-            install.assert_called_once()
-        self.assertFalse(self.service.maintenance)
         self.assertFalse(self.service._locked_widgets)
+        self.assertEqual(window.status.get(), "签名校验失败")
+        self.assertEqual(window.primary.cget("text"), "重试更新")
+
+    def test_direct_source_start_does_not_install_or_request_privileges(self):
+        self.service.emit = None
+        self.controller.release = self.release
+        self.controller.show()
+        window = self.controller.window
+        window.perform()
+        self.assertFalse(window.downloading)
+        self.assertIn("源码启动模式", window.status.get())
 
 
 if __name__ == "__main__":

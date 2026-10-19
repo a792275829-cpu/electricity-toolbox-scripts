@@ -1,17 +1,14 @@
-"""Original Tk update UI: background badge, release notes, download, Installer."""
+"""Original Tk update UI with signed native download, replacement and restart."""
 from __future__ import annotations
 
 import os
 import queue
-import shutil
-import subprocess
 import threading
 import tkinter as tk
 import webbrowser
-from pathlib import Path
 from tkinter import messagebox, ttk
 
-from github_update import Cancelled, GitHubUpdater
+from github_update import GitHubUpdater
 
 
 class UpdateController:
@@ -75,6 +72,13 @@ class UpdateController:
             return
         self.window = UpdateWindow(self, self.release)
 
+    def update_event(self, method, params):
+        window = self.window
+        if window and window.winfo_exists():
+            window.update_event(method, params)
+        elif method == "update_failed":
+            messagebox.showerror("更新未完成", params.get("error", "请重试更新"), parent=self.app)
+
     def activate(self):
         self.check()
 
@@ -83,9 +87,7 @@ class UpdateWindow(tk.Toplevel):
     def __init__(self, controller, release):
         super().__init__(controller.app)
         self.controller, self.release = controller, release
-        self.cancel = threading.Event()
         self.downloading = self.installing = False
-        self.installer = None
         self.title("软件更新")
         self.transient(controller.app)
         self.geometry("560x510")
@@ -114,7 +116,7 @@ class UpdateWindow(tk.Toplevel):
         notes.configure(state="disabled")
         self.progress = ttk.Progressbar(body, maximum=100)
         self.progress.grid(sticky="ew", pady=(12, 8))
-        self.status = tk.StringVar(self, "准备好后即可下载更新。")
+        self.status = tk.StringVar(self, "下载完成后自动验签、更新并重新启动；有运行任务时暂停安装。")
         ttk.Label(body, textvariable=self.status, wraplength=490).grid(sticky="w", pady=(0, 16))
         actions = ttk.Frame(body)
         actions.grid(sticky="ew")
@@ -122,7 +124,7 @@ class UpdateWindow(tk.Toplevel):
         ttk.Button(actions, text="发布页面", command=lambda: webbrowser.open(release.page)).grid(row=0, column=0)
         self.cancel_button = ttk.Button(actions, text="稍后", command=self.dismiss)
         self.cancel_button.grid(row=0, column=2, padx=(8, 8))
-        self.primary = ttk.Button(actions, text="下载更新", command=self.perform, style="Primary.TButton")
+        self.primary = ttk.Button(actions, text="下载并更新", command=self.perform, style="Primary.TButton")
         self.primary.grid(row=0, column=3)
         if not release.asset:
             self.primary.state(["disabled"])
@@ -131,78 +133,40 @@ class UpdateWindow(tk.Toplevel):
     def dismiss(self):
         if self.installing:
             return
-        self.cancel.set()
-        if self.installer:
-            shutil.rmtree(self.installer.parent, ignore_errors=True)
+        if self.downloading:
+            self.controller.service.call("cancel_update", {})
+            self.status.set("正在取消下载…")
+            return
         self.destroy()
 
     def perform(self):
         if self.downloading or self.installing:
             return
-        if self.installer:
-            self.install()
-            return
-        self.cancel.clear()
         self.downloading = True
         self.primary.configure(text="下载中…", state="disabled")
         self.cancel_button.configure(text="取消下载")
         self.status.set("正在连接 GitHub…")
-        def progress(fraction):
-            # Coalesce progress so a fast download cannot flood the Tk queue.
-            percent = int(fraction * 100)
-            if percent != getattr(self, "_percent", -1):
-                self._percent = percent
-                self.controller.messages.put((self.progressed, percent, None))
-        self._percent = -1
-        self.controller.worker(lambda: self.controller.updater.download(self.release, self.cancel, progress), self.downloaded)
-
-    def progressed(self, percent, _error):
-        if self.winfo_exists():
-            self.progress["value"] = percent
-            self.status.set("正在校验安装包…" if percent == 100 else f"正在下载 · {percent}%")
-
-    def downloaded(self, path, error):
-        if not self.winfo_exists():
-            if path:
-                shutil.rmtree(path.parent, ignore_errors=True)
-            return
-        self.downloading = False
-        self.primary.configure(state="normal", text="重新下载" if error else "安装更新")
-        self.cancel_button.configure(text="稍后")
-        if error:
-            self.progress["value"] = 0
-            self.status.set("已取消下载。" if isinstance(error, Cancelled) else str(error))
-        else:
-            self.installer = path
-            self.status.set("校验通过。点击安装更新，在系统安装器中完成升级。")
-
-    def install(self):
         try:
-            self.controller.service.call("prepare_update", {})
-            # A per-user marker lets the installer retire a moved running copy.
-            current = os.environ.get("TOOLBOX_APP_BUNDLE")
-            if current:
-                marker = Path.home() / "Library/Application Support/com.electricity.toolbox/update-source.txt"
-                marker.parent.mkdir(parents=True, exist_ok=True)
-                marker.write_text(current + "\n", encoding="utf-8")
-                marker.chmod(0o600)
+            self.controller.service.call("begin_update", {"version": self.release.version})
         except Exception as exc:
-            self.controller.service.call("abort_update", {})
-            self.status.set(str(exc))
-            return
-        self.installing = True
-        self.primary.configure(state="disabled")
-        self.cancel_button.configure(state="disabled")
-        self.status.set("请在系统安装器中完成升级；取消安装后工具箱会恢复可用。")
-        self.controller.worker(
-            lambda: subprocess.run(["/usr/bin/open", "-W", "-a", "Installer", str(self.installer)], check=True),
-            self.installed,
-        )
+            self.update_event("update_failed", {"error": str(exc)})
 
-    def installed(self, _result, error):
-        self.controller.service.call("abort_update", {})
-        self.installing = False
-        if self.winfo_exists():
-            self.primary.configure(state="normal")
-            self.cancel_button.configure(state="normal")
-            self.status.set(f"无法打开安装器：{error}" if error else "安装器已关闭。若取消了安装，可再次点击安装更新。")
+    def update_event(self, method, params):
+        if method == "update_cancelled":
+            self.downloading = False
+            self.destroy()
+        elif method == "update_failed":
+            self.downloading = self.installing = False
+            self.primary.configure(state="normal", text="重试更新")
+            self.cancel_button.configure(state="normal", text="稍后")
+            self.status.set(params.get("error", "更新失败，请重试。"))
+        elif method == "update_progress":
+            stage = params.get("stage", "downloading")
+            self.progress["value"] = params.get("percent", 0)
+            if stage == "installing":
+                self.downloading = False
+                self.installing = True
+                self.cancel_button.configure(state="disabled")
+                self.status.set("签名校验通过，正在自动更新并重新启动…")
+            else:
+                self.status.set(f"正在下载及校验签名 · {params.get('percent', 0)}%")

@@ -1,3 +1,4 @@
+mod app_update;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -161,10 +162,13 @@ impl Backend {
                         }
                     } else if let Some(event) = value.get("event") {
                         let _ = handle.emit("backend-event", event);
+                        if event["kind"] == "begin_update" || event["kind"] == "cancel_update" {
+                            app_update::event(&handle, event);
+                        }
                         if event["kind"] == "native-closed" {
                             if let Some(state) = handle.try_state::<State>() {
                                 state.native_closed.store(true, Ordering::Release);
-                                handle.exit(0);
+                                if !state.update_job.lock().unwrap().installing() { handle.exit(0); }
                             }
                         }
                     }
@@ -192,6 +196,11 @@ impl Backend {
             pending,
             next_id: AtomicU64::new(1),
         }))
+    }
+
+    fn notify(&self, method: &str, params: Value) -> Result<(), String> {
+        let payload = json!({"method": method, "params": params}).to_string() + "\n";
+        self.input.lock().unwrap().write_all(payload.as_bytes()).map_err(|e| e.to_string())
     }
 
     fn request(&self, method: &str, params: Value) -> Result<Value, String> {
@@ -229,6 +238,7 @@ impl Backend {
 struct State {
     backend: Result<Arc<Backend>, String>,
     native_closed: AtomicBool,
+    update_job: Mutex<app_update::UpdateJob>,
 }
 
 fn show_updater(app: &tauri::AppHandle) {
@@ -326,6 +336,7 @@ fn main() {
                 request_native(app, "activate");
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
@@ -335,6 +346,7 @@ fn main() {
             app.manage(State {
                 backend,
                 native_closed: AtomicBool::new(false),
+                update_job: Mutex::new(app_update::UpdateJob::default()),
             });
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -393,3 +405,6 @@ fn main() {
             }
         });
 }
+
+#[cfg(test)]
+mod signed_update_tests;

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "电力工具箱",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "identifier": "com.electricity.toolbox",
   "build": {
     "beforeDevCommand": "npm run web:dev",
@@ -28,8 +28,7 @@
   "bundle": {
     "active": true,
     "targets": [
-      "app",
-      "dmg"
+      "app"
     ],
     "category": "Productivity",
     "shortDescription": "电力数据采集、分析与报表工具箱",
@@ -53,7 +52,8 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI3RjlERTU3MEVFNEQwRTIKUldUaTBPUU9WOTc1dDZRWXMwclh5YUxxYkhtQmRXUE5uaDc4bTdRMGx1d0x4WmdVSXBBalV2N3gK",
       "endpoints": [
         "https://github.com/a792275829-cpu/electricity-toolbox-scripts/releases/latest/download/latest.json"
-      ]
+      ],
+      "requireSignedVersion": true
     }
   }
 }
