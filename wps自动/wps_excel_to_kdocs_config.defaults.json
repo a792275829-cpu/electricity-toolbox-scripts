@@ -1,0 +1,306 @@
+{
+  "recent_urls": [],
+  "browser_mode": "managed_cdp",
+  "cdp_url": "http://127.0.0.1:9222",
+  "configs": [
+    {
+      "name": "上网电量写入",
+      "source_type": "excel",
+      "source_url": "",
+      "kdocs_url": "https://www.kdocs.cn/l/csEQ4dne7HF5",
+      "local_file": "",
+      "regions": [
+        {
+          "source_sheet": "汇总",
+          "source_start": "A138",
+          "source_end": "A161",
+          "target_sheet": "归湖",
+          "target_start": "F4",
+          "target_end": "F27"
+        },
+        {
+          "source_sheet": "汇总",
+          "source_start": "A111",
+          "source_end": "A134",
+          "target_sheet": "鮀莲",
+          "target_start": "F4",
+          "target_end": "F27"
+        },
+        {
+          "source_sheet": "汇总",
+          "source_start": "A84",
+          "source_end": "A107",
+          "target_sheet": "海风",
+          "target_start": "F4",
+          "target_end": "F27"
+        },
+        {
+          "source_sheet": "汇总",
+          "source_start": "A30",
+          "source_end": "D53",
+          "target_sheet": "海门",
+          "target_start": "X3",
+          "target_end": "AA26"
+        },
+        {
+          "source_sheet": "汇总",
+          "source_start": "A57",
+          "source_end": "D80",
+          "target_sheet": "东莞",
+          "target_start": "Y3",
+          "target_end": "AB26"
+        },
+        {
+          "source_sheet": "汇总",
+          "source_start": "A3",
+          "source_end": "C26",
+          "target_sheet": "汕头",
+          "target_start": "T3",
+          "target_end": "V26"
+        }
+      ]
+    },
+    {
+      "name": "日前电量写入",
+      "source_type": "excel",
+      "source_url": "",
+      "kdocs_url": "https://www.kdocs.cn/l/cn5wW44OLJNc",
+      "local_file": "",
+      "regions": [
+        {
+          "source_sheet": "汕头",
+          "source_start": "B4",
+          "source_end": "C27",
+          "target_sheet": "汕头",
+          "target_start": "B3",
+          "target_end": "C26"
+        },
+        {
+          "source_sheet": "海门",
+          "source_start": "B4",
+          "source_end": "C27",
+          "target_sheet": "海门",
+          "target_start": "B3",
+          "target_end": "C26"
+        },
+        {
+          "source_sheet": "东莞",
+          "source_start": "B4",
+          "source_end": "C27",
+          "target_sheet": "东莞",
+          "target_start": "B3",
+          "target_end": "C26"
+        },
+        {
+          "source_sheet": "海风",
+          "source_start": "B4",
+          "source_end": "C27",
+          "target_sheet": "海风",
+          "target_start": "B4",
+          "target_end": "C27"
+        },
+        {
+          "source_sheet": "金平",
+          "source_start": "B4",
+          "source_end": "C27",
+          "target_sheet": "鮀莲",
+          "target_start": "B4",
+          "target_end": "C27"
+        },
+        {
+          "source_sheet": "潮安",
+          "source_start": "B4",
+          "source_end": "C27",
+          "target_sheet": "归湖",
+          "target_start": "B4",
+          "target_end": "C27"
+        },
+        {
+          "source_sheet": "汕头",
+          "source_start": "D4",
+          "source_end": "E27",
+          "target_sheet": "汕头",
+          "target_start": "F3",
+          "target_end": "G26"
+        },
+        {
+          "source_sheet": "海门",
+          "source_start": "D4",
+          "source_end": "E27",
+          "target_sheet": "海门",
+          "target_start": "F3",
+          "target_end": "G26"
+        },
+        {
+          "source_sheet": "东莞",
+          "source_start": "D4",
+          "source_end": "E27",
+          "target_sheet": "东莞",
+          "target_start": "F3",
+          "target_end": "G26"
+        },
+        {
+          "source_sheet": "汕头",
+          "source_start": "F4",
+          "source_end": "G27",
+          "target_sheet": "汕头",
+          "target_start": "J3",
+          "target_end": "K26"
+        },
+        {
+          "source_sheet": "海门",
+          "source_start": "F4",
+          "source_end": "G27",
+          "target_sheet": "海门",
+          "target_start": "J3",
+          "target_end": "K26"
+        },
+        {
+          "source_sheet": "东莞",
+          "source_start": "F4",
+          "source_end": "G27",
+          "target_sheet": "东莞",
+          "target_start": "J3",
+          "target_end": "K26"
+        },
+        {
+          "source_sheet": "海门",
+          "source_start": "H4",
+          "source_end": "I27",
+          "target_sheet": "海门",
+          "target_start": "N3",
+          "target_end": "O26"
+        },
+        {
+          "source_sheet": "东莞",
+          "source_start": "H4",
+          "source_end": "I27",
+          "target_sheet": "东莞",
+          "target_start": "N3",
+          "target_end": "O26"
+        }
+      ]
+    },
+    {
+      "name": "实时电量写入",
+      "source_type": "excel",
+      "source_url": "",
+      "kdocs_url": "https://www.kdocs.cn/l/crMmVIQPta18",
+      "local_file": "",
+      "regions": [
+        {
+          "source_sheet": "汕头",
+          "source_start": "I4",
+          "source_end": "J27",
+          "target_sheet": "汕头",
+          "target_start": "D3",
+          "target_end": "E26"
+        },
+        {
+          "source_sheet": "海风",
+          "source_start": "E4",
+          "source_end": "F27",
+          "target_sheet": "海风",
+          "target_start": "D4",
+          "target_end": "E27"
+        },
+        {
+          "source_sheet": "金平",
+          "source_start": "E4",
+          "source_end": "F27",
+          "target_sheet": "鮀莲",
+          "target_start": "D4",
+          "target_end": "E27"
+        },
+        {
+          "source_sheet": "潮安",
+          "source_start": "E4",
+          "source_end": "F27",
+          "target_sheet": "归湖",
+          "target_start": "D4",
+          "target_end": "E27"
+        },
+        {
+          "source_sheet": "汕头",
+          "source_start": "K4",
+          "source_end": "L27",
+          "target_sheet": "汕头",
+          "target_start": "H3",
+          "target_end": "I26"
+        },
+        {
+          "source_sheet": "海门",
+          "source_start": "K4",
+          "source_end": "L27",
+          "target_sheet": "海门",
+          "target_start": "D3",
+          "target_end": "E26"
+        },
+        {
+          "source_sheet": "东莞",
+          "source_start": "K4",
+          "source_end": "L27",
+          "target_sheet": "东莞",
+          "target_start": "D3",
+          "target_end": "E26"
+        },
+        {
+          "source_sheet": "汕头",
+          "source_start": "M4",
+          "source_end": "N27",
+          "target_sheet": "汕头",
+          "target_start": "L3",
+          "target_end": "M26"
+        },
+        {
+          "source_sheet": "海门",
+          "source_start": "M4",
+          "source_end": "N27",
+          "target_sheet": "海门",
+          "target_start": "H3",
+          "target_end": "I26"
+        },
+        {
+          "source_sheet": "东莞",
+          "source_start": "M4",
+          "source_end": "N27",
+          "target_sheet": "东莞",
+          "target_start": "H3",
+          "target_end": "I26"
+        },
+        {
+          "source_sheet": "海门",
+          "source_start": "O4",
+          "source_end": "P27",
+          "target_sheet": "海门",
+          "target_start": "L3",
+          "target_end": "M26"
+        },
+        {
+          "source_sheet": "东莞",
+          "source_start": "O4",
+          "source_end": "P27",
+          "target_sheet": "东莞",
+          "target_start": "L3",
+          "target_end": "M26"
+        },
+        {
+          "source_sheet": "海门",
+          "source_start": "Q4",
+          "source_end": "R27",
+          "target_sheet": "海门",
+          "target_start": "P3",
+          "target_end": "Q26"
+        },
+        {
+          "source_sheet": "东莞",
+          "source_start": "Q4",
+          "source_end": "R27",
+          "target_sheet": "东莞",
+          "target_start": "P3",
+          "target_end": "Q26"
+        }
+      ]
+    }
+  ]
+}

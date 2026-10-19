@@ -5,6 +5,9 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
+
+from openpyxl import load_workbook
 
 import numpy as np
 import pandas as pd
@@ -83,6 +86,120 @@ class GuangdongDataUpdateTests(unittest.TestCase):
                 self.update.SHARED_CONFIG_PATH = original
         self.assertEqual("u", result["username"])
 
+    def test_update_uses_relative_initial_path_and_explicit_master(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            initial = root / "输入" / "初始.xlsx"
+            initial.parent.mkdir()
+            frame = pd.DataFrame({
+                "日期": pd.Timestamp("2026-07-11"),
+                "时刻": pd.date_range("2026-07-11", periods=96, freq="15min").strftime("%H:%M"),
+                "全省日前平均电价": 300.0,
+            })
+            frame.to_excel(initial, index=False, sheet_name="整合数据")
+            initial_bytes = initial.read_bytes()
+            config = root / "config.json"
+            config.write_text('{"initialWorkbook":"输入/初始.xlsx","masterWorkbook":"错误.xlsx"}')
+            selected = root / "自选输出" / "总表.xlsx"
+            with mock.patch.object(self.update, "SCRIPT_DIR", root), mock.patch.object(
+                self.update, "load_config", return_value={"username": "u", "password": "p"}
+            ), mock.patch.object(self.update, "GDFireClient") as client:
+                result = self.update.update_master_workbook(
+                    run_date="2026-07-11", config_path=config, master_workbook=Path("自选输出/总表.xlsx")
+                )
+            client.assert_not_called()
+            self.assertEqual(selected, result["master"])
+            self.assertFalse((root / "错误.xlsx").exists())
+            self.assertEqual(initial_bytes, initial.read_bytes())
+            with pd.ExcelFile(selected) as book:
+                self.assertEqual(["整合数据"], book.sheet_names)
+                readback = pd.read_excel(book)
+            self.assertEqual(list(frame.columns), list(readback.columns))
+            self.assertEqual(96, len(readback))
+            self.assertEqual(300, readback.iloc[-1]["全省日前平均电价"])
+
+
+class GuangdongPathTests(unittest.TestCase):
+    def test_paths_are_module_relative_and_shared_by_toolbox(self) -> None:
+        from toolbox.runtime import ToolPaths
+
+        paths_module = load_script("test_guangdong_paths", "gd_price_forecast/paths.py")
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            module_dir = root / "广东电价预测"
+            module_dir.mkdir()
+            (module_dir / "config.json").write_text(
+                '{"masterWorkbook":"业务数据/总表.xlsx","predictionOutputDir":"业务结果/日前"}'
+            )
+            resolved = paths_module.resolve_paths(module_dir)
+            paths = ToolPaths(root)
+            self.assertEqual(module_dir / "业务数据/总表.xlsx", resolved["masterWorkbook"])
+            self.assertEqual(resolved["masterWorkbook"], paths.guangdong_price_master_workbook)
+            self.assertEqual(resolved["predictionOutputDir"], paths.guangdong_prediction_output_dir)
+            self.assertEqual(module_dir / "输入/广东数据初始总表.xlsx", resolved["initialWorkbook"])
+
+
+class GuangdongPageTests(unittest.TestCase):
+    def test_page_uses_config_and_passes_selected_paths_to_tasks(self) -> None:
+        import tkinter as tk
+        from datetime import date
+        from toolbox.pages import GuangdongPricePage
+        from toolbox.runtime import TaskRegistry, ToolPaths
+
+        try:
+            root = tk.Tk()
+            root.withdraw()
+        except tk.TclError as exc:
+            self.skipTest(str(exc))
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                workspace = Path(folder).resolve()
+                module_dir = workspace / "广东电价预测"
+                module_dir.mkdir()
+                (module_dir / "config.json").write_text(
+                    '{"masterWorkbook":"数据/总表.xlsx","predictionOutputDir":"预测"}'
+                )
+                page = GuangdongPricePage(root, ToolPaths(workspace), TaskRegistry(), today=date(2026, 10, 10))
+                self.assertEqual(module_dir / "数据/总表.xlsx", Path(page.master_workbook.get()))
+                self.assertEqual(module_dir / "预测", Path(page.prediction_output_dir.get()))
+                page.master_workbook.set("自选/总表.xlsx")
+                module = mock.Mock()
+                with mock.patch.object(page, "run_in_thread") as run, mock.patch(
+                    "toolbox.pages.load_module", return_value=module
+                ):
+                    page.start_update()
+                    run.call_args.args[0]()
+                selected = module_dir / "自选/总表.xlsx"
+                module.update_master_workbook.assert_called_once_with(run_date="2026-10-10", master_workbook=selected)
+                selected.parent.mkdir()
+                selected.touch()
+                page.prediction_output_dir.set("自选/预测")
+                with mock.patch("toolbox.pages._open_directory") as open_directory:
+                    page.open_business_directory(page.prediction_output_dir.get())
+                open_directory.assert_called_once_with(module_dir / "自选/预测")
+                with mock.patch.object(page, "run_process") as run:
+                    page.start_prediction()
+                command = run.call_args.args[0]
+                self.assertEqual(str(selected), command[command.index("--input") + 1])
+                self.assertEqual(str(module_dir / "自选/预测"), command[command.index("--output-dir") + 1])
+                self.assertEqual("1", command[command.index("--forecast-days") + 1])
+                self.assertEqual("0", command[command.index("--training-months") + 1])
+                self.assertEqual("2026-10-10", command[command.index("--as-of") + 1])
+                page.prediction_output_dir.set("")
+                with mock.patch.object(page, "run_process") as run, mock.patch("toolbox.pages.messagebox.showerror") as error:
+                    page.start_prediction()
+                run.assert_not_called()
+                error.assert_called_once()
+                page.prediction_output_dir.set("自选/预测")
+                page.run_date.set("无效日期")
+                with mock.patch.object(page, "run_process") as run, mock.patch("toolbox.pages.messagebox.showerror") as error:
+                    page.start_prediction()
+                run.assert_not_called()
+                error.assert_called_once()
+                root.update_idletasks()
+        finally:
+            root.destroy()
+
 
 @unittest.skipUnless(
     importlib.util.find_spec("joblib") and importlib.util.find_spec("sklearn"),
@@ -116,6 +233,52 @@ class GuangdongForecastTests(unittest.TestCase):
         self.assertEqual(96, len(future))
         self.assertEqual(96, future["时刻"].nunique())
         self.assertTrue(future["全省日前平均电价"].isna().all())
+
+    def test_prediction_cli_reads_configured_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            config = Path(folder) / "config.json"
+            config.write_text('{"masterWorkbook":"自选/总表.xlsx","predictionOutputDir":"自选/预测"}')
+            with mock.patch.object(sys, "argv", ["train_d1_forecast.py", "--config", str(config)]), mock.patch.object(
+                self.forecast, "run_pipeline", return_value={"mae": 0.0}
+            ) as pipeline, mock.patch("builtins.print"):
+                self.forecast.main()
+            self.assertEqual((PROJECT / "自选/总表.xlsx", PROJECT / "自选/预测"), pipeline.call_args.args)
+
+    def test_pipeline_exports_actual_workbook_and_rejects_unsupported_days(self) -> None:
+        times = pd.date_range("2026-05-01", periods=50 * 96, freq="15min")
+        frame = pd.DataFrame({
+            "日期": times.normalize(),
+            "时刻": times.strftime("%H:%M"),
+            "全省日前平均电价": 300 + np.sin(np.arange(len(times)) / 96) * 20,
+        })
+        with tempfile.TemporaryDirectory() as folder:
+            input_path = Path(folder) / "输入.xlsx"
+            output_dir = Path(folder) / "自选结果"
+            frame.to_excel(input_path, index=False, sheet_name="整合数据")
+            original = input_path.read_bytes()
+            summary = self.forecast.run_pipeline(
+                input_path, output_dir,
+                configs=[{"name": "smoke", "kind": "hist_gradient_boosting", "params": {"max_iter": 5}}],
+            )
+            self.assertTrue(np.isfinite(summary["mae"]))
+            self.assertEqual({"D+1日前电价.xlsx", "MAE.json"}, {p.name for p in output_dir.iterdir()})
+            book = load_workbook(output_dir / "D+1日前电价.xlsx")
+            try:
+                self.assertEqual(["D+1日前电价"], book.sheetnames)
+                sheet = book.active
+                self.assertEqual((97, 3), (sheet.max_row, sheet.max_column))
+                self.assertEqual(["日期", "时刻", "日前电价"], [c.value for c in sheet[1]])
+                self.assertEqual(pd.Timestamp("2026-06-20"), sheet["A2"].value)
+                self.assertEqual("00:00", sheet["B2"].value)
+                self.assertEqual("23:45", sheet["B97"].value)
+                self.assertTrue(np.isfinite(sheet["C2"].value))
+                self.assertEqual("0.00", sheet["C2"].number_format)
+                self.assertNotEqual("General", sheet["A2"].number_format)
+            finally:
+                book.close()
+            self.assertEqual(original, input_path.read_bytes())
+            with self.assertRaisesRegex(ValueError, "预测天数必须为 1"):
+                self.forecast.run_pipeline(input_path, output_dir, forecast_days=2)
 
     def test_training_window_keeps_only_recent_three_months(self) -> None:
         dates = pd.date_range("2025-01-01", "2026-07-11", freq="D")

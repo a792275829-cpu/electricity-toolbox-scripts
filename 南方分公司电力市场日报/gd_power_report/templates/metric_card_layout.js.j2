@@ -1,0 +1,44 @@
+(() => {
+  const main = document.querySelector("main");
+  const root = document.documentElement;
+  if (!main) return;
+  let frame = 0;
+  let lastWidth = main.getBoundingClientRect().width;
+
+  function syncMetricCardHeights() {
+    // Measure natural wrapping before sharing the largest height across all groups.
+    root.style.removeProperty("--metric-card-height");
+    const cards = [...main.querySelectorAll(".metric-card")];
+    if (!cards.length) return 0;
+    const height = Math.ceil(Math.max(...cards.map(card => card.getBoundingClientRect().height)));
+    root.style.setProperty("--metric-card-height", `${height}px`);
+    return height;
+  }
+
+  function schedule() {
+    if (frame) return;
+    window.metricCardsReady = new Promise(resolve => {
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        resolve(syncMetricCardHeights());
+      });
+    });
+  }
+
+  window.syncMetricCardHeights = syncMetricCardHeights;
+  syncMetricCardHeights();
+  window.metricCardsReady = document.fonts.ready.then(syncMetricCardHeights);
+  document.fonts.addEventListener("loadingdone", schedule);
+  window.addEventListener("resize", schedule);
+  window.addEventListener("beforeprint", syncMetricCardHeights);
+  new ResizeObserver(entries => {
+    const width = entries[0].contentRect.width;
+    if (Math.abs(width - lastWidth) > 0.1) {
+      lastWidth = width;
+      schedule();
+    }
+  }).observe(main);
+  new MutationObserver(schedule).observe(main, {
+    subtree: true, childList: true, characterData: true
+  });
+})();

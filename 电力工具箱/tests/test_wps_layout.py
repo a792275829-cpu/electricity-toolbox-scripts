@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import time
 import tkinter as tk
 import unittest
 from pathlib import Path
@@ -21,6 +22,9 @@ class WpsToolbarLayoutTests(unittest.TestCase):
         except tk.TclError as exc:
             self.skipTest(f"Tk unavailable: {exc}")
         from toolbox.runtime import ToolPaths, load_module
+        from toolbox.ui.theme import configure_theme
+
+        configure_theme(ttk.Style(root))
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
         module = load_module("wps_responsive_toolbar_test", paths.wps_writer)
@@ -29,8 +33,8 @@ class WpsToolbarLayoutTests(unittest.TestCase):
         root.update_idletasks()
 
         expected = {
-            "Add config", "Edit", "Copy", "Remove", "Move up", "Move down",
-            "Import", "Export", "Preview", "Write to WPS",
+            "添加配置", "编辑", "复制", "删除", "上移", "下移",
+            "导入", "导出", "预览", "开始写入",
         }
         buttons = {
             str(widget.cget("text")): widget
@@ -49,10 +53,10 @@ class WpsToolbarLayoutTests(unittest.TestCase):
 
         tree_top = frame.tree.winfo_rooty()
         tree_bottom = tree_top + frame.tree.winfo_height()
-        for text in ("Add config", "Edit", "Copy", "Remove", "Move up", "Move down", "Import", "Export"):
+        for text in ("添加配置", "编辑", "复制", "删除", "上移", "下移", "导入", "导出"):
             with self.subTest(toolbar_button=text):
                 self.assertLess(buttons[text].winfo_rooty(), tree_top)
-        for text in ("Preview", "Write to WPS"):
+        for text in ("预览", "开始写入"):
             with self.subTest(execution_button=text):
                 self.assertGreaterEqual(buttons[text].winfo_rooty(), tree_bottom)
 
@@ -68,10 +72,18 @@ class WpsToolbarLayoutTests(unittest.TestCase):
             self.skipTest(f"Tk unavailable: {exc}")
         from toolbox.pages import WpsWriterPage
         from toolbox.runtime import TaskRegistry, ToolPaths
+        from toolbox.ui.theme import configure_theme
+
+        configure_theme(ttk.Style(root))
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
         page = WpsWriterPage(root, paths, TaskRegistry())
         page.pack(fill="both", expand=True)
+        deadline = time.monotonic() + 5
+        while not hasattr(page, "writer_frame") and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.01)
+        self.assertTrue(hasattr(page, "writer_frame"))
         root.update_idletasks()
 
         self.assertEqual(page.footer.winfo_manager(), "")
@@ -83,7 +95,7 @@ class WpsToolbarLayoutTests(unittest.TestCase):
             for widget in descendants(page)
             if isinstance(widget, ttk.LabelFrame) and widget.winfo_ismapped()
         ]
-        self.assertIn("WPS operation log", visible_log_frames)
+        self.assertIn("操作日志", visible_log_frames)
         self.assertNotIn("运行日志", visible_log_frames)
 
         page.destroy()

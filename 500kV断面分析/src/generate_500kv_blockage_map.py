@@ -31,7 +31,7 @@ def generate_blockage_map(
     topology_path: Path,
     raw_price_path: Path,
     output_dir: Path,
-    threshold: float = 100.0,
+    threshold: float = 80.0,
     html_name: str | None = None,
 ) -> BlockageMapResult:
     topology_path = Path(topology_path)
@@ -103,7 +103,7 @@ def main() -> None:
     parser.add_argument("--topology", required=True, type=Path, help="拓扑 Markdown 文件路径")
     parser.add_argument("--raw-prices", required=True, type=Path, help="原始节点电价 Excel 文件路径")
     parser.add_argument("--output-dir", required=True, type=Path, help="输出目录")
-    parser.add_argument("--threshold", default=100.0, type=float, help="价差阈值，默认 100 元/MWh")
+    parser.add_argument("--threshold", default=80.0, type=float, help="价差阈值，默认 80 元/MWh")
     parser.add_argument("--html-name", help="输出 HTML 文件名；默认使用原数据文件名加_500kV分析")
     args = parser.parse_args()
 

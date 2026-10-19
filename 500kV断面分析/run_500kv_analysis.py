@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -16,11 +15,6 @@ from src.generate_500kv_blockage_map import generate_blockage_map
 DEFAULT_TOPOLOGY = MODULE_ROOT / "500kV节点拓扑.md"
 
 
-def result_folder_name(source: Path) -> str:
-    cleaned = re.sub(r'[\\/:*?"<>|]+', "_", Path(source).stem).strip()
-    return cleaned or "500kV断面分析结果"
-
-
 def result_html_name(source: Path) -> str:
     return f"{Path(source).stem}_500kV分析.html"
 
@@ -30,7 +24,7 @@ def run_many(
     output_root: Path,
     *,
     topology_path: Path = DEFAULT_TOPOLOGY,
-    threshold: float = 100.0,
+    threshold: float = 80.0,
 ) -> list[Path]:
     topology_path = Path(topology_path).resolve()
     output_root = Path(output_root).resolve()
@@ -50,13 +44,13 @@ def run_many(
         if raw_price_path.suffix.lower() != ".xlsx":
             raise ValueError(f"仅支持 .xlsx 文件：{raw_price_path}")
 
-        output_dir = output_root / result_folder_name(raw_price_path)
         print(f"[{index}/{len(raw_price_paths)}] 开始处理：{raw_price_path.name}", flush=True)
         result = generate_blockage_map(
             topology_path=topology_path,
             raw_price_path=raw_price_path,
-            output_dir=output_dir,
+            output_dir=output_root,
             threshold=threshold,
+            html_name=result_html_name(raw_price_path),
         )
         html_paths.append(result.html_path)
         print(
@@ -75,7 +69,7 @@ def main() -> int:
     parser.add_argument("raw_prices", nargs="+", type=Path, help="原始节点电价 Excel，可传多个")
     parser.add_argument("--output-root", required=True, type=Path, help="结果根目录")
     parser.add_argument("--topology", default=DEFAULT_TOPOLOGY, type=Path, help="500kV拓扑 Markdown")
-    parser.add_argument("--threshold", default=100.0, type=float, help="价差阈值，默认100元/MWh")
+    parser.add_argument("--threshold", default=80.0, type=float, help="价差阈值，默认80元/MWh")
     args = parser.parse_args()
     run_many(
         args.raw_prices,

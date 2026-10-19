@@ -1,0 +1,108 @@
+{% macro table_cell_value(cell) -%}
+{%- if cell.wrap_parts -%}<span class="balanced-wrap">{%- for part in cell.wrap_parts -%}<span>{{ part }}</span>{%- endfor -%}</span>{%- else -%}{{ cell.value }}{%- endif -%}
+{%- endmacro %}
+
+{% macro metric_cards(cards, class_name='metric-grid') -%}
+<div class="{{ class_name }}">
+  {% for card in cards %}
+  <article class="metric-card{% if card.delta_text %} metric-card--comparison{% endif %}">
+    <span class="metric-label">{{ card.label }}{% if card.unit %}<small class="metric-label-unit">（{{ card.unit }}）</small>{% endif %}</span>
+    {% if card.label == '火电机组开机台数' %}
+    {% set fuel_rows = card.thermal_breakdown_rows | default([], true) %}
+    <dl class="thermal-card-body thermal-breakdown">
+      {% for fuel_label in ['煤机', '气机'] %}
+      {% set row = fuel_rows[loop.index0] if loop.index0 < (fuel_rows | length) else {} %}
+      <div class="thermal-breakdown-row">
+        <dt class="thermal-breakdown-label">{{ fuel_label }}</dt>
+        <dd class="thermal-breakdown-value">{{ row.value_text if row.value_text is defined and row.value_text is not none and row.value_text != '' else '—' }}</dd>
+        <dd class="thermal-breakdown-delta metric-delta--{{ row.delta_class | default('flat', true) }}">{% if row.delta_prefix %}{{ row.delta_prefix }} {% endif %}{{ row.delta_text if row.delta_text is defined and row.delta_text is not none and row.delta_text != '' else '—' }}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+    {% else %}
+    <div class="metric-value-row">
+      <div class="metric-value"><b>{{ card.value_text }}</b></div>
+      {% if card.delta_text %}<em class="metric-delta metric-delta--{{ card.delta_class }}">{% if card.delta_prefix %}{{ card.delta_prefix }} {% endif %}{{ card.delta_text }}</em>{% endif %}
+      {% if card.pending %}<em class="pending-label">数据待更新</em>{% endif %}
+    </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro appendix_block(block) -%}
+<section class="legacy-table-block legacy-table-block--{{ block.block_kind }}">
+  {% if not block.suppress_heading %}<header class="legacy-table-heading"><h3>{{ block.title }}</h3>{% if block.unit %}<p>{{ block.unit }}</p>{% endif %}</header>{% endif %}
+  {% if block.pending %}
+  <p class="pending-label">数据待更新</p>
+  {% if block.pending_message %}<div class="source-notes"><p>{{ block.pending_message }}</p></div>{% endif %}
+  {% else %}
+  <table class="appendix-table" data-source-range="{{ block.range }}">
+    <colgroup>{% for width in block.column_widths %}<col style="width:{{ width }}px">{% endfor %}</colgroup>
+    <thead>
+      {% for row in block.rows[:block.header_rows] %}
+      <tr>{% for cell in row.cells %}<th{% if cell.compact_tall_cell %} data-tall-cell="true"{% endif %}{% if cell.rowspan > 1 %} rowspan="{{ cell.rowspan }}"{% endif %}{% if cell.colspan > 1 %} colspan="{{ cell.colspan }}"{% endif %}{% if cell.style %} style="{{ cell.style }}"{% endif %}>{{ table_cell_value(cell) }}</th>{% endfor %}</tr>
+      {% endfor %}
+    </thead>
+    <tbody>
+      {% for row in block.rows[block.header_rows:] %}
+      <tr class="{% if row.subtable_header %}subtable-header {% endif %}{% if block.block_kind == 'day-recap' and row.group_key %}day-recap-group day-recap-group--{{ row.group_key }}{% endif %}">{% for cell in row.cells %}<td data-source-column="{{ cell.source_column }}"{% if cell.compact_tall_cell %} data-tall-cell="true"{% endif %}{% if block.block_kind == 'day-recap' and not row.subtable_header and cell.source_column in [10, 11, 12, 16] %} class="day-recap-emphasis"{% elif block.block_kind == 'realtime-recap' and not row.subtable_header and cell.source_column in [12, 13] %} class="realtime-recap-emphasis"{% endif %}{% if cell.rowspan > 1 %} rowspan="{{ cell.rowspan }}"{% endif %}{% if cell.colspan > 1 %} colspan="{{ cell.colspan }}"{% endif %}{% if cell.style %} style="{{ cell.style }}"{% endif %}>{{ table_cell_value(cell) }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if block.notes %}<div class="source-notes">{% for note in block.notes %}<p>{{ note }}</p>{% endfor %}</div>{% endif %}
+  {% endif %}
+</section>
+{%- endmacro %}
+
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ analysis_date_cn }}南方分公司电力市场日报</title>
+  <style>{% include "legacy_concise_report.css" %}</style>{% block print_styles %}{% endblock %}
+</head>
+<body>
+<main>
+  <header class="report-header">
+    <h1>南方分公司电力市场日报</h1>
+    <div class="report-brand">
+      {% include "report_logo.html.j2" %}
+      <p>▣ {{ analysis_date_cn }}（{{ analysis_weekday }}）</p>
+    </div>
+  </header>
+
+  <section class="market-section">
+    <h2>一、日前市场简析（{{ analysis_date_meta }}）</h2>
+    <h3>1. 市场运行情况</h3>
+    {{ metric_cards(report.market.day_ahead, 'metric-grid metric-grid--market') }}
+
+    <h3>2. 分公司机组运行方式</h3>
+    <table class="operation-table"><thead><tr><th>单位</th><th>近两日机组运行方式</th></tr></thead><tbody>{% for row in operation_rows %}<tr class="operation-row"><th>{{ row.unit }}</th><td class="operation-status{% if row.same %} operation-status--same{% endif %}">{{ row.display }}</td></tr>{% endfor %}</tbody></table>
+
+    <h3>3. 分公司日前情况</h3>
+    <p class="day-ahead-company-subtitle">火电日前出清情况</p>
+    {{ metric_cards(report.day_ahead.cards, 'metric-grid metric-grid--summary') }}
+
+    {% for block in day_blocks %}{{ appendix_block(block) }}{% endfor %}
+
+    <h3>4. 各厂报价策略与收益</h3>
+    <div class="strategy-text">{% for item in report.strategies %}<section class="strategy-item"><strong>{{ item.plant }}：</strong>{% if item.paragraphs %}{% for paragraph in item.paragraphs %}<p>{{ paragraph }}</p>{% endfor %}{% else %}<p>{{ item.body_text or item.text }}{% if item.profit_text %}<span class="strategy-profit-line">{{ item.profit_text }}</span>{% endif %}</p>{% endif %}</section>{% else %}<p>数据待更新</p>{% endfor %}</div>
+  </section>
+
+  <section class="market-section realtime-section">
+    <h2>二、实时市场简析（{{ realtime_date_meta }}）</h2>
+    <h3>1. 市场实时情况</h3>
+    {{ metric_cards(report.market.realtime, 'metric-grid metric-grid--market') }}
+    <h3>2. 分公司实时情况</h3>
+    <p class="realtime-company-subtitle">火电实时出清情况</p>
+    {{ metric_cards(report.realtime.cards, 'metric-grid metric-grid--summary metric-grid--summary-realtime') }}
+    {% for block in realtime_blocks %}{{ appendix_block(block) }}{% endfor %}
+    {% if full_day_block %}{{ appendix_block(full_day_block) }}{% endif %}
+  </section>
+</main>
+<script>{% include "metric_card_layout.js.j2" %}</script>
+</body>
+</html>

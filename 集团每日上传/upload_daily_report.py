@@ -24,6 +24,12 @@ from playwright.sync_api import sync_playwright
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = SCRIPT_DIR.parent
+if str(WORKSPACE_DIR) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_DIR))
+from toolbox_credentials import mark_browser_session, prepare_browser_session, read_login_config
+from toolbox_auth_loader import wait_for_login
+from toolbox_dates import normalize_date_input
+
 LOGIN_SOURCE_DIR = WORKSPACE_DIR / "上网电量抓取"
 
 BASE_URL = "https://xhxt.chng.com.cn"
@@ -40,11 +46,13 @@ DEFAULT_DAILY_REPORT_TEMPLATE_ID = "e4dccaa498651f38019877e865fe0022"
 REPORT_API_TIMEOUT_MS = 60000
 DAY_REPORT_TENANT_NAMES = ("广东分公司", "中国华能集团有限公司广东分公司", "华能广东分公司")
 
-PROFILE_DIR = SCRIPT_DIR / ".browser-profile"
-AUTH_STATE_PATH = SCRIPT_DIR / "auth_state.json"
+from toolbox_storage import data_path
+
+PROFILE_DIR = data_path(SCRIPT_DIR / ".browser-profile")
+AUTH_STATE_PATH = data_path(SCRIPT_DIR / "auth_state.json")
 AUTH_LOCK_PATH = Path(str(AUTH_STATE_PATH) + ".lock")
-CONFIG_PATH = SCRIPT_DIR / "config.json"
-FALLBACK_CONFIG_PATH = LOGIN_SOURCE_DIR / "config.json"
+CONFIG_PATH = data_path(SCRIPT_DIR / "config.json")
+FALLBACK_CONFIG_PATH = data_path(LOGIN_SOURCE_DIR / "config.json")
 
 UPLOAD_TYPES = {
     "省内": {
@@ -93,24 +101,13 @@ def short_error(exc: BaseException) -> str:
 def process_is_alive(pid: int) -> bool:
     if pid <= 0:
         return False
-    if os.name != "nt":
-        try:
-            os.kill(pid, 0)
-            return True
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
     try:
-        import ctypes
-
-        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-        if not handle:
-            return False
-        ctypes.windll.kernel32.CloseHandle(handle)
+        os.kill(pid, 0)
         return True
-    except Exception:
+    except ProcessLookupError:
         return False
+    except PermissionError:
+        return True
 
 
 def parse_lock_timestamp(value: Any) -> float | None:
@@ -187,10 +184,7 @@ class AuthStateLock:
 
 
 def load_config() -> Config:
-    path = CONFIG_PATH if CONFIG_PATH.exists() else FALLBACK_CONFIG_PATH
-    if not path.exists():
-        return Config()
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = read_login_config(CONFIG_PATH, FALLBACK_CONFIG_PATH)
     return Config(
         username=str(raw.get("username", "") or ""),
         password=str(raw.get("password", "") or ""),
@@ -199,11 +193,7 @@ def load_config() -> Config:
 
 
 def validate_date(value: str) -> str:
-    value = value.strip()
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-        raise ValueError("日期格式应为 YYYY-MM-DD")
-    datetime.strptime(value, "%Y-%m-%d")
-    return value
+    return normalize_date_input(value)
 
 
 def daily_report_name(run_date: str) -> str:
@@ -385,11 +375,43 @@ def load_saved_auth_state(context) -> None:
 
 
 def save_auth_state(context) -> None:
+    log("正在保存集团上传登录态...")
     AUTH_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     AUTH_STATE_PATH.write_text(
         json.dumps(context.storage_state(), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    mark_browser_session(context, AUTH_STATE_PATH)
+    log("集团上传登录态已保存。")
+
+
+def close_upload_context(context) -> None:
+    """Close task pages explicitly and keep slow browser shutdown visible."""
+    original_error = sys.exc_info()[1]
+    log("正在关闭集团上传浏览器...")
+    reminder = threading.Timer(
+        15,
+        lambda: log("仍在等待集团上传浏览器退出；请勿因等待而重复提交数据。"),
+    )
+    reminder.daemon = True
+    reminder.start()
+    try:
+        # Stop the report application's background activity before closing the
+        # persistent context. Do not run website beforeunload confirmation UI.
+        for page in list(context.pages):
+            try:
+                page.close(run_before_unload=False)
+            except PlaywrightError as exc:
+                log(f"关闭上传页面失败，继续关闭浏览器：{short_error(exc)}")
+        context.close()
+    except Exception as exc:
+        if original_error is None:
+            raise
+        log(f"关闭上传浏览器失败，将保留原始错误：{short_error(exc)}")
+    else:
+        log("集团上传浏览器已关闭。")
+    finally:
+        reminder.cancel()
 
 
 def playwright_proxy() -> dict[str, str] | None:
@@ -412,7 +434,7 @@ def launch_context(playwright, *, headless: bool):
     try:
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_DIR),
-            channel="chrome",
+            channel=None if os.environ.get("TOOLBOX_PORTABLE") == "1" else "chrome",
             **launch_options,
         )
     except PlaywrightError:
@@ -420,7 +442,8 @@ def launch_context(playwright, *, headless: bool):
             str(PROFILE_DIR),
             **launch_options,
         )
-    load_saved_auth_state(context)
+    if not prepare_browser_session(context, AUTH_STATE_PATH):
+        load_saved_auth_state(context)
     return context
 
 
@@ -512,6 +535,7 @@ def try_ui_login(context, username: str, password: str) -> bool:
 
 
 def try_auto_login(context, username: str, password: str) -> bool:
+    context._qingneng_login_credentials = (username, password)
     try:
         log("正在尝试接口登录...")
         if try_api_login(context, username, password):
@@ -524,42 +548,28 @@ def try_auto_login(context, username: str, password: str) -> bool:
 
 
 def ensure_login(context, config: Config) -> None:
-    if is_logged_in(context):
+    if getattr(context, "_qingneng_account_changed", False) is not True and is_logged_in(context):
         return
     if not config.username or not config.password:
-        raise RuntimeError("未检测到有效登录态，且 config.json 没有填写账号密码。")
-    log("未检测到有效登录态，正在使用 config.json 的账号密码自动登录...")
+        raise RuntimeError("未检测到有效登录态，请在任务中心下方填写清能网站账号密码。")
+    log("正在使用已配置的清能网站账号密码自动登录...")
     if not try_auto_login(context, config.username, config.password):
-        raise RuntimeError("自动登录失败，请运行“登录日报系统.bat”手动保存一次登录态。")
+        raise RuntimeError("自动登录失败，请在清能网站账号区检查账号密码后重新运行任务。")
     log("自动登录成功。")
 
 
 def interactive_login(context, config: Config) -> None:
-    if not is_logged_in(context):
+    if getattr(context, "_qingneng_account_changed", False) is True or not is_logged_in(context):
         if config.username and config.password and try_auto_login(context, config.username, config.password):
             log("自动登录成功。")
         else:
             page = context.new_page()
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            log("请在打开的浏览器里完成登录，然后回到这里按 Enter。")
-            input()
-            if not is_logged_in(context):
-                raise RuntimeError("仍未检测到有效登录态，请确认浏览器里已经登录成功。")
-            page.close()
-
-    page = context.new_page()
-    page.goto(REPORT_URL, wait_until="domcontentloaded")
-    try:
-        page.wait_for_load_state("networkidle", timeout=15000)
-    except PlaywrightTimeoutError:
-        pass
-    if page_needs_manual_navigation(page):
-        log("已登录，但当前会话还没有进入“日报数据管理”页面。")
-        log("请在打开的浏览器里从首页进入“日报数据管理”，确认页面正常显示后回到这里按 Enter。")
-        input()
-        page = find_report_page(context, page)
-        if page_needs_manual_navigation(page):
-            raise RuntimeError("仍未进入可访问的“日报数据管理”页面，登录态未保存。")
+            log("请在打开的浏览器里完成登录；工具会自动检测并保存登录态（最长等待5分钟）。")
+            try:
+                wait_for_login(lambda: is_logged_in(context))
+            finally:
+                page.close()
 
     save_auth_state(context)
     log("日报系统登录态已保存。")
@@ -654,7 +664,7 @@ def open_report_page(context, *, allow_manual: bool) -> Page:
 
     if page_needs_manual_navigation(page):
         if not allow_manual:
-            raise RuntimeError("未能直接进入“日报数据管理”页面。请先运行“登录日报系统.bat”，并确认该浏览器能访问日报数据管理。")
+            raise RuntimeError("未能直接进入“日报数据管理”页面。请先在工具箱中重新登录日报系统，并确认该浏览器能访问日报数据管理。")
         log("\n当前页面未直接进入日报数据管理。")
         log("请在打开的浏览器窗口中登录，或从首页进入“日报数据管理”页面；完成后回到这里按 Enter。")
         input()
@@ -950,7 +960,7 @@ def create_daily_report(context, run_date: str, *, headless: bool) -> None:
 def dump_page_diagnostics(page: Page, prefix: str) -> str:
     safe_prefix = re.sub(r"[^A-Za-z0-9_.-]+", "_", prefix).strip("_") or "page"
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_path = SCRIPT_DIR / f"{safe_prefix}_{stamp}"
+    base_path = data_path(SCRIPT_DIR) / f"{safe_prefix}_{stamp}"
     data: dict[str, Any] = {"url": page.url, "title": "", "bodyText": ""}
     try:
         data["title"] = page.title()
@@ -1150,7 +1160,7 @@ def dump_upload_diagnostics(page: Page) -> str:
         }
         """
     )
-    path = SCRIPT_DIR / f"upload_page_diagnostics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    path = data_path(SCRIPT_DIR) / f"upload_page_diagnostics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(path)
 
@@ -1248,14 +1258,25 @@ def fetch_startup_max(context, run_date: str, province_area_id: str) -> int:
             timeout=30000,
         )
         payload = parse_api_payload(response, f"读取{label}出清电量开机台数")
-        rows = payload.get("data") or []
-        if not rows:
-            raise RuntimeError(f"{label}出清电量没有返回 {run_date} 的燃煤/燃气开机台数。")
+        rows = [
+            row
+            for row in (payload.get("data") or [])
+            if isinstance(row, dict)
+            and str(row.get("date") or "").startswith(run_date)
+            and str(row.get("dataItemGroup") or "") in groups
+        ]
+        rows_by_group = {str(row.get("dataItemGroup")): row for row in rows}
+        missing_groups = [group for group in groups if group not in rows_by_group]
+        if missing_groups:
+            log(
+                f"提醒：{label}出清电量未完整返回 {run_date} 的燃煤/燃气开机台数，"
+                "将使用另一类型的完整数据。"
+            )
+            continue
 
         hourly_totals: list[float] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
+        for group in groups:
+            row = rows_by_group[group]
             unit_count = row.get("unitCount") or []
             for index, raw_value in enumerate(unit_count):
                 value = number_or_none(raw_value)
@@ -1266,8 +1287,12 @@ def fetch_startup_max(context, run_date: str, province_area_id: str) -> int:
                 if index < len(hourly_totals):
                     hourly_totals[index] += value
         if not hourly_totals:
-            raise RuntimeError(f"{label}出清电量没有可用的开机台数明细。")
+            log(f"提醒：{label}出清电量没有可用的开机台数明细，将使用另一类型的完整数据。")
+            continue
         max_values[label] = int(round(max(hourly_totals)))
+
+    if not max_values:
+        raise RuntimeError(f"日前和实时出清电量都没有返回 {run_date} 的完整燃煤/燃气开机台数。")
 
     detail = "，".join(f"{label}最大{value}" for label, value in max_values.items())
     final_value = max(max_values.values())
@@ -1320,64 +1345,8 @@ def evaluate_simple_excel_formula(formula: str) -> float:
     return total
 
 
-def recalculate_with_excel(workbook_path: Path) -> bool:
-    ps_script = f"""
-$path = ConvertFrom-Json @'
-{json.dumps(str(workbook_path), ensure_ascii=False)}
-'@
-$excel = $null
-$workbook = $null
-try {{
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = $false
-    $excel.DisplayAlerts = $false
-    $workbook = $excel.Workbooks.Open($path)
-    $excel.CalculateFullRebuild()
-    $workbook.Save()
-    exit 0
-}} catch {{
-    Write-Error $_.Exception.Message
-    exit 1
-}} finally {{
-    if ($workbook -ne $null) {{
-        $workbook.Close($false) | Out-Null
-        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) | Out-Null
-    }}
-    if ($excel -ne $null) {{
-        $excel.Quit() | Out-Null
-        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
-    }}
-    [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
-}}
-"""
-    try:
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
-            capture_output=True,
-            text=True,
-            timeout=90,
-        )
-    except Exception as exc:
-        log(f"Excel 后台重算失败，将改写 C2 为数值：{exc}")
-        return False
-
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        log(f"Excel 后台重算失败，将改写 C2 为数值：{detail[:300]}")
-        return False
-    return True
 
 
-def cached_cell_value(workbook_path: Path, sheet_name: str, cell: str) -> Any:
-    from openpyxl import load_workbook
-
-    workbook = load_workbook(workbook_path, data_only=True)
-    try:
-        worksheet = workbook[sheet_name] if sheet_name in workbook.sheetnames else workbook.active
-        return worksheet[cell].value
-    finally:
-        workbook.close()
 
 
 def write_formula_result_as_value(workbook_path: Path, sheet_name: str, cell: str, value: float) -> None:
@@ -1440,13 +1409,7 @@ def update_province_excel_for_upload(
         workbook.close()
 
     if isinstance(current_formula, str) and current_formula.startswith("="):
-        if recalculate_with_excel(target_path):
-            cached_value = cached_cell_value(target_path, worksheet.title, "C2")
-            if cached_value is None:
-                log("Excel 已重算但 C2 缓存仍为空，将改写 C2 为数值。")
-                write_formula_result_as_value(target_path, worksheet.title, "C2", formula_result)
-        else:
-            write_formula_result_as_value(target_path, worksheet.title, "C2", formula_result)
+        write_formula_result_as_value(target_path, worksheet.title, "C2", formula_result)
 
     log(f"省内数据已更新：{target_path}")
     return [
@@ -1514,6 +1477,12 @@ def run_api_upload(
                 login_refreshed = False
                 try:
                     uploads = update_province_excel_for_upload(context, target_date, uploads)
+                except PermissionError as exc:
+                    raise PermissionError(
+                        "macOS 拒绝访问所选 Excel。请在工具箱中重新选择该文件；"
+                        "如仍失败，请在“系统设置 > 隐私与安全性 > 文件和文件夹”中"
+                        "允许电力工具箱访问桌面。"
+                    ) from exc
                 except Exception:
                     if login_refreshed:
                         raise
@@ -1555,10 +1524,13 @@ def run_api_upload(
                     log(f"{spec['name']} 导入成功。")
                 if create_report:
                     create_daily_report(context, target_date, headless=config.headless)
+                log("数据上传和日报步骤已完成，正在收尾...")
                 save_auth_state(context)
             finally:
-                context.close()
+                close_upload_context(context)
+        log("集团上传浏览器驱动已退出。")
 
+    log("集团上传登录态锁已释放。")
     log("\n处理完成。")
 
 

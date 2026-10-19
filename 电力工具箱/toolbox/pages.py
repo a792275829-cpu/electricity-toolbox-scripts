@@ -1,24 +1,37 @@
 from __future__ import annotations
 
+import queue
+import shutil
+import subprocess
+import sys
+import tempfile
 import threading
 import tkinter as tk
 from collections.abc import Mapping
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from toolbox_storage import data_path
 from .file_dialogs import FileDialogState
 from .runtime import (
     TaskRegistry,
     ToolPaths,
     load_module,
-    node_executable,
     python_executable,
     utf8_environment,
 )
 from .widgets import ToolPage
 from .tasks import CancellationToken, ProcessRunner
 from .section_analysis_page import SectionAnalysisPage
+from .daily_pdf_page import DailyPdfParserPage
+from .wind_forecast_page import WindForecastPage
+from .spot_price_page import SpotPriceUpdatePage
+from .transaction_info_page import TransactionInfoUpdatePage
+from .power_benefit_page import PowerBenefitUpdatePage
+from .market_report_page import MarketReportPage
+from .summary_upload_page import SummaryUploadPage
+from .page_support import DateInput, DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
 from .page_support import (
     add_path_row as _add_path_row,
     clearing_file_date,
@@ -34,6 +47,61 @@ def _file_dialog_state(paths: ToolPaths) -> FileDialogState:
     if settings_path is None:
         settings_path = Path(getattr(paths, "group_upload_dir", Path.cwd())) / "file_dialog_settings.json"
     return FileDialogState(settings_path)
+
+
+def copy_file_with_finder_fallback(source: Path, destination_dir: Path) -> Path:
+    """Copy a selected file even when macOS TCC blocks Python from Desktop/Documents."""
+    source = Path(source)
+    destination_dir = Path(destination_dir)
+    destination = destination_dir / source.name
+    try:
+        shutil.copy2(source, destination)
+        return destination
+    except PermissionError:
+        if sys.platform != "darwin":
+            raise
+
+    script = (
+        "on run argv\n"
+        "set sourceFile to POSIX file (item 1 of argv) as alias\n"
+        "set destinationFolder to POSIX file (item 2 of argv) as alias\n"
+        'tell application "Finder" to duplicate sourceFile to destinationFolder with replacing\n'
+        "end run"
+    )
+    result = subprocess.run(
+        ["/usr/bin/osascript", "-e", script, str(source), str(destination_dir)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0 or not destination.is_file():
+        detail = (result.stderr or result.stdout or "Finder 未返回详细信息").strip()
+        raise PermissionError(f"无法通过 Finder 复制文件：{source.name}。{detail[:300]}")
+    return destination
+
+
+def run_group_upload_with_staging(module, paths: list[Path], *, force: bool, on_log) -> None:
+    target_date, original_uploads = module.prepare_upload_files(paths)
+    original_province = next(item for item in original_uploads if item.kind == "省内")
+
+    with tempfile.TemporaryDirectory(prefix="electricity-group-upload-") as directory:
+        staging_dir = Path(directory)
+        on_log("正在通过 Finder 暂存所选 Excel，以获得 macOS 文件访问权限...")
+        staged_paths = [
+            copy_file_with_finder_fallback(path, staging_dir)
+            for path in paths
+        ]
+        _, staged_uploads = module.prepare_upload_files(staged_paths)
+        staged_province = next(item for item in staged_uploads if item.kind == "省内")
+        staged_output = module.province_output_path(staged_province.path, target_date)
+
+        module.run_api_upload(staged_paths, force=force)
+
+        copied_output = copy_file_with_finder_fallback(
+            staged_output,
+            original_province.path.parent,
+        )
+        on_log(f"已将更新后的省内数据复制回原目录：{copied_output}")
 
 
 class OnlineEnergyPage(ToolPage):
@@ -53,11 +121,11 @@ class OnlineEnergyPage(ToolPage):
 
         form = ttk.LabelFrame(self.content, text="导出设置", padding=14)
         form.grid(row=0, column=0, sticky="ew")
-        ttk.Label(form, text="运行日期").grid(row=0, column=0, sticky="w")
-        ttk.Entry(form, textvariable=self.run_date, width=18).grid(
+        ttk.Label(form, text="导出日期").grid(row=0, column=0, sticky="w")
+        DateInput(form, textvariable=self.run_date, width=18).grid(
             row=0, column=1, sticky="w", padx=(8, 14)
         )
-        ttk.Label(form, text="格式：YYYY-MM-DD", style="Muted.TLabel").grid(
+        ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
             row=0, column=2, sticky="w"
         )
 
@@ -66,16 +134,12 @@ class OnlineEnergyPage(ToolPage):
             actions, text="开始导出", command=self.start_export
         )
         self.export_button.pack(side="left")
-        self.login_button = ttk.Button(
-            actions, text="登录/刷新登录状态", command=self.start_login
-        )
-        self.login_button.pack(side="left", padx=(8, 0))
         ttk.Button(
             actions,
             text="打开输出目录",
-            command=lambda: _open_directory(self.paths.online_energy_dir / "输出"),
+            command=lambda: _open_directory(data_path(self.paths.online_energy_dir / "输出")),
         ).pack(side="left", padx=(8, 0))
-        self.register_busy_widgets(self.export_button, self.login_button)
+        self.register_busy_widgets(self.export_button)
         self.append_log("请选择日期后开始导出。")
 
     def build_export_command(self, run_date: str) -> list[str]:
@@ -84,10 +148,10 @@ class OnlineEnergyPage(ToolPage):
     def start_export(self) -> None:
         run_date = self.run_date.get().strip()
         try:
-            datetime.strptime(run_date, "%Y-%m-%d")
+            run_date = normalize_date_input(run_date)
         except ValueError:
             messagebox.showerror(
-                "日期格式错误", "请输入 YYYY-MM-DD 格式日期。", parent=self
+                "日期格式错误", DATE_INPUT_ERROR, parent=self
             )
             return
         self.clear_log()
@@ -115,7 +179,7 @@ class TradeAnalysisPage(ToolPage):
         super().__init__(
             parent,
             registry=registry,
-            title="电力交易分析",
+            title="出力受限分析",
             description="选择一个或多个出清 Excel，批量生成 HTML 分析报告。",
         )
         self.paths = paths
@@ -128,9 +192,10 @@ class TradeAnalysisPage(ToolPage):
         ttk.Button(toolbar, text="自动匹配D和D-2", command=self.auto_match_files).pack(
             side="left", padx=(8, 0)
         )
-        ttk.Button(toolbar, text="移除选中", command=self.remove_selected).pack(
-            side="left", padx=(8, 0)
+        self.run_button = ttk.Button(
+            toolbar, text="开始分析", command=self.start_analysis
         )
+        self.run_button.pack(side="left", padx=(8, 0))
         ttk.Button(toolbar, text="清空列表", command=self.clear_files).pack(
             side="left", padx=(8, 0)
         )
@@ -160,10 +225,7 @@ class TradeAnalysisPage(ToolPage):
         )
 
         actions = self.actions
-        self.run_button = ttk.Button(
-            actions, text="开始分析", command=self.start_analysis
-        )
-        self.run_button.pack(side="left")
+        ttk.Button(actions, text="移除选中", command=self.remove_selected).pack(side="left")
         ttk.Button(
             actions,
             text="打开输出目录",
@@ -281,129 +343,6 @@ class TradeAnalysisPage(ToolPage):
         )
 
 
-class SummaryPage(ToolPage):
-    def __init__(
-        self,
-        parent: tk.Misc,
-        paths: ToolPaths,
-        registry: TaskRegistry,
-        *,
-        today: date | None = None,
-        review_root: Path | None = None,
-    ) -> None:
-        super().__init__(
-            parent,
-            registry=registry,
-            title="电量汇总",
-            description="汇总日前和实时交易结果，并保留原始 Excel 的显示精度。",
-        )
-        self.paths = paths
-        self.file_dialogs = _file_dialog_state(paths)
-        default_input = default_review_folder_for_date(today or date.today(), review_root)
-        self.input_dir = tk.StringVar(master=self, value=str(default_input))
-        self.output_file = tk.StringVar(
-            master=self,
-            value=str(self.default_output_for(default_input)) if default_input else "",
-        )
-
-        form = ttk.LabelFrame(self.content, text="汇总设置", padding=12)
-        form.grid(row=0, column=0, sticky="ew")
-        input_button = _add_path_row(
-            form,
-            row=0,
-            label="原始数据文件夹",
-            variable=self.input_dir,
-            command=self.choose_input_dir,
-            button_text="选择文件夹",
-        )
-        output_button = _add_path_row(
-            form,
-            row=1,
-            label="输出文件",
-            variable=self.output_file,
-            command=self.choose_output_file,
-            button_text="选择位置",
-        )
-
-        actions = self.actions
-        self.run_button = ttk.Button(
-            actions, text="开始汇总", command=self.start_summary
-        )
-        self.run_button.pack(side="left")
-        ttk.Button(
-            actions, text="打开输出目录", command=self.open_output_dir
-        ).pack(side="left", padx=(8, 0))
-        self.register_busy_widgets(self.run_button, input_button, output_button)
-
-    @staticmethod
-    def default_output_for(input_dir: Path) -> Path:
-        return input_dir / f"{input_dir.name}_汇总.xlsx"
-
-    def choose_input_dir(self) -> None:
-        selected = filedialog.askdirectory(
-            title="选择原始数据文件夹",
-            initialdir=str(
-                self.file_dialogs.initial_directory("summary_input", self.input_dir.get())
-            ),
-            parent=self,
-        )
-        if selected:
-            path = Path(selected)
-            self.input_dir.set(str(path))
-            self.output_file.set(str(self.default_output_for(path)))
-            self.file_dialogs.remember_directory("summary_input", path)
-
-    def choose_output_file(self) -> None:
-        selected = filedialog.asksaveasfilename(
-            title="选择输出文件",
-            initialdir=str(
-                self.file_dialogs.initial_directory("summary_output", self.output_file.get())
-            ),
-            defaultextension=".xlsx",
-            filetypes=[("Excel 文件", "*.xlsx")],
-            parent=self,
-        )
-        if selected:
-            self.output_file.set(selected)
-            self.file_dialogs.remember_file("summary_output", selected)
-
-    def open_output_dir(self) -> None:
-        output = self.output_file.get().strip()
-        if not output:
-            messagebox.showinfo("提示", "还没有输出文件路径。", parent=self)
-            return
-        _open_directory(Path(output).parent)
-
-    def start_summary(self) -> None:
-        input_dir = Path(self.input_dir.get().strip())
-        if not self.input_dir.get().strip() or not input_dir.is_dir():
-            messagebox.showerror(
-                "输入无效", "请选择有效的原始数据文件夹。", parent=self
-            )
-            return
-        output = (
-            Path(self.output_file.get().strip())
-            if self.output_file.get().strip()
-            else self.default_output_for(input_dir)
-        )
-        self.output_file.set(str(output))
-        self.clear_log()
-
-        def worker() -> Path:
-            module = load_module("toolbox_summary", self.paths.summary)
-            return module.run_summary(
-                input_dir=input_dir,
-                output_path=output,
-                logger=self.append_log,
-            )
-
-        def finished(path: Path) -> None:
-            self.output_file.set(str(path))
-            messagebox.showinfo("完成", f"汇总文件已生成：\n{path}", parent=self)
-
-        self.run_in_thread(worker, status="正在汇总...", on_success=finished)
-
-
 class ReportPage(ToolPage):
     def __init__(
         self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry
@@ -411,7 +350,7 @@ class ReportPage(ToolPage):
         super().__init__(
             parent,
             registry=registry,
-            title="生成报告",
+            title="早报生成",
             description="抓取每日数据并根据三个 Excel 数据源生成生产经营情况 Word 报告。",
         )
         self.paths = paths
@@ -428,7 +367,7 @@ class ReportPage(ToolPage):
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
         ttk.Label(form, text="报告日期").grid(row=0, column=0, sticky="w", pady=4)
-        ttk.Entry(form, textvariable=self.report_date, width=18).grid(
+        DateInput(form, textvariable=self.report_date, width=18).grid(
             row=0, column=1, sticky="w", pady=4
         )
         auto_button = ttk.Button(
@@ -483,7 +422,7 @@ class ReportPage(ToolPage):
         ttk.Button(
             actions,
             text="打开输出目录",
-            command=lambda: _open_directory(self.paths.report_root / "输出"),
+            command=lambda: _open_directory(data_path(self.paths.report_root / "输出")),
         ).pack(side="left", padx=(8, 0))
         self.register_busy_widgets(
             self.run_button, auto_button, *browse_buttons
@@ -491,7 +430,7 @@ class ReportPage(ToolPage):
 
     @staticmethod
     def source_dates(value: str) -> tuple[date, date, date]:
-        report_day = datetime.strptime(value, "%Y-%m-%d").date()
+        report_day = parse_date_input(value)
         return report_day - timedelta(days=1), report_day, report_day - timedelta(days=2)
 
     def build_word_command(
@@ -535,7 +474,7 @@ class ReportPage(ToolPage):
             target_dates = self.source_dates(self.report_date.get().strip())
         except ValueError:
             messagebox.showerror(
-                "日期格式错误", "请输入 YYYY-MM-DD 格式日期。", parent=self
+                "日期格式错误", DATE_INPUT_ERROR, parent=self
             )
             return
         variables = (
@@ -598,10 +537,10 @@ class ReportPage(ToolPage):
     def start_report(self) -> None:
         report_date = self.report_date.get().strip()
         try:
-            self.source_dates(report_date)
+            report_date = normalize_date_input(report_date)
         except ValueError:
             messagebox.showerror(
-                "日期格式错误", "请输入 YYYY-MM-DD 格式日期。", parent=self
+                "日期格式错误", DATE_INPUT_ERROR, parent=self
             )
             return
         if not self.fetch_data.get() and not self.generate_word.get():
@@ -667,96 +606,6 @@ class ReportPage(ToolPage):
         )
 
 
-class PrivateUploadPage(ToolPage):
-    def __init__(
-        self,
-        parent: tk.Misc,
-        paths: ToolPaths,
-        registry: TaskRegistry,
-        *,
-        today: date | None = None,
-        review_root: Path | None = None,
-    ) -> None:
-        super().__init__(
-            parent,
-            registry=registry,
-            title="私有数据上传",
-            description="选择复盘目录，先预览匹配结果，再确认上传私有数据。",
-        )
-        self.paths = paths
-        self.file_dialogs = _file_dialog_state(paths)
-        default = default_review_folder_for_date(today or date.today(), review_root)
-        self.source_folder = tk.StringVar(master=self, value=str(default))
-
-        form = ttk.LabelFrame(self.content, text="上传目录", padding=12)
-        form.grid(row=0, column=0, sticky="ew")
-        browse = _add_path_row(
-            form,
-            row=0,
-            label="复盘文件夹",
-            variable=self.source_folder,
-            command=self.choose_folder,
-            button_text="选择文件夹",
-        )
-        actions = self.actions
-        self.preview_button = ttk.Button(
-            actions, text="预览", command=lambda: self.start_command("--plan")
-        )
-        self.preview_button.pack(side="left")
-        self.upload_button = ttk.Button(
-            actions, text="开始上传", command=self.confirm_upload
-        )
-        self.upload_button.pack(side="left", padx=(8, 0))
-        self.register_busy_widgets(browse, self.preview_button, self.upload_button)
-        self.append_log("操作流程：选择文件夹 -> 预览 -> 确认无误后开始上传。")
-
-    def build_command(self, mode: str, source: Path) -> list[str]:
-        return [
-            node_executable(),
-            str(self.paths.private_uploader),
-            mode,
-            "--source",
-            str(source),
-        ]
-
-    def choose_folder(self) -> None:
-        selected = filedialog.askdirectory(
-            title="选择复盘文件夹",
-            initialdir=str(
-                self.file_dialogs.initial_directory(
-                    "private_upload_source", self.source_folder.get()
-                )
-            ),
-            parent=self,
-        )
-        if selected:
-            self.source_folder.set(selected)
-            self.file_dialogs.remember_directory("private_upload_source", selected)
-
-    def confirm_upload(self) -> None:
-        folder = self.source_folder.get().strip()
-        if not messagebox.askokcancel(
-            "确认上传",
-            f"确认上传此文件夹下匹配到的文件？\n{folder}",
-            parent=self,
-        ):
-            return
-        self.start_command("--execute")
-
-    def start_command(self, mode: str) -> None:
-        source = Path(self.source_folder.get().strip())
-        if not source.is_dir():
-            messagebox.showerror("目录无效", f"请选择有效文件夹：\n{source}", parent=self)
-            return
-        self.clear_log()
-        self.run_process(
-            self.build_command(mode, source),
-            cwd=self.paths.private_uploader_dir,
-            status="正在预览..." if mode == "--plan" else "正在上传...",
-            cancellable=mode == "--plan",
-        )
-
-
 class GroupUploadPage(ToolPage):
     def __init__(
         self,
@@ -800,15 +649,11 @@ class GroupUploadPage(ToolPage):
             actions, text="开始上传", command=self.confirm_upload
         )
         self.upload_button.pack(side="left", padx=(8, 0))
-        self.login_button = ttk.Button(
-            actions, text="登录/刷新登录状态", command=self.start_login
-        )
-        self.login_button.pack(side="left", padx=(8, 0))
         ttk.Checkbutton(
             actions, text="已上传数据也覆盖", variable=self.force
         ).pack(side="right")
         self.register_busy_widgets(
-            self.choose_button, self.upload_button, self.login_button
+            self.choose_button, self.upload_button
         )
         self.auto_select_energy_file(today or date.today())
 
@@ -902,9 +747,25 @@ class GroupUploadPage(ToolPage):
         ):
             return
         self.clear_log()
-        self.run_process(
-            self.build_upload_command(self.selected_paths, force=self.force.get()),
-            cwd=self.paths.group_upload_dir,
+        selected_paths = list(self.selected_paths)
+        force = self.force.get()
+
+        def upload() -> None:
+            module = load_module("toolbox_group_upload", self.paths.group_upload)
+            old_sink = module.LOG_SINK
+            module.LOG_SINK = self.append_log
+            try:
+                run_group_upload_with_staging(
+                    module,
+                    selected_paths,
+                    force=force,
+                    on_log=self.append_log,
+                )
+            finally:
+                module.LOG_SINK = old_sink
+
+        self.run_in_thread(
+            upload,
             status="正在上传集团每日数据...",
             cancellable=False,
         )
@@ -964,10 +825,10 @@ class MarketTableUpdatePage(ToolPage):
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
         ttk.Label(form, text="基准运行日期").grid(row=0, column=0, sticky="w", pady=5)
-        ttk.Entry(form, textvariable=self.run_date, width=18).grid(
+        DateInput(form, textvariable=self.run_date, width=18).grid(
             row=0, column=1, sticky="w", pady=5
         )
-        ttk.Label(form, text="格式：YYYY-MM-DD", style="Muted.TLabel").grid(
+        ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
             row=0, column=2, sticky="w", padx=(8, 0), pady=5
         )
         browse = _add_path_row(
@@ -989,7 +850,7 @@ class MarketTableUpdatePage(ToolPage):
             mapping,
             height=8,
             wrap="word",
-            font=("Microsoft YaHei UI", 9),
+            font="TkTextFont",
             borderwidth=0,
             padx=4,
             pady=4,
@@ -1009,11 +870,7 @@ class MarketTableUpdatePage(ToolPage):
             actions, text="开始更新", command=self.start_update
         )
         self.update_button.pack(side="left")
-        self.login_button = ttk.Button(
-            actions, text="登录/刷新登录状态", command=self.start_login
-        )
-        self.login_button.pack(side="left", padx=(8, 0))
-        self.register_busy_widgets(browse, self.update_button, self.login_button)
+        self.register_busy_widgets(browse, self.update_button)
         self.append_log("请选择日期和市场 Excel 后开始更新。")
 
     def build_update_command(self, run_date: date, workbook: Path) -> list[str]:
@@ -1041,10 +898,10 @@ class MarketTableUpdatePage(ToolPage):
 
     def start_update(self) -> None:
         try:
-            run_date = datetime.strptime(self.run_date.get().strip(), "%Y-%m-%d").date()
+            run_date = parse_date_input(self.run_date.get())
         except ValueError:
             messagebox.showerror(
-                "日期格式错误", "请输入 YYYY-MM-DD 格式日期。", parent=self
+                "日期格式错误", DATE_INPUT_ERROR, parent=self
             )
             return
         workbook = Path(self.workbook.get().strip()).expanduser()
@@ -1098,23 +955,22 @@ class GuangdongPricePage(ToolPage):
         self.run_date = tk.StringVar(master=self, value=current.isoformat())
         self.master_workbook = tk.StringVar(
             master=self,
-            value=str(paths.guangdong_price_output_dir / "广东电价数据总表.xlsx"),
+            value=str(paths.guangdong_price_master_workbook),
         )
         self.prediction_input = self.master_workbook
         self.prediction_output_dir = tk.StringVar(
-            master=self, value=str(paths.guangdong_price_output_dir / "D+1预测")
+            master=self, value=str(paths.guangdong_prediction_output_dir)
         )
-        self.forecast_days = tk.IntVar(master=self, value=1)
-        self.training_months = tk.IntVar(master=self, value=3)
+        self.training_months = tk.IntVar(master=self, value=0)
 
-        form = ttk.LabelFrame(self.content, text="数据抓取与合并", padding=12)
+        form = ttk.LabelFrame(self.content, text="1. 补齐历史数据总表", padding=12)
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
         ttk.Label(form, text="运行日 D").grid(row=0, column=0, sticky="w", pady=4)
-        ttk.Entry(form, textvariable=self.run_date, width=16).grid(
+        DateInput(form, textvariable=self.run_date, width=16).grid(
             row=0, column=1, sticky="w", pady=4
         )
-        ttk.Label(form, text="格式：YYYY-MM-DD", style="Muted.TLabel").grid(
+        ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
             row=0, column=2, sticky="w", padx=(8, 0), pady=4
         )
         master_button = _add_path_row(
@@ -1122,7 +978,7 @@ class GuangdongPricePage(ToolPage):
             row=1,
             label="数据总表",
             variable=self.master_workbook,
-            command=lambda: _open_directory(paths.guangdong_price_output_dir),
+            command=lambda: self.open_business_directory(self.master_workbook.get(), workbook=True),
             button_text="打开目录",
         )
         ttk.Label(
@@ -1131,7 +987,7 @@ class GuangdongPricePage(ToolPage):
             style="Muted.TLabel",
         ).grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
-        prediction = ttk.LabelFrame(self.content, text="D+1 日前电价预测", padding=12)
+        prediction = ttk.LabelFrame(self.content, text="2. 使用总表预测 D+1", padding=12)
         prediction.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         prediction.columnconfigure(1, weight=1)
         ttk.Label(prediction, text="建模输入表").grid(row=0, column=0, sticky="w", pady=4)
@@ -1146,24 +1002,20 @@ class GuangdongPricePage(ToolPage):
             command=self.choose_prediction_output_dir,
             button_text="选择目录",
         )
-        ttk.Label(prediction, text="向后预测天数").grid(row=2, column=0, sticky="w", pady=4)
-        ttk.Spinbox(
-            prediction, from_=1, to=7, textvariable=self.forecast_days, width=8
-        ).grid(row=2, column=1, sticky="w", pady=4)
         ttk.Label(prediction, text="滚动训练月数").grid(
             row=3, column=0, sticky="w", pady=4
         )
         ttk.Spinbox(
-            prediction, from_=2, to=24, textvariable=self.training_months, width=8
+            prediction, from_=0, to=24, textvariable=self.training_months, width=8
         ).grid(row=3, column=1, sticky="w", pady=4)
         ttk.Label(
             prediction,
-            text="默认使用最近 3 个自然月，降低旧市场规律对近期预测的干扰。",
+            text="0 为自动：当日供需齐全用 12 个月，否则用 3 个月历史信息回退。",
             style="Muted.TLabel",
         ).grid(row=3, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=4)
         ttk.Label(
             prediction,
-            text="抓取完成后会自动填入不含实际/实时泄漏字段的建模表。",
+            text="自动核验预测日供需发布时间；固定输出 D+1 的 96 点电价。",
             style="Muted.TLabel",
         ).grid(row=2, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=4)
 
@@ -1177,8 +1029,8 @@ class GuangdongPricePage(ToolPage):
         self.predict_button.pack(side="left", padx=(8, 0))
         ttk.Button(
             self.actions,
-            text="打开输出目录",
-            command=lambda: _open_directory(paths.guangdong_price_output_dir),
+            text="打开预测目录",
+            command=lambda: self.open_business_directory(self.prediction_output_dir.get()),
         ).pack(side="left", padx=(8, 0))
         self.register_busy_widgets(
             self.update_button,
@@ -1186,12 +1038,27 @@ class GuangdongPricePage(ToolPage):
             master_button,
             prediction_dir_button,
         )
-        self.append_log("数据总表也是默认建模输入表；账号密码从本地 config.json 读取。")
+        self.append_log("先补齐总表，再运行 D+1 预测；账号使用右侧统一账号。")
+
+    def resolve_business_path(self, text: str) -> Path:
+        if not text.strip():
+            raise ValueError("路径不能为空")
+        path = Path(text.strip()).expanduser()
+        if not path.is_absolute():
+            path = self.paths.guangdong_price_dir / path
+        return path.resolve()
+
+    def open_business_directory(self, text: str, *, workbook: bool = False) -> None:
+        try:
+            path = self.resolve_business_path(text)
+            _open_directory(path.parent if workbook else path)
+        except (ValueError, OSError) as exc:
+            messagebox.showerror("目录无效", str(exc), parent=self)
 
     @staticmethod
     def validate_date_range(start_text: str, end_text: str) -> tuple[date, date]:
-        start = datetime.strptime(start_text, "%Y-%m-%d").date()
-        end = datetime.strptime(end_text, "%Y-%m-%d").date()
+        start = parse_date_input(start_text)
+        end = parse_date_input(end_text)
         if start > end:
             raise ValueError("开始日期不能晚于结束日期")
         return start, end
@@ -1217,6 +1084,8 @@ class GuangdongPricePage(ToolPage):
         forecast_days: int,
         training_months: int | None = None,
     ) -> list[str]:
+        if forecast_days != 1:
+            raise ValueError("本模块只输出 D+1 日前电价，预测天数必须为 1")
         months = training_months if training_months is not None else self.training_months.get()
         return [
             python_executable(),
@@ -1225,6 +1094,8 @@ class GuangdongPricePage(ToolPage):
             str(input_path),
             "--output-dir",
             str(output_dir),
+            "--as-of",
+            normalize_date_input(self.run_date.get()),
             "--forecast-days",
             str(forecast_days),
             "--training-months",
@@ -1233,17 +1104,22 @@ class GuangdongPricePage(ToolPage):
 
     def start_update(self) -> None:
         try:
-            datetime.strptime(self.run_date.get().strip(), "%Y-%m-%d")
+            run_date = normalize_date_input(self.run_date.get())
+            master_text = self.master_workbook.get().strip()
+            if not master_text:
+                raise ValueError("数据总表路径不能为空")
+            master_path = self.resolve_business_path(master_text)
+            if master_path.suffix.lower() != ".xlsx":
+                raise ValueError("数据总表必须是 .xlsx 文件")
         except ValueError as exc:
-            messagebox.showerror("日期无效", str(exc), parent=self)
+            messagebox.showerror("参数无效", str(exc), parent=self)
             return
-        run_date = self.run_date.get().strip()
         self.clear_log()
         self.append_log(f"检查截至 {run_date} 的空缺数据")
 
         def worker() -> dict[str, object]:
             module = load_module("toolbox_guangdong_data_update", self.paths.guangdong_data_update)
-            return module.update_master_workbook(run_date=run_date)
+            return module.update_master_workbook(run_date=run_date, master_workbook=master_path)
 
         def finished(outputs: dict[str, Path]) -> None:
             self.master_workbook.set(str(outputs["master"]))
@@ -1263,24 +1139,28 @@ class GuangdongPricePage(ToolPage):
         )
 
     def start_prediction(self) -> None:
-        input_path = Path(self.prediction_input.get().strip())
-        output_dir = Path(self.prediction_output_dir.get().strip())
-        forecast_days = self.forecast_days.get()
-        training_months = self.training_months.get()
+        try:
+            normalize_date_input(self.run_date.get())
+            input_text = self.prediction_input.get().strip()
+            output_text = self.prediction_output_dir.get().strip()
+            if not input_text or not output_text:
+                raise ValueError("数据总表与预测输出目录不能为空")
+            input_path = self.resolve_business_path(input_text)
+            output_dir = self.resolve_business_path(output_text)
+            training_months = self.training_months.get()
+        except (ValueError, tk.TclError) as exc:
+            messagebox.showerror("参数无效", str(exc), parent=self)
+            return
         if not input_path.is_file():
             messagebox.showerror("文件不存在", "请选择有效的建模输入表。", parent=self)
             return
-        if forecast_days < 1:
-            messagebox.showerror("预测天数无效", "预测天数必须至少为 1。", parent=self)
+        if training_months != 0 and training_months < 2:
+            messagebox.showerror("训练窗口无效", "填 0 自动选择，或填写至少 2 个月。", parent=self)
             return
-        if training_months < 2:
-            messagebox.showerror("训练窗口无效", "训练窗口至少为 2 个月。", parent=self)
-            return
-        output_dir.mkdir(parents=True, exist_ok=True)
         self.clear_log()
         self.run_process(
             self.build_prediction_command(
-                input_path, output_dir, forecast_days, training_months
+                input_path, output_dir, 1, training_months
             ),
             cwd=self.paths.guangdong_price_dir,
             status="正在训练并生成 D+1 日前电价预测...",
@@ -1297,8 +1177,8 @@ class WpsWriterPage(ToolPage):
         super().__init__(
             parent,
             registry=registry,
-            title="WPS Writer",
-            description="Use the WPS/KDocs writer directly inside the toolbox.",
+            title="WPS 写入工具",
+            description="将本地或在线表格中的指定区域写入金山文档。",
         )
         self.paths = paths
         # WpsWriterFrame owns its browser/write lifecycle and its own module log.
@@ -1307,22 +1187,71 @@ class WpsWriterPage(ToolPage):
         self.set_task_console_visible(False)
         self.content.rowconfigure(0, weight=1)
         self.content.columnconfigure(0, weight=1)
+        self.actions.grid_remove()
+        self._writer_load_after_id: str | None = None
+        self._writer_load_queue: queue.Queue = queue.Queue()
 
         if not self.paths.wps_writer.is_file():
-            self._show_load_error(f"Script file not found:\n{self.paths.wps_writer}")
+            self._show_load_error(f"找不到写入工具脚本：\n{self.paths.wps_writer}")
             return
 
+        self.loading_label = ttk.Label(self.content, text="正在加载 WPS 写入工具…", style="Muted.TLabel")
+        self.loading_label.grid(row=0, column=0, sticky="nw", pady=12)
+        # Importing openpyxl/Playwright may take hundreds of milliseconds on a
+        # cold start. Only import Python code in the worker; all Tk operations,
+        # including creating WpsWriterFrame, stay on the main thread.
+        result_queue = self._writer_load_queue
+        script = self.paths.wps_writer
+
+        def load_writer() -> None:
+            try:
+                module = load_module("toolbox_wps_writer_gui", script)
+                result_queue.put((module.WpsWriterFrame, None))
+            except Exception as exc:
+                result_queue.put((None, exc))
+
+        self._writer_loader = threading.Thread(target=load_writer, name="wps-page-loader", daemon=True)
+        # Return to Tk so the shell/loading label can paint before imports start.
+        # after_idle alone runs among Tk's own redraw handlers; use a short timer.
+        self._writer_load_after_id = self.after(50, self._start_writer_load)
+
+    def _start_writer_load(self) -> None:
+        if self._writer_loader.ident is not None:
+            return
+        if self._writer_load_after_id is not None:
+            self.after_cancel(self._writer_load_after_id)
+        self._writer_load_after_id = None
+        self._writer_loader.start()
+        self._writer_load_after_id = self.after(20, self._finish_writer_load)
+
+    def _finish_writer_load(self) -> None:
+        if self._writer_load_after_id is not None:
+            self.after_cancel(self._writer_load_after_id)
+        self._writer_load_after_id = None
         try:
-            module = load_module("toolbox_wps_writer_gui", self.paths.wps_writer)
-            frame_class = getattr(module, "WpsWriterFrame")
-            self.writer_frame = frame_class(self.content, task_registry=registry)
+            frame_class, error = self._writer_load_queue.get_nowait()
+        except queue.Empty:
+            self._writer_load_after_id = self.after(20, self._finish_writer_load)
+            return
+        self.loading_label.destroy()
+        if error is not None:
+            self._show_load_error(str(error))
+            return
+        try:
+            self.writer_frame = frame_class(self.content, task_registry=self.registry)
             self.writer_frame.grid(row=0, column=0, sticky="nsew")
-            self.actions.grid_remove()
         except Exception as exc:
             self._show_load_error(str(exc))
 
+    def destroy(self) -> None:
+        if self._writer_load_after_id is not None:
+            self.after_cancel(self._writer_load_after_id)
+            self._writer_load_after_id = None
+        super().destroy()
+
     def _show_load_error(self, message: str) -> None:
-        panel = ttk.LabelFrame(self.content, text="WPS writer load failed", padding=12)
+        self.actions.grid()
+        panel = ttk.LabelFrame(self.content, text="写入工具加载失败", padding=12)
         panel.grid(row=0, column=0, sticky="nsew")
         panel.columnconfigure(0, weight=1)
         ttk.Label(panel, text=message, foreground="#b00020", wraplength=760).grid(
@@ -1331,25 +1260,30 @@ class WpsWriterPage(ToolPage):
         actions = self.actions
         ttk.Button(
             actions,
-            text="Open config folder",
+            text="打开配置目录",
             command=lambda: _open_directory(self.paths.wps_writer_dir),
         ).pack(side="left")
         ttk.Button(
             actions,
-            text="Open log folder",
+            text="打开日志目录",
             command=lambda: _open_directory(self.paths.wps_writer_logs_dir),
         ).pack(side="left", padx=(8, 0))
 
 def page_factories() -> Mapping[str, object]:
     return {
         "导出上网电量": OnlineEnergyPage,
-        "电力交易分析": TradeAnalysisPage,
+        "风力预测截图": WindForecastPage,
+        "出力受限分析": TradeAnalysisPage,
         "500kV断面分析": SectionAnalysisPage,
-        "电量汇总": SummaryPage,
-        "生成报告": ReportPage,
-        "私有数据上传": PrivateUploadPage,
+        "广东运行日报解析上传": DailyPdfParserPage,
+        "南方分公司电力市场日报": MarketReportPage,
+        "出清结果汇总上传": SummaryUploadPage,
+        "早报生成": ReportPage,
         "上传集团每日数据": GroupUploadPage,
         "市场表更新": MarketTableUpdatePage,
+        "现货价格分析表更新": SpotPriceUpdatePage,
+        "交易系统信息更新": TransactionInfoUpdatePage,
+        "功率调整收益统计表更新": PowerBenefitUpdatePage,
         "广东电价预测": GuangdongPricePage,
         "WPS写入工具": WpsWriterPage,
     }

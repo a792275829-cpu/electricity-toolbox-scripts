@@ -20,7 +20,7 @@ def _estimator(config: dict[str, Any]):
 
         return XGBRegressor(objective="reg:absoluteerror", random_state=42, n_jobs=-1, **params)
     if kind == "hist_gradient_boosting":
-        return HistGradientBoostingRegressor(loss="absolute_error", random_state=42, **params)
+        return HistGradientBoostingRegressor(loss=params.pop("loss", "absolute_error"), random_state=42, **params)
     if kind == "extra_trees":
         return ExtraTreesRegressor(criterion="absolute_error", random_state=42, n_jobs=-1, **params)
     if kind == "random_forest":
@@ -28,13 +28,14 @@ def _estimator(config: dict[str, Any]):
     raise ValueError(f"不支持的模型: {kind}")
 
 
-def fit_model(X: pd.DataFrame, y: pd.Series, config: dict[str, Any]) -> Pipeline:
+def fit_model(X: pd.DataFrame, y: pd.Series, config: dict[str, Any], sample_weight=None) -> Pipeline:
     pipeline = Pipeline([
-        ("imputer", SimpleImputer(strategy="median", add_indicator=True)),
+        ("imputer", SimpleImputer(strategy="median", add_indicator=True, keep_empty_features=True)),
         ("model", _estimator(config)),
     ])
     pipeline.set_output(transform="pandas")
-    pipeline.fit(X, y)
+    kwargs = {"model__sample_weight": sample_weight} if sample_weight is not None else {}
+    pipeline.fit(X, y, **kwargs)
     return pipeline
 
 

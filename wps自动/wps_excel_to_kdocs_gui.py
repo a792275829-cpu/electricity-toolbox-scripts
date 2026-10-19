@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
@@ -10,6 +11,7 @@ import traceback
 import time as time_module
 import urllib.parse
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from pathlib import Path
@@ -38,15 +40,25 @@ except ImportError:  # pragma: no cover - surfaced in GUI
 
 
 BASE_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = BASE_DIR / "wps_excel_to_kdocs_config.json"
-PROFILE_DIR = BASE_DIR / "wps-browser-profile"
-WPS_CHROME_PID_PATH = BASE_DIR / "wps-chrome.pid"
-WPS_CHROME_STATE_PATH = BASE_DIR / "wps-chrome-state.json"
-WPS_CHROME_LAUNCH_VERSION = 2
+if str(BASE_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR.parent))
+from toolbox_storage import data_path
+
+DATA_DIR = data_path(BASE_DIR)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_PATH = DATA_DIR / "wps_excel_to_kdocs_config.json"
+DEFAULT_CONFIG_PATH = BASE_DIR / "wps_excel_to_kdocs_config.defaults.json"
+PROFILE_DIR = DATA_DIR / "wps-browser-profile"
+WPS_CHROME_PID_PATH = DATA_DIR / "wps-chrome.pid"
+WPS_CHROME_STATE_PATH = DATA_DIR / "wps-chrome-state.json"
+WPS_CHROME_LAUNCH_VERSION = 6
 WPS_CHROME_START_LOCK = threading.Lock()
-LOG_DIR = BASE_DIR / "logs"
+LOG_DIR = DATA_DIR / "logs"
 MAX_RECENT_URLS = 10
 DOCUMENT_CONFIGS_MIN_HEIGHT = 220
+CDP_CONNECT_TIMEOUT_MS = 15000
+WPS_LOGIN_STATUS_URL = "https://account.kdocs.cn/api/v3/islogin"
+LOGIN_STATUS_POLL_MS = 15000
 CONFIG_EXPORT_SCHEMA = "wps_excel_to_kdocs_config_export"
 CONFIG_EXPORT_VERSION = 1
 
@@ -113,6 +125,43 @@ class PreparedMapping:
     values: list[list[Any]]
 
 
+@dataclass(frozen=True)
+class WpsLoginStatus:
+    state: str
+    message: str
+
+
+def read_wps_login_status(context) -> WpsLoginStatus:
+    """Confirm the current browser session with WPS, without exposing account data."""
+    response = context.request.get(WPS_LOGIN_STATUS_URL, timeout=10000)
+    data = response.json()
+    if not isinstance(data, dict):
+        return WpsLoginStatus("unknown", "暂时无法确认，请稍后刷新登录状态。")
+    if response.status == 200 and data.get("result") == "ok" and data.get("userid"):
+        return WpsLoginStatus("logged_in", "已登录")
+    if data.get("result") == "userNotLogin" or response.status == 401:
+        return WpsLoginStatus("logged_out", "未登录或登录已失效，请点击“登录 WPS”。")
+    return WpsLoginStatus("unknown", "暂时无法确认，请检查网络后刷新登录状态。")
+
+
+def check_wps_login_status(browser_mode: str, cdp_url: str, log) -> WpsLoginStatus:
+    # A copied browser profile is not proof of login: cookies may be encrypted
+    # for the previous Mac. Existing profiles must be verified online.
+    if browser_mode != "cdp" and not PROFILE_DIR.is_dir():
+        return WpsLoginStatus("logged_out", "本机尚未登录，请点击“登录 WPS”。")
+    if sync_playwright is None:
+        raise RuntimeError("缺少浏览器自动化组件，请先运行工具箱初始化程序。")
+    with sync_playwright() as playwright:
+        _browser, context, close_context = open_browser_context(
+            playwright, browser_mode, cdp_url, log, for_login_check=True
+        )
+        try:
+            return read_wps_login_status(context)
+        finally:
+            if close_context:
+                context.close()
+
+
 def normalize_cell_value(value: Any) -> Any:
     if value is None:
         return ""
@@ -155,7 +204,7 @@ def values_equivalent(expected: Any, actual: Any) -> bool:
 
 def parse_start_cell(cell: str) -> tuple[int, int]:
     if coordinate_from_string is None or column_index_from_string is None:
-        raise RuntimeError("openpyxl is not installed.")
+        raise RuntimeError("缺少表格读取组件，请运行工具箱目录中的 setup_macos.command 完成初始化。")
     col_text, row = coordinate_from_string(cell.strip().upper())
     return row, column_index_from_string(col_text)
 
@@ -169,7 +218,7 @@ def range_from_cells(start_cell: str, end_cell: str) -> str:
     start_row, start_col = parse_start_cell(start_cell)
     end_row, end_col = parse_start_cell(end_cell)
     if end_row < start_row or end_col < start_col:
-        raise ValueError(f"End cell must be down/right of start cell: {start_cell} -> {end_cell}")
+        raise ValueError(f"结束单元格不能位于起始单元格的上方或左侧：{start_cell} → {end_cell}")
     return f"{get_column_letter(start_col)}{start_row}:{get_column_letter(end_col)}{end_row}"
 
 
@@ -177,7 +226,7 @@ def range_shape(start_cell: str, end_cell: str) -> tuple[int, int]:
     start_row, start_col = parse_start_cell(start_cell)
     end_row, end_col = parse_start_cell(end_cell)
     if end_row < start_row or end_col < start_col:
-        raise ValueError(f"End cell must be down/right of start cell: {start_cell} -> {end_cell}")
+        raise ValueError(f"结束单元格不能位于起始单元格的上方或左侧：{start_cell} → {end_cell}")
     return end_row - start_row + 1, end_col - start_col + 1
 
 
@@ -206,7 +255,7 @@ def rect_from_cells(start_cell: str, end_cell: str) -> tuple[int, int, int, int]
     start_row, start_col = parse_start_cell(start_cell)
     end_row, end_col = parse_start_cell(end_cell)
     if end_row < start_row or end_col < start_col:
-        raise ValueError(f"End cell must be down/right of start cell: {start_cell} -> {end_cell}")
+        raise ValueError(f"结束单元格不能位于起始单元格的上方或左侧：{start_cell} → {end_cell}")
     return start_row, start_col, end_row, end_col
 
 
@@ -217,10 +266,11 @@ def rects_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) ->
 
 
 def load_config() -> dict[str, Any]:
-    if not CONFIG_PATH.exists():
+    path = CONFIG_PATH if CONFIG_PATH.exists() else DEFAULT_CONFIG_PATH
+    if not path.exists():
         return {}
     try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
@@ -252,7 +302,7 @@ def _document_config_from_dict(row: dict[str, Any]) -> dict[str, Any]:
         for region in row.get("regions", [])
         if isinstance(region, dict)
     ]
-    name = str(row.get("name", "")).strip() or Path(str(row.get("local_file", ""))).stem or "Config"
+    name = str(row.get("name", "")).strip() or Path(str(row.get("local_file", ""))).stem or "未命名配置"
     source_type = str(row.get("source_type", "excel")).strip() or "excel"
     if source_type not in {"excel", "kdocs"}:
         source_type = "excel"
@@ -291,12 +341,12 @@ def build_config_export(runtime_config: dict[str, Any], exported_at: str | None 
 
 def runtime_config_from_export_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("schema") != CONFIG_EXPORT_SCHEMA:
-        raise ValueError(f"Unsupported config export schema: {payload.get('schema')!r}")
+        raise ValueError("无法识别此配置文件，请选择由本工具导出的配置。")
     if payload.get("version") != CONFIG_EXPORT_VERSION:
-        raise ValueError(f"Unsupported config export version: {payload.get('version')!r}")
+        raise ValueError(f"暂不支持此配置文件版本：{payload.get('version')!r}")
     runtime_config = normalize_runtime_config(payload)
     if not runtime_config["configs"]:
-        raise ValueError("Config export does not contain any document configs.")
+        raise ValueError("配置文件中没有可导入的写入配置。")
     return runtime_config
 
 
@@ -304,9 +354,9 @@ def load_config_export(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON config export: {exc}") from exc
+        raise ValueError(f"配置文件格式有误，无法读取：{exc}") from exc
     if not isinstance(payload, dict):
-        raise ValueError("Config export must be a JSON object.")
+        raise ValueError("配置文件结构有误，请重新导出后再导入。")
     return runtime_config_from_export_payload(payload)
 
 
@@ -331,40 +381,102 @@ def update_recent_urls(urls: list[str], url: str) -> list[str]:
     return result
 
 
-def read_excel_range(workbook_path: Path, sheet_name: str, source_range: str) -> tuple[list[list[Any]], int, int]:
-    if load_workbook is None or range_boundaries is None:
-        raise RuntimeError("Missing dependency: openpyxl. Run: pip install -r work/requirements.txt")
-    if not workbook_path.exists():
-        raise FileNotFoundError(f"Excel file not found: {workbook_path}")
-
-    wb = load_workbook(workbook_path, data_only=True, read_only=True)
+def load_excel_workbook(workbook_path: Path, **kwargs):
+    """Open an OOXML workbook with a useful error for partial/corrupt files."""
+    if workbook_path.suffix.lower() in {".xlsx", ".xlsm", ".xltx", ".xltm"}:
+        try:
+            is_zip = zipfile.is_zipfile(workbook_path)
+        except OSError as exc:
+            raise OSError(f"无法读取表格文件：{workbook_path}") from exc
+        if not is_zip:
+            try:
+                with workbook_path.open("rb") as source:
+                    starts_as_zip = source.read(4).startswith(b"PK")
+            except OSError:
+                starts_as_zip = False
+            if starts_as_zip:
+                reason = (
+                    "表格文件尚未生成完整。"
+                    "请重新生成汇总表后再选择。"
+                )
+            else:
+                reason = (
+                    "所选文件的内容与表格格式不符。"
+                    "请用表格软件打开，另存为 .xlsx 文件后重试。"
+                )
+            raise ValueError(f"{reason}\n\n文件：{workbook_path}")
     try:
-        if sheet_name not in wb.sheetnames:
-            raise ValueError(f"Source sheet not found: {sheet_name}")
-        ws = wb[sheet_name]
-        min_col, min_row, max_col, max_row = range_boundaries(source_range)
-        rows = max_row - min_row + 1
-        cols = max_col - min_col + 1
-        values: list[list[Any]] = []
-        for row in ws.iter_rows(
-            min_row=min_row,
-            max_row=max_row,
-            min_col=min_col,
-            max_col=max_col,
-            values_only=True,
-        ):
-            values.append([normalize_cell_value(cell) for cell in row])
-        return values, rows, cols
+        return load_workbook(workbook_path, **kwargs)
+    except zipfile.BadZipFile as exc:
+        raise ValueError(
+            "表格文件不完整或已损坏，请重新生成后再试。"
+            f"\n\n文件：{workbook_path}"
+        ) from exc
+
+
+def read_excel_range(workbook_path: Path, sheet_name: str, source_range: str) -> tuple[list[list[Any]], int, int]:
+    return read_excel_ranges(workbook_path, [(sheet_name, source_range)])[0]
+
+
+def read_excel_ranges(
+    workbook_path: Path, requests: list[tuple[str, str]]
+) -> list[tuple[list[list[Any]], int, int]]:
+    """Read several regions of a workbook with one scan per source sheet."""
+    if load_workbook is None or range_boundaries is None:
+        raise RuntimeError("缺少表格读取组件，请运行工具箱目录中的 setup_macos.command 完成初始化。")
+    if not workbook_path.exists():
+        raise FileNotFoundError(f"找不到表格文件：{workbook_path}")
+    if not requests:
+        return []
+
+    wb = load_excel_workbook(workbook_path, data_only=True, read_only=True)
+    try:
+        grouped: dict[str, list[tuple[int, tuple[int, int, int, int]]]] = {}
+        for index, (sheet_name, source_range) in enumerate(requests):
+            if sheet_name not in wb.sheetnames:
+                raise ValueError(f"找不到来源工作表：{sheet_name}")
+            grouped.setdefault(sheet_name, []).append((index, range_boundaries(source_range)))
+
+        results: list[tuple[list[list[Any]], int, int] | None] = [None] * len(requests)
+        for sheet_name, regions in grouped.items():
+            first_row = min(bounds[1] for _, bounds in regions)
+            last_row = max(bounds[3] for _, bounds in regions)
+            first_col = min(bounds[0] for _, bounds in regions)
+            last_col = max(bounds[2] for _, bounds in regions)
+            collected: dict[int, list[list[Any]]] = {index: [] for index, _ in regions}
+            for row_number, row in enumerate(
+                wb[sheet_name].iter_rows(
+                    min_row=first_row,
+                    max_row=last_row,
+                    min_col=first_col,
+                    max_col=last_col,
+                    values_only=True,
+                ),
+                start=first_row,
+            ):
+                for index, (min_col, min_row, max_col, max_row) in regions:
+                    if min_row <= row_number <= max_row:
+                        cells = row[min_col - first_col : max_col - first_col + 1]
+                        collected[index].append([normalize_cell_value(cell) for cell in cells])
+            for index, (min_col, min_row, max_col, max_row) in regions:
+                results[index] = (
+                    collected[index],
+                    max_row - min_row + 1,
+                    max_col - min_col + 1,
+                )
+        if any(result is None for result in results):
+            raise RuntimeError("未能完整读取来源区域，请检查表格文件后重试。")
+        return [result for result in results if result is not None]
     finally:
         wb.close()
 
 
 def read_excel_sheet_names(workbook_path: Path) -> list[str]:
     if load_workbook is None:
-        raise RuntimeError("Missing dependency: openpyxl. Run: pip install -r work/requirements.txt")
+        raise RuntimeError("缺少表格读取组件，请运行工具箱目录中的 setup_macos.command 完成初始化。")
     if not workbook_path.exists():
-        raise FileNotFoundError(f"Excel file not found: {workbook_path}")
-    wb = load_workbook(workbook_path, read_only=True)
+        raise FileNotFoundError(f"找不到表格文件：{workbook_path}")
+    wb = load_excel_workbook(workbook_path, read_only=True)
     try:
         return list(wb.sheetnames)
     finally:
@@ -378,9 +490,10 @@ def prepare_mappings(
     log=None,
 ) -> list[PreparedMapping]:
     if not mappings:
-        raise ValueError("No range mappings configured.")
+        raise ValueError("尚未配置写入区域。")
 
-    prepared: list[PreparedMapping] = []
+    source_specs: list[tuple[int, MappingRow, str, Path | None, str, str, int, int]] = []
+    excel_groups: dict[Path, list[tuple[int, str, str]]] = {}
     target_rects: dict[tuple[str, str], list[tuple[int, tuple[int, int, int, int], str]]] = {}
     log = log or (lambda _message: None)
     for idx, mapping in enumerate(mappings, start=1):
@@ -389,13 +502,13 @@ def prepare_mappings(
         if source_type == "excel":
             workbook_path_text = mapping.local_file.strip()
             if not workbook_path_text:
-                raise ValueError(f"Mapping {idx} has no local file.")
+                raise ValueError(f"第 {idx} 个写入区域未选择本地文件。")
             workbook_path = Path(workbook_path_text).expanduser()
         elif source_type == "kdocs":
             if not mapping.source_url.strip():
-                raise ValueError(f"Mapping {idx} has no source KDocs URL.")
+                raise ValueError(f"第 {idx} 个写入区域未填写来源表格链接。")
         else:
-            raise ValueError(f"Mapping {idx} has unknown source type: {source_type}")
+            raise ValueError(f"第 {idx} 个写入区域的数据来源类型无法识别：{source_type}")
         if not all(
             [
                 mapping.kdocs_url,
@@ -407,41 +520,58 @@ def prepare_mappings(
                 mapping.target_end,
             ]
         ):
-            raise ValueError(f"Mapping {idx} has empty fields.")
+            raise ValueError(f"第 {idx} 个写入区域的信息未填完整。")
         source_range = range_from_cells(mapping.source_start, mapping.source_end)
         target_range = range_from_cells(mapping.target_start, mapping.target_end)
         source_rows, source_cols = range_shape(mapping.source_start, mapping.source_end)
         target_rows, target_cols = range_shape(mapping.target_start, mapping.target_end)
         if (source_rows, source_cols) != (target_rows, target_cols):
             raise ValueError(
-                f"Mapping {idx} size mismatch: source {source_rows}x{source_cols}, "
-                f"target {target_rows}x{target_cols}"
+                f"第 {idx} 个写入区域大小不一致：来源为 {source_rows} 行 {source_cols} 列，"
+                f"目标为 {target_rows} 行 {target_cols} 列。"
             )
-        if source_type == "excel":
-            values, rows, cols = read_excel_range(workbook_path, mapping.source_sheet, source_range)
-            source_label = str(workbook_path)
-        else:
-            values = read_online_range_values(
-                mapping.source_url,
-                mapping.source_sheet,
-                source_range,
-                source_rows,
-                source_cols,
-                browser_mode,
-                cdp_url,
-                log,
-            )
-            rows, cols = source_rows, source_cols
-            source_label = mapping.source_url
         rect = rect_from_cells(mapping.target_start, mapping.target_end)
         target_key = (mapping.kdocs_url, mapping.target_sheet)
         for other_idx, other_rect, other_range in target_rects.get(target_key, []):
             if rects_overlap(rect, other_rect):
                 raise ValueError(
-                    f"Target ranges overlap for URL '{mapping.kdocs_url}' on sheet '{mapping.target_sheet}': "
-                    f"mapping {other_idx} {other_range} and mapping {idx} {target_range}"
+                    f"目标表格 {mapping.kdocs_url} 的工作表“{mapping.target_sheet}”存在重叠区域："
+                    f"第 {other_idx} 个区域 {other_range} 与第 {idx} 个区域 {target_range}。"
                 )
         target_rects.setdefault(target_key, []).append((idx, rect, target_range))
+        source_specs.append(
+            (idx, mapping, source_type, workbook_path, source_range, target_range, source_rows, source_cols)
+        )
+        if workbook_path is not None:
+            excel_groups.setdefault(workbook_path, []).append((idx, mapping.source_sheet, source_range))
+
+    excel_values: dict[int, tuple[list[list[Any]], int, int]] = {}
+    for workbook_path, requests in excel_groups.items():
+        results = read_excel_ranges(
+            workbook_path, [(sheet_name, source_range) for _, sheet_name, source_range in requests]
+        )
+        for (idx, _, _), result in zip(requests, results):
+            excel_values[idx] = result
+
+    online_specs = [spec for spec in source_specs if spec[2] != "excel"]
+    online_values = {}
+    if online_specs:
+        results = read_online_ranges(
+            [(mapping.source_url, mapping.source_sheet, source_range, rows, cols)
+             for _, mapping, _, _, source_range, _, rows, cols in online_specs],
+            browser_mode, cdp_url, log,
+        )
+        online_values = {spec[0]: values for spec, values in zip(online_specs, results)}
+
+    prepared: list[PreparedMapping] = []
+    for idx, mapping, source_type, workbook_path, source_range, target_range, source_rows, source_cols in source_specs:
+        if source_type == "excel":
+            values, rows, cols = excel_values[idx]
+            source_label = str(workbook_path)
+        else:
+            values = online_values[idx]
+            rows, cols = source_rows, source_cols
+            source_label = mapping.source_url
         prepared.append(
             PreparedMapping(
                 index=idx,
@@ -485,10 +615,10 @@ def compare_matrix(expected: list[list[Any]], actual_raw: Any, rows: int, cols: 
             raw_expected = expected[r][c] if r < len(expected) and c < len(expected[r]) else ""
             raw_actual = actual[r][c] if r < len(actual) and c < len(actual[r]) else ""
             if not values_equivalent(raw_expected, raw_actual):
-                cell = f"R{r + 1}C{c + 1}"
+                cell = f"区域内第 {r + 1} 行第 {c + 1} 列"
                 expected_value = normalize_for_compare(raw_expected)
                 actual_value = normalize_for_compare(raw_actual)
-                mismatches.append(f"{cell}: expected {expected_value!r}, got {actual_value!r}")
+                mismatches.append(f"{cell}：来源值 {expected_value!r}，回读值 {actual_value!r}")
                 if len(mismatches) >= 20:
                     return mismatches
     return mismatches
@@ -501,7 +631,7 @@ def wait_for_wps_ready(page, log, timeout_seconds: int) -> dict[str, Any]:
     readiness_script = """
     async () => {
       const api = window.WPSOpenApi;
-      if (!api?.EtApplication) {
+      if (typeof api?.EtApplication !== "function") {
         return {
           ready: false,
           url: location.href,
@@ -529,7 +659,8 @@ def wait_for_wps_ready(page, log, timeout_seconds: int) -> dict[str, Any]:
         } catch (_error) {}
       }
       return {
-        ready: applicationReady || documentReady,
+        ready: !!app && typeof app.Worksheets === "function"
+          && (applicationReady || documentReady) && window.WPSOpenApi === api,
         url: location.href,
         title: document.title,
         hasSave: typeof api.save === "function"
@@ -549,21 +680,95 @@ def wait_for_wps_ready(page, log, timeout_seconds: int) -> dict[str, Any]:
         elapsed_bucket = timeout_seconds - remaining
         if elapsed_bucket // 15 > last_log_second // 15:
             last_log_second = elapsed_bucket
-            log(f"Still waiting for WPSOpenApi... current URL: {page.url}")
+            log(f"仍在等待表格加载，当前页面：{page.url}")
         page.wait_for_timeout(1000)
     return last_state
+
+
+WPS_APPLICATION_GUARD = """
+  const api = window.WPSOpenApi;
+  if (typeof api?.EtApplication !== "function") {
+    throw new Error("WPS_API_NOT_READY: 操作前表格连接已变化");
+  }
+  const app = api.EtApplication();
+  if (!app || typeof app.Worksheets !== "function") {
+    throw new Error("WPS_API_NOT_READY: 表格尚未就绪");
+  }
+"""
+
+
+def evaluate_wps_operation(page, script: str, payload: Any, log, timeout_seconds: int):
+    """Recheck readiness after navigation, including the gap before evaluate."""
+    first_error: Exception | None = None
+    for attempt in range(1, 4):
+        ready = wait_for_wps_ready(
+            page, log, timeout_seconds=timeout_seconds if attempt == 1 else 60
+        )
+        if not ready.get("ready"):
+            message = (
+                "表格加载超时。"
+                "请点击“登录 WPS”，确认已登录且能访问该表格后重试。"
+                f"当前页面：{ready.get('title')} {ready.get('url')}"
+            )
+            if first_error is not None:
+                message += f" 首次操作失败原因：{first_error}"
+            raise RuntimeError(message) from first_error
+        try:
+            return page.evaluate(script, payload)
+        except Exception as exc:
+            # The guard runs before any cell assignment. Do not retry arbitrary
+            # TypeErrors or API errors that may have occurred during a write.
+            if not any(marker in str(exc) for marker in (
+                "WPS_API_NOT_READY:", "Execution context was destroyed"
+            )) and "navigation" not in str(exc).lower():
+                raise
+            if first_error is None:
+                first_error = exc
+            if attempt == 3:
+                raise RuntimeError(
+                    f"重试 3 次后仍无法操作表格。首次失败原因：{first_error}"
+                ) from exc
+            log(f"表格连接已变化，等待恢复后重试（第 {attempt + 1}/3 次）。")
+            page.wait_for_timeout(1500)
+
+
+def browser_has_page(browser, url: str) -> bool:
+    target_key = url.rstrip("/").split("/")[-1]
+    return any(
+        target_key and target_key in page.url
+        for context in browser.contexts
+        for page in context.pages
+    )
+
+
+def ensure_background_cdp_target(browser, cdp_url: str, url: str) -> bool:
+    if browser_has_page(browser, url):
+        return False
+    session = browser.new_browser_cdp_session()
+    session.send("Target.createTarget", {"url": url, "background": True})
+    target_key = url.rstrip("/").split("/")[-1]
+    deadline = time_module.monotonic() + 10
+    while time_module.monotonic() < deadline:
+        _base_url, targets = cdp_page_targets(cdp_url)
+        if any(
+            target.get("type") == "page"
+            and target_key
+            and target_key in str(target.get("url") or "")
+            for target in targets
+        ):
+            return True
+        time_module.sleep(0.05)
+    raise RuntimeError("已创建后台表格页面，但加载超时，请重试。")
 
 
 def find_or_open_page(context, url: str):
     target_key = url.rstrip("/").split("/")[-1]
     for page in context.pages:
         if target_key and target_key in page.url:
-            page.bring_to_front()
             return page
     for page in context.pages:
         if "kdocs.cn" in page.url:
-            page.bring_to_front()
-            page.goto(url, wait_until="commit", timeout=60000)
+            page.goto(url, wait_until="commit", timeout=20000)
             return page
     page = next(
         (
@@ -574,9 +779,8 @@ def find_or_open_page(context, url: str):
         None,
     )
     if page is None:
-        page = context.new_page()
-    page.bring_to_front()
-    page.goto(url, wait_until="commit", timeout=60000)
+        page = context.pages[0] if context.pages else context.new_page()
+    page.goto(url, wait_until="commit", timeout=20000)
     return page
 
 
@@ -606,29 +810,37 @@ def resolve_cdp_endpoint(cdp_url: str) -> str:
             ws_url = data.get("webSocketDebuggerUrl")
             if ws_url:
                 return ws_url
-            errors.append(f"{version_url}: missing webSocketDebuggerUrl")
+            errors.append(f"{version_url}：浏览器未返回连接地址")
         except Exception as exc:
             errors.append(f"{version_url}: {exc}")
-    raise RuntimeError("Could not resolve Chrome DevTools websocket. " + " | ".join(errors))
+    raise RuntimeError("无法获取浏览器连接地址。" + " | ".join(errors))
 
 
 def find_macos_chrome() -> Path | None:
+    # Keep the automation browser on a distinct application bundle. If the
+    # regular Chrome binary is used for a long-lived headless CDP process,
+    # LaunchServices may route links from WeChat and other apps into that
+    # invisible instance because both share com.google.Chrome.
     candidates = [
-        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-        Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         Path("/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
         Path.home() / "Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
         Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
         Path.home() / "Applications/Chromium.app/Contents/MacOS/Chromium",
+        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     ]
     return next((candidate for candidate in candidates if candidate.is_file()), None)
+
+
+
+
 
 
 def managed_cdp_host_port(cdp_url: str) -> tuple[str, int]:
     parsed = urllib.parse.urlparse(cdp_url.strip() or "http://127.0.0.1:9222")
     host = parsed.hostname or "127.0.0.1"
     if host not in {"127.0.0.1", "localhost", "::1"}:
-        raise ValueError("The managed WPS Chrome CDP address must use localhost.")
+        raise ValueError("专用浏览器的连接地址必须指向本机，例如 http://127.0.0.1:9222。")
     return "127.0.0.1", parsed.port or 9222
 
 
@@ -636,22 +848,36 @@ def build_wps_chrome_command(
     chrome_path: Path,
     cdp_url: str,
     initial_url: str = "https://www.kdocs.cn/",
+    *,
+    headless: bool = False,
 ) -> list[str]:
     host, port = managed_cdp_host_port(cdp_url)
-    return [
-        str(chrome_path),
+    executable = [str(chrome_path)]
+    # A macOS application can retain an "Open using Rosetta" preference even
+    # when Chrome and Python are both universal/native. KDocs is CPU-heavy and
+    # becomes dramatically slower when its renderer is translated. Force the
+    # dedicated instance to use Chrome's native Apple Silicon slice.
+    if sys.platform == "darwin" and os.uname().machine == "arm64":
+        executable = ["/usr/bin/arch", "-arm64", str(chrome_path)]
+    command = executable + [
         f"--remote-debugging-address={host}",
         f"--remote-debugging-port={port}",
         f"--user-data-dir={PROFILE_DIR}",
         "--no-first-run",
         "--no-default-browser-check",
+        # Do not let Chrome keep a hidden app/background-mode process after
+        # the last dedicated WPS window is closed.
+        "--disable-background-mode",
         # The Tk config dialog normally covers Chrome on macOS. Keep the WPS
         # renderer at foreground speed while that dedicated window is occluded.
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
-        initial_url,
     ]
+    if headless:
+        command.extend(["--headless=new", "--window-size=1400,900"])
+    command.append(initial_url)
+    return command
 
 
 def try_resolve_cdp_endpoint(cdp_url: str, timeout: float = 0.5) -> str | None:
@@ -702,7 +928,7 @@ def ensure_wps_cdp_page(
     elif page_targets:
         return False
     if base_url is None:
-        raise RuntimeError("Could not inspect the dedicated WPS Chrome page list.")
+        raise RuntimeError("无法读取专用浏览器的页面列表。")
 
     encoded_url = urllib.parse.quote(initial_url, safe="")
     request = urllib.request.Request(
@@ -712,25 +938,111 @@ def ensure_wps_cdp_page(
     with opener.open(request, timeout=5) as response:
         created = json.loads(response.read().decode("utf-8"))
     if not isinstance(created, dict) or created.get("type") != "page":
-        raise RuntimeError("Dedicated WPS Chrome did not create a browser page.")
+        raise RuntimeError("专用浏览器未能创建页面，请重试。")
     return True
 
 
-def managed_chrome_pid() -> int | None:
+def managed_chrome_state_version() -> int:
     try:
-        pid = int(WPS_CHROME_PID_PATH.read_text(encoding="utf-8").strip())
-        os.kill(pid, 0)
+        state = json.loads(WPS_CHROME_STATE_PATH.read_text(encoding="utf-8"))
+        return int(state.get("version") or 0)
+    except (FileNotFoundError, ValueError, TypeError, json.JSONDecodeError):
+        return 0
+
+
+def managed_chrome_command(pid: int) -> str:
+    if sys.platform != "darwin":
+        return ""
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except subprocess.SubprocessError:
+        return ""
+    return result.stdout.strip()
+
+
+def is_managed_chrome_command(command: str) -> bool:
+    profile_argument = f"--user-data-dir={PROFILE_DIR}"
+    is_browser_main_process = (
+        "/Contents/MacOS/Google Chrome" in command
+        or "/Contents/MacOS/Chromium" in command
+    )
+    return (
+        profile_argument in command
+        and is_browser_main_process
+        and "Google Chrome Helper" not in command
+        and "--type=" not in command
+    )
+
+
+def discover_managed_chrome_pid() -> int | None:
+    """Find a dedicated Chrome whose PID changed without updating our PID file."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,command="],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except subprocess.SubprocessError:
+        return None
+
+    candidates: list[tuple[bool, int]] = []
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(None, 1)
+        if len(fields) != 2 or not fields[0].isdigit():
+            continue
+        pid = int(fields[0])
+        command = fields[1]
+        if is_managed_chrome_command(command):
+            candidates.append(("--remote-debugging-port=" in command, pid))
+    if not candidates:
+        return None
+    return max(candidates)[1]
+
+
+def remember_managed_chrome(pid: int, version: int, *, headless: bool = False) -> None:
+    WPS_CHROME_PID_PATH.write_text(str(pid), encoding="utf-8")
+    WPS_CHROME_STATE_PATH.write_text(
+        json.dumps(
+            {"pid": pid, "version": version, "headless": headless},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def clear_managed_chrome_state(pid: int) -> None:
+    try:
+        recorded_pid = int(WPS_CHROME_PID_PATH.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, ValueError, OSError):
+        recorded_pid = None
+    if recorded_pid != pid:
+        return
+    for path in (WPS_CHROME_PID_PATH, WPS_CHROME_STATE_PATH):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def managed_chrome_pid() -> int | None:
+    recorded_pid: int | None = None
+    try:
+        recorded_pid = int(WPS_CHROME_PID_PATH.read_text(encoding="utf-8").strip())
+        os.kill(recorded_pid, 0)
         if sys.platform == "darwin":
-            result = subprocess.run(
-                ["ps", "-p", str(pid), "-o", "command="],
-                capture_output=True,
-                text=True,
-                timeout=2,
-                check=False,
-            )
-            if str(PROFILE_DIR) not in result.stdout:
-                return None
-        return pid
+            if not is_managed_chrome_command(managed_chrome_command(recorded_pid)):
+                raise ProcessLookupError
+        return recorded_pid
     except (
         FileNotFoundError,
         ValueError,
@@ -738,7 +1050,18 @@ def managed_chrome_pid() -> int | None:
         PermissionError,
         subprocess.SubprocessError,
     ):
+        pass
+
+    discovered_pid = discover_managed_chrome_pid()
+    if discovered_pid is None:
+        if recorded_pid is not None:
+            clear_managed_chrome_state(recorded_pid)
         return None
+    try:
+        remember_managed_chrome(discovered_pid, managed_chrome_state_version())
+    except OSError:
+        pass
+    return discovered_pid
 
 
 def managed_chrome_launch_version(pid: int) -> int:
@@ -751,23 +1074,80 @@ def managed_chrome_launch_version(pid: int) -> int:
         return 0
 
 
-def stop_outdated_managed_chrome(log, cdp_url: str) -> None:
-    pid = managed_chrome_pid()
-    if pid is None or managed_chrome_launch_version(pid) >= WPS_CHROME_LAUNCH_VERSION:
-        return
-    log("Restarting dedicated WPS Chrome once to apply the macOS speed settings.")
+def managed_chrome_is_running(pid: int) -> bool:
     try:
-        os.kill(pid, 15)
+        os.kill(pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    if sys.platform != "darwin":
+        return True
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "stat="],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except subprocess.SubprocessError:
+        return True
+    state = result.stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def stop_managed_chrome(pid: int, log, reason: str, timeout_seconds: float = 8) -> None:
+    log(f"正在重启专用浏览器：{reason}")
+    try:
+        os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
+        clear_managed_chrome_state(pid)
         return
-    deadline = time_module.monotonic() + 8
-    while time_module.monotonic() < deadline:
-        if try_resolve_cdp_endpoint(cdp_url, timeout=0.2) is None:
-            time_module.sleep(0.5)
-            return
+
+    deadline = time_module.monotonic() + timeout_seconds
+    while managed_chrome_is_running(pid) and time_module.monotonic() < deadline:
         time_module.sleep(0.2)
-    raise RuntimeError(
-        "The old dedicated WPS Chrome did not exit. Close that dedicated Chrome window and try again."
+    if managed_chrome_is_running(pid):
+        log("专用浏览器未正常关闭，正在结束其进程。")
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            clear_managed_chrome_state(pid)
+            return
+        force_deadline = time_module.monotonic() + 2
+        while managed_chrome_is_running(pid) and time_module.monotonic() < force_deadline:
+            time_module.sleep(0.1)
+    if managed_chrome_is_running(pid):
+        raise RuntimeError(
+            "专用浏览器无响应，自动重启失败。"
+            "请关闭专用浏览器窗口后重试。"
+        )
+    clear_managed_chrome_state(pid)
+
+
+def managed_chrome_is_headless(pid: int) -> bool:
+    return "--headless" in managed_chrome_command(pid)
+
+
+def stop_outdated_managed_chrome(
+    log, cdp_url: str, *, headless: bool = False
+) -> None:
+    pid = managed_chrome_pid()
+    if pid is None:
+        return
+    if managed_chrome_launch_version(pid) < WPS_CHROME_LAUNCH_VERSION:
+        reason = "正在应用更新后的浏览器设置"
+    elif managed_chrome_is_headless(pid) != headless:
+        reason = (
+            "正在切换为后台运行"
+            if headless
+            else "正在打开浏览器供您登录"
+        )
+    else:
+        return
+    stop_managed_chrome(
+        pid,
+        log,
+        reason,
     )
 
 
@@ -777,8 +1157,9 @@ def _ensure_wps_dedicated_chrome(
     timeout_seconds: float = 15,
     initial_url: str = "https://www.kdocs.cn/",
     preload_url: bool = False,
+    headless: bool = False,
 ) -> dict[str, Any]:
-    stop_outdated_managed_chrome(log, cdp_url)
+    stop_outdated_managed_chrome(log, cdp_url, headless=headless)
     existing_endpoint = try_resolve_cdp_endpoint(cdp_url)
     if existing_endpoint:
         ensure_wps_cdp_page(
@@ -786,8 +1167,12 @@ def _ensure_wps_dedicated_chrome(
             initial_url,
             require_initial_url=preload_url,
         )
-        log("Reusing the running dedicated WPS Chrome.")
-        return {"started": False, "endpoint": existing_endpoint}
+        log("已连接正在运行的专用浏览器。")
+        return {
+            "started": False,
+            "endpoint": existing_endpoint,
+            "headless": headless,
+        }
     existing_pid = managed_chrome_pid()
     if existing_pid is not None:
         # Chrome can briefly stop answering /json/version while a heavy KDocs
@@ -802,26 +1187,38 @@ def _ensure_wps_dedicated_chrome(
                     initial_url,
                     require_initial_url=preload_url,
                 )
-                log("Reusing the running dedicated WPS Chrome.")
-                return {"started": False, "endpoint": endpoint, "pid": existing_pid}
+                log("已连接正在运行的专用浏览器。")
+                return {
+                    "started": False,
+                    "endpoint": endpoint,
+                    "pid": existing_pid,
+                    "headless": headless,
+                }
             time_module.sleep(0.2)
-        raise RuntimeError(
-            "Dedicated WPS Chrome is running but its local debugging endpoint is not responding. "
-            "Wait a moment or close that dedicated window and start it again."
+        stop_managed_chrome(
+            existing_pid,
+            log,
+            "浏览器仍在运行，但连接无响应",
         )
     if sys.platform != "darwin":
-        raise RuntimeError("Automatic dedicated Chrome startup is currently available on macOS only.")
+        raise RuntimeError("当前系统不支持自动启动专用浏览器，请手动打开后连接。")
 
     chrome_path = find_macos_chrome()
     if chrome_path is None:
-        raise RuntimeError("Google Chrome was not found in /Applications or ~/Applications.")
+        raise RuntimeError("未找到可用浏览器，请先安装谷歌浏览器。")
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     try:
         PROFILE_DIR.chmod(0o700)
     except OSError:
         pass
-    command = build_wps_chrome_command(chrome_path, cdp_url, initial_url)
-    log(f"Starting dedicated WPS Chrome: {chrome_path.name}")
+    command = build_wps_chrome_command(
+        chrome_path,
+        cdp_url,
+        initial_url,
+        headless=headless,
+    )
+    mode_label = "后台运行" if headless else "供您登录"
+    log(f"正在启动专用浏览器（{mode_label}）…")
     process = subprocess.Popen(
         command,
         stdin=subprocess.DEVNULL,
@@ -829,13 +1226,10 @@ def _ensure_wps_dedicated_chrome(
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    WPS_CHROME_PID_PATH.write_text(str(process.pid), encoding="utf-8")
-    WPS_CHROME_STATE_PATH.write_text(
-        json.dumps(
-            {"pid": process.pid, "version": WPS_CHROME_LAUNCH_VERSION},
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    remember_managed_chrome(
+        process.pid,
+        WPS_CHROME_LAUNCH_VERSION,
+        headless=headless,
     )
     deadline = time_module.monotonic() + timeout_seconds
     while time_module.monotonic() < deadline:
@@ -846,14 +1240,22 @@ def _ensure_wps_dedicated_chrome(
                 initial_url,
                 require_initial_url=preload_url,
             )
-            log("Dedicated WPS Chrome is ready. Log in once if WPS asks for it.")
-            return {"started": True, "endpoint": endpoint, "pid": process.pid}
+            if headless:
+                log("专用浏览器已在后台就绪。")
+            else:
+                log("专用浏览器已打开；如出现登录页面，请先完成登录。")
+            return {
+                "started": True,
+                "endpoint": endpoint,
+                "pid": process.pid,
+                "headless": headless,
+            }
         if process.poll() is not None:
             break
         time_module.sleep(0.2)
     raise RuntimeError(
-        "Dedicated WPS Chrome did not expose its local debugging endpoint. "
-        "Close any Chrome window using the WPS profile and try again."
+        "无法连接专用浏览器。"
+        "请关闭使用该登录资料的浏览器窗口后重试。"
     )
 
 
@@ -863,6 +1265,7 @@ def ensure_wps_dedicated_chrome(
     timeout_seconds: float = 15,
     initial_url: str = "https://www.kdocs.cn/",
     preload_url: bool = False,
+    headless: bool = False,
 ) -> dict[str, Any]:
     with WPS_CHROME_START_LOCK:
         return _ensure_wps_dedicated_chrome(
@@ -871,6 +1274,7 @@ def ensure_wps_dedicated_chrome(
             timeout_seconds,
             initial_url,
             preload_url,
+            headless,
         )
 
 
@@ -880,44 +1284,87 @@ def open_browser_context(
     cdp_url: str,
     log,
     initial_url: str | None = None,
+    *,
+    for_login_check: bool = False,
 ):
     if browser_mode in {"managed_cdp", "cdp"}:
         if browser_mode == "managed_cdp":
-            ensure_wps_dedicated_chrome(
-                cdp_url,
-                log,
-                initial_url=initial_url or "https://www.kdocs.cn/",
-                preload_url=bool(initial_url),
-            )
+            # Automatic reads/writes use the saved WPS profile in a headless
+            # Chrome process. Only the explicit login button opens a window.
+            if for_login_check and try_resolve_cdp_endpoint(cdp_url):
+                # Do not close the visible browser while the user is logging in.
+                ensure_wps_cdp_page(cdp_url)
+            else:
+                ensure_wps_dedicated_chrome(cdp_url, log, headless=True)
         else:
-            log(f"Connecting to existing Chrome through CDP: {cdp_url}")
+            log(f"正在连接已打开的浏览器：{cdp_url}")
         endpoint = resolve_cdp_endpoint(cdp_url)
+        log("正在连接浏览器并检查表格页面…")
         try:
-            browser = playwright.chromium.connect_over_cdp(endpoint)
+            browser = playwright.chromium.connect_over_cdp(
+                endpoint, timeout=CDP_CONNECT_TIMEOUT_MS
+            )
         except Exception as exc:
-            if browser_mode != "managed_cdp" or "context management is not supported" not in str(exc):
+            if browser_mode != "managed_cdp":
                 raise
-            log("Dedicated Chrome had no open page; creating a WPS page and reconnecting.")
-            ensure_wps_cdp_page(cdp_url)
+            if "context management is not supported" in str(exc):
+                log("专用浏览器中没有页面，正在打开金山文档并重新连接。")
+                ensure_wps_cdp_page(cdp_url)
+            elif isinstance(exc, PlaywrightTimeoutError) and not for_login_check:
+                # The HTTP status endpoint can still respond while every renderer
+                # is stuck. Restart only the browser owned by this tool, before
+                # any spreadsheet operation has begun.
+                with WPS_CHROME_START_LOCK:
+                    pid = managed_chrome_pid()
+                    if pid is None:
+                        raise RuntimeError(
+                            "浏览器连接超时，请关闭专用浏览器后重新打开。"
+                        ) from exc
+                    stop_managed_chrome(pid, log, "表格页面无响应，连接超时")
+                    _ensure_wps_dedicated_chrome(
+                        cdp_url, log, headless=True,
+                        initial_url=initial_url or "https://www.kdocs.cn/",
+                    )
+            else:
+                raise
             endpoint = resolve_cdp_endpoint(cdp_url)
-            browser = playwright.chromium.connect_over_cdp(endpoint)
+            try:
+                browser = playwright.chromium.connect_over_cdp(
+                    endpoint, timeout=CDP_CONNECT_TIMEOUT_MS
+                )
+            except Exception as retry_error:
+                raise RuntimeError(
+                    "重新连接浏览器失败，请打开专用浏览器检查登录状态后重试。"
+                    f"首次连接失败原因：{exc}"
+                ) from retry_error
         context = browser.contexts[0] if browser.contexts else browser.new_context()
+        if (
+            browser_mode == "cdp"
+            and initial_url
+            and ensure_background_cdp_target(browser, cdp_url, initial_url)
+        ):
+            # Playwright discovers background targets that existed when the CDP
+            # connection was established. Reconnect once after creating it.
+            browser = playwright.chromium.connect_over_cdp(
+                endpoint, timeout=CDP_CONNECT_TIMEOUT_MS
+            )
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
         return browser, context, False
 
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    log("Starting one-time browser with persistent WPS profile...")
+    log("正在启动临时浏览器，并载入已保存的登录信息…")
     try:
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_DIR),
-            headless=False,
-            channel="chrome",
+            headless=for_login_check,
+            channel=None if os.environ.get("TOOLBOX_PORTABLE") == "1" else "chrome",
             viewport={"width": 1400, "height": 900},
         )
     except Exception:
-        log("Chrome channel was not available; falling back to bundled Chromium.")
+        log("未能启动系统浏览器，正在尝试使用内置浏览器。")
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_DIR),
-            headless=False,
+            headless=for_login_check,
             viewport={"width": 1400, "height": 900},
         )
     return None, context, True
@@ -931,7 +1378,7 @@ def write_to_wps(
     cdp_url: str = "http://127.0.0.1:9222",
 ) -> dict[str, Any]:
     if sync_playwright is None:
-        raise RuntimeError("Missing dependency: playwright. Run: pip install -r work/requirements.txt")
+        raise RuntimeError("缺少浏览器自动化组件，请运行工具箱目录中的 setup_macos.command 完成初始化。")
 
     payload = [
         {
@@ -949,32 +1396,25 @@ def write_to_wps(
 
     with sync_playwright() as p:
         try:
-            _browser, context, close_context = open_browser_context(
+            browser, context, close_context = open_browser_context(
                 p, browser_mode, cdp_url, log, initial_url=url
             )
         except Exception as exc:
             if browser_mode == "cdp":
                 raise RuntimeError(
-                    "Could not connect to existing Chrome. Start it with a custom --user-data-dir "
-                    "and --remote-debugging-port, then log in to WPS in that window."
+                    "无法连接已打开的浏览器，请使用独立的用户资料目录和远程调试端口启动，"
+                    "并在该窗口登录金山文档。"
                 ) from exc
             raise
         try:
-            log(f"Opening or selecting KDocs URL: {url}")
+            log(f"正在打开目标表格：{url}")
             page = find_or_open_page(context, url)
 
-            log("Waiting for WPSOpenApi. If a login page is shown, finish login in the browser window.")
-            ready = wait_for_wps_ready(page, log, timeout_seconds=180)
-            if not ready.get("ready"):
-                raise RuntimeError(
-                    "WPSOpenApi was not ready after waiting. "
-                    f"Current page: {ready.get('title')} {ready.get('url')}"
-                )
-            log(f"Document ready: {ready.get('title')}")
-
-            writer_script = """
-            async (payload) => {
-              const app = window.WPSOpenApi.EtApplication();
+            log("正在等待表格加载；如出现登录页面，请先在专用浏览器中完成登录。")
+            writer_script = "async (payload) => {" + WPS_APPLICATION_GUARD + """
+              if (typeof api.save !== "function") {
+                throw new Error("WPS_API_NOT_READY: 表格保存功能尚未就绪");
+              }
               const results = [];
               for (const item of payload) {
                 const sheet = app.Worksheets(item.targetSheet);
@@ -991,7 +1431,7 @@ def write_to_wps(
                   mergeCells
                 });
               }
-              await window.WPSOpenApi.save();
+              await api.save();
               for (const result of results) {
                 const sheet = app.Worksheets(result.targetSheet);
                 const range = sheet.Range(result.targetRange);
@@ -1002,24 +1442,8 @@ def write_to_wps(
               return { saved: true, results };
             }
             """
-            log(f"Writing {len(payload)} mapping(s) through WPSOpenApi...")
-            result = None
-            last_error: Exception | None = None
-            for attempt in range(1, 4):
-                try:
-                    if attempt > 1:
-                        log(f"Retrying write attempt {attempt}/3 after page navigation...")
-                        wait_for_wps_ready(page, log, timeout_seconds=60)
-                    result = page.evaluate(writer_script, payload)
-                    break
-                except Exception as exc:
-                    last_error = exc
-                    if "Execution context was destroyed" not in str(exc) and "navigation" not in str(exc).lower():
-                        raise
-                    page.wait_for_timeout(1500)
-            if result is None:
-                raise RuntimeError(f"Write failed after retries: {last_error}")
-            return result
+            log(f"正在写入 {len(payload)} 个区域…")
+            return evaluate_wps_operation(page, writer_script, payload, log, 180)
         finally:
             if close_context:
                 context.close()
@@ -1027,34 +1451,38 @@ def write_to_wps(
 
 def read_online_document_info(url: str, browser_mode: str, cdp_url: str, log) -> dict[str, Any]:
     if sync_playwright is None:
-        raise RuntimeError("Missing dependency: playwright. Run: pip install -r work/requirements.txt")
+        raise RuntimeError("缺少浏览器自动化组件，请运行工具箱目录中的 setup_macos.command 完成初始化。")
 
+    started_at = time_module.monotonic()
+    log("正在读取表格名称和工作表列表…")
     with sync_playwright() as p:
-        _browser, context, close_context = open_browser_context(
+        browser, context, close_context = open_browser_context(
             p, browser_mode, cdp_url, log, initial_url=url
         )
         try:
             page = find_or_open_page(context, url)
-            ready = wait_for_wps_ready(page, log, timeout_seconds=120)
-            if not ready.get("ready"):
-                raise RuntimeError(
-                    "WPSOpenApi was not ready after waiting. "
-                    f"Current page: {ready.get('title')} {ready.get('url')}"
-                )
-            script = """
-            async () => {
-              const app = window.WPSOpenApi.EtApplication();
+            log(
+                f"已打开表格，用时 {time_module.monotonic() - started_at:.1f} 秒；"
+                "正在等待表格就绪…"
+            )
+            script = "async () => {" + WPS_APPLICATION_GUARD + """
               const count = await app.Worksheets.Count;
               const sheets = [];
               for (let i = 1; i <= Number(count); i++) {
                 const ws = app.Worksheets(i);
                 sheets.push(await ws.Name);
               }
-              return sheets;
+              return {title: document.title, sheets};
             }
             """
-            sheets = page.evaluate(script)
-            return {"title": ready.get("title") or page.title(), "sheets": sheets}
+            info = evaluate_wps_operation(page, script, None, log, 45)
+            sheets = info["sheets"]
+            title = info["title"] or page.title()
+            log(
+                f"表格信息读取完成，用时 {time_module.monotonic() - started_at:.1f} 秒，"
+                f"共 {len(sheets)} 个工作表。"
+            )
+            return {"title": title, "sheets": sheets}
         finally:
             if close_context:
                 context.close()
@@ -1074,46 +1502,44 @@ def read_online_range_values(
     cdp_url: str,
     log,
 ) -> list[list[Any]]:
+    return read_online_ranges(
+        [(url, sheet_name, range_text, rows, cols)], browser_mode, cdp_url, log
+    )[0]
+
+
+def read_online_ranges(
+    requests: list[tuple[str, str, str, int, int]],
+    browser_mode: str,
+    cdp_url: str,
+    log,
+) -> list[list[list[Any]]]:
+    """Read source regions in order using one connection and browser context."""
+    if not requests:
+        return []
     if sync_playwright is None:
-        raise RuntimeError("Missing dependency: playwright. Run: pip install -r work/requirements.txt")
+        raise RuntimeError("缺少浏览器自动化组件，请运行工具箱目录中的 setup_macos.command 完成初始化。")
 
     with sync_playwright() as p:
-        _browser, context, close_context = open_browser_context(
-            p, browser_mode, cdp_url, log, initial_url=url
+        browser, context, close_context = open_browser_context(
+            p, browser_mode, cdp_url, log, initial_url=requests[0][0]
         )
         try:
-            page = find_or_open_page(context, url)
-            ready = wait_for_wps_ready(page, log, timeout_seconds=120)
-            if not ready.get("ready"):
-                raise RuntimeError(
-                    "WPSOpenApi was not ready after waiting. "
-                    f"Current page: {ready.get('title')} {ready.get('url')}"
-                )
-            script = """
-            async ({sheetName, rangeText}) => {
-              const app = window.WPSOpenApi.EtApplication();
+            script = "async (payload) => {" + WPS_APPLICATION_GUARD + """
+              const {sheetName, rangeText} = payload;
               const sheet = await app.Worksheets(sheetName);
               const range = await sheet.Range(rangeText);
               return await range.Value;
             }
             """
-            raw = None
-            last_error: Exception | None = None
-            for attempt in range(1, 4):
-                try:
-                    if attempt > 1:
-                        wait_for_wps_ready(page, log, timeout_seconds=60)
-                    raw = page.evaluate(script, {"sheetName": sheet_name, "rangeText": range_text})
-                    break
-                except Exception as exc:
-                    last_error = exc
-                    if "Execution context was destroyed" not in str(exc) and "navigation" not in str(exc).lower():
-                        raise
-                    page.wait_for_timeout(1500)
-            if raw is None and last_error is not None:
-                raise RuntimeError(f"Read source range failed after retries: {last_error}")
-            matrix = coerce_wps_matrix(raw, rows, cols)
-            return [[normalize_cell_value(cell) for cell in row] for row in matrix]
+            results = []
+            for url, sheet_name, range_text, rows, cols in requests:
+                page = find_or_open_page(context, url)
+                raw = evaluate_wps_operation(
+                    page, script, {"sheetName": sheet_name, "rangeText": range_text}, log, 120
+                )
+                matrix = coerce_wps_matrix(raw, rows, cols)
+                results.append([[normalize_cell_value(cell) for cell in row] for row in matrix])
+            return results
         finally:
             if close_context:
                 context.close()
@@ -1155,14 +1581,14 @@ class MappingDialog(tk.Toplevel):
         }
 
         labels = [
-            ("KDocs URL", "kdocs_url"),
-            ("Local file", "local_file"),
-            ("Local sheet", "source_sheet"),
-            ("Local start cell", "source_start"),
-            ("Local end cell", "source_end"),
-            ("Online sheet", "target_sheet"),
-            ("Online start cell", "target_start"),
-            ("Online end cell", "target_end"),
+            ("目标表格链接", "kdocs_url"),
+            ("本地文件", "local_file"),
+            ("来源工作表", "source_sheet"),
+            ("来源起始单元格", "source_start"),
+            ("来源结束单元格", "source_end"),
+            ("目标工作表", "target_sheet"),
+            ("目标起始单元格", "target_start"),
+            ("目标结束单元格", "target_end"),
         ]
         for row, (label, key) in enumerate(labels):
             ttk.Label(self, text=label).grid(row=row, column=0, padx=10, pady=6, sticky="w")
@@ -1184,17 +1610,17 @@ class MappingDialog(tk.Toplevel):
             if key == "local_file":
                 button_frame = ttk.Frame(self)
                 button_frame.grid(row=row, column=2, padx=10, pady=6)
-                ttk.Button(button_frame, text="Browse", command=self.browse_local_file).pack(side="left")
-                ttk.Button(button_frame, text="Refresh sheets", command=self.refresh_local_sheets).pack(side="left", padx=(6, 0))
+                ttk.Button(button_frame, text="选择文件", command=self.browse_local_file).pack(side="left")
+                ttk.Button(button_frame, text="刷新工作表", command=self.refresh_local_sheets).pack(side="left", padx=(6, 0))
             elif key == "target_sheet":
-                ttk.Button(self, text="Refresh online sheets", command=self.refresh_online_sheets).grid(
+                ttk.Button(self, text="刷新目标工作表", command=self.refresh_online_sheets).grid(
                     row=row, column=2, padx=10, pady=6
                 )
 
         button_frame = ttk.Frame(self)
         button_frame.grid(row=len(labels), column=0, columnspan=3, padx=10, pady=10, sticky="e")
-        ttk.Button(button_frame, text="OK", command=self.on_ok).pack(side="left", padx=4)
-        ttk.Button(button_frame, text="Cancel", command=self.destroy).pack(side="left", padx=4)
+        ttk.Button(button_frame, text="确定", command=self.on_ok).pack(side="left", padx=4)
+        ttk.Button(button_frame, text="取消", command=self.destroy).pack(side="left", padx=4)
 
         self.bind("<Return>", lambda _event: self.on_ok())
         self.bind("<Escape>", lambda _event: self.destroy())
@@ -1229,7 +1655,7 @@ class MappingDialog(tk.Toplevel):
                 row.target_end,
             ]
         ):
-            messagebox.showerror("Invalid mapping", "All mapping fields are required.", parent=self)
+            messagebox.showerror("信息未填完整", "请填写来源文件、目标表格链接及两边的工作表和单元格范围。", parent=self)
             return
         self.result = row
         self.destroy()
@@ -1237,8 +1663,8 @@ class MappingDialog(tk.Toplevel):
     def browse_local_file(self) -> None:
         path = filedialog.askopenfilename(
             parent=self,
-            title="Choose Excel file for this mapping",
-            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            title="选择来源表格文件",
+            filetypes=[("表格文件", "*.xlsx"), ("所有文件", "*.*")],
         )
         if path:
             self.vars["local_file"].set(path)
@@ -1256,7 +1682,7 @@ class MappingDialog(tk.Toplevel):
         except Exception as exc:
             self.local_sheet_combo.configure(values=[])
             if show_errors:
-                messagebox.showerror("Read sheets failed", str(exc), parent=self)
+                messagebox.showerror("读取工作表失败", str(exc), parent=self)
             return
         self.local_sheet_combo.configure(values=names)
         current = self.vars["source_sheet"].get().strip()
@@ -1270,7 +1696,7 @@ class MappingDialog(tk.Toplevel):
         if not url:
             if auto:
                 return
-            messagebox.showerror("Missing URL", "KDocs URL is required before reading online sheets.", parent=self)
+            messagebox.showerror("请填写表格链接", "请先填写目标表格链接，再刷新工作表。", parent=self)
             return
         if auto and url == self.last_online_sheet_url:
             return
@@ -1279,7 +1705,7 @@ class MappingDialog(tk.Toplevel):
         except Exception as exc:
             self.online_sheet_combo.configure(values=[])
             self.last_online_sheet_url = ""
-            messagebox.showerror("Read online sheets failed", str(exc), parent=self)
+            messagebox.showerror("读取目标工作表失败", str(exc), parent=self)
             return
         self.online_sheet_combo.configure(values=names)
         self.last_online_sheet_url = url
@@ -1312,12 +1738,12 @@ class RegionDialog(tk.Toplevel):
         }
 
         labels = [
-            ("Source sheet", "source_sheet"),
-            ("Source start cell", "source_start"),
-            ("Source end cell", "source_end"),
-            ("Online sheet", "target_sheet"),
-            ("Online start cell", "target_start"),
-            ("Online end cell", "target_end"),
+            ("来源工作表", "source_sheet"),
+            ("来源起始单元格", "source_start"),
+            ("来源结束单元格", "source_end"),
+            ("目标工作表", "target_sheet"),
+            ("目标起始单元格", "target_start"),
+            ("目标结束单元格", "target_end"),
         ]
         for row, (label, key) in enumerate(labels):
             ttk.Label(self, text=label).grid(row=row, column=0, padx=10, pady=6, sticky="w")
@@ -1337,8 +1763,8 @@ class RegionDialog(tk.Toplevel):
 
         button_frame = ttk.Frame(self)
         button_frame.grid(row=len(labels), column=0, columnspan=2, padx=10, pady=10, sticky="e")
-        ttk.Button(button_frame, text="OK", command=self.on_ok).pack(side="left", padx=4)
-        ttk.Button(button_frame, text="Cancel", command=self.destroy).pack(side="left", padx=4)
+        ttk.Button(button_frame, text="确定", command=self.on_ok).pack(side="left", padx=4)
+        ttk.Button(button_frame, text="取消", command=self.destroy).pack(side="left", padx=4)
 
         self.bind("<Return>", lambda _event: self.on_ok())
         self.bind("<Escape>", lambda _event: self.destroy())
@@ -1359,7 +1785,7 @@ class RegionDialog(tk.Toplevel):
             target_end=self.vars["target_end"].get().strip(),
         )
         if not all([row.source_sheet, row.source_start, row.source_end, row.target_sheet, row.target_start, row.target_end]):
-            messagebox.showerror("Invalid region", "All region fields are required.", parent=self)
+            messagebox.showerror("写入区域未填完整", "请填写来源和目标的工作表、起始单元格及结束单元格。", parent=self)
             return
         self.result = row
         self.destroy()
@@ -1424,14 +1850,20 @@ class DocumentConfigDialog(tk.Toplevel):
         self.target_doc_title = tk.StringVar(value="")
         cached_sheet_count = len(self.online_sheets)
         cached_status = (
-            f"Using {cached_sheet_count} sheet name(s) from the saved config; "
-            "refresh online only if the document changed."
+            f"已载入配置中保存的 {cached_sheet_count} 个工作表名称；"
+            "如表格有变动，请刷新工作表。"
             if cached_sheet_count
             else ""
         )
         self.read_status = tk.StringVar(value=cached_status)
 
         self.create_widgets()
+        # Editing an existing configuration should immediately restore the
+        # target document title and current sheet list. The read is asynchronous
+        # and managed mode uses the saved profile in headless Chrome, so the
+        # dialog remains responsive and no browser window is shown.
+        if initial is not None and default_url:
+            self.refresh_online_sheets(auto=True)
         if self.source_type.get() == "excel":
             self.refresh_local_sheets(show_errors=False)
 
@@ -1448,70 +1880,70 @@ class DocumentConfigDialog(tk.Toplevel):
         root.columnconfigure(0, weight=1)
         root.rowconfigure(1, weight=1)
 
-        docs = ttk.LabelFrame(root, text="Documents")
+        docs = ttk.LabelFrame(root, text="来源与目标")
         docs.grid(row=0, column=0, sticky="ew")
-        ttk.Label(docs, text="Name").grid(row=0, column=0, padx=8, pady=6, sticky="w")
+        ttk.Label(docs, text="配置名称").grid(row=0, column=0, padx=8, pady=6, sticky="w")
         ttk.Entry(docs, textvariable=self.config_name).grid(row=0, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
 
-        ttk.Label(docs, text="Source type").grid(row=1, column=0, padx=8, pady=6, sticky="w")
+        ttk.Label(docs, text="数据来源").grid(row=1, column=0, padx=8, pady=6, sticky="w")
         source_frame = ttk.Frame(docs)
         source_frame.grid(row=1, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
-        ttk.Radiobutton(source_frame, text="Local Excel", variable=self.source_type, value="excel").pack(side="left")
-        ttk.Radiobutton(source_frame, text="KDocs document", variable=self.source_type, value="kdocs").pack(side="left", padx=(16, 0))
+        ttk.Radiobutton(source_frame, text="本地表格", variable=self.source_type, value="excel").pack(side="left")
+        ttk.Radiobutton(source_frame, text="金山文档", variable=self.source_type, value="kdocs").pack(side="left", padx=(16, 0))
 
-        ttk.Label(docs, text="Source KDocs URL").grid(row=2, column=0, padx=8, pady=6, sticky="w")
+        ttk.Label(docs, text="来源表格链接").grid(row=2, column=0, padx=8, pady=6, sticky="w")
         source_url_combo = ttk.Combobox(docs, textvariable=self.source_url, values=self.recent_urls)
         source_url_combo.grid(row=2, column=1, padx=8, pady=6, sticky="ew")
         self.refresh_source_button = ttk.Button(
-            docs, text="Refresh source sheets", command=self.refresh_local_sheets
+            docs, text="刷新来源工作表", command=self.refresh_local_sheets
         )
         self.refresh_source_button.grid(row=2, column=2, padx=8, pady=6)
 
-        ttk.Label(docs, text="Target KDocs URL").grid(row=3, column=0, padx=8, pady=6, sticky="w")
+        ttk.Label(docs, text="目标表格链接").grid(row=3, column=0, padx=8, pady=6, sticky="w")
         url_combo = ttk.Combobox(docs, textvariable=self.kdocs_url, values=self.recent_urls)
         url_combo.grid(row=3, column=1, padx=8, pady=6, sticky="ew")
         self.refresh_target_button = ttk.Button(
-            docs, text="Refresh target sheets", command=self.refresh_online_sheets
+            docs, text="刷新目标工作表", command=self.refresh_online_sheets
         )
         self.refresh_target_button.grid(row=3, column=2, padx=8, pady=6)
 
-        ttk.Label(docs, text="Source document").grid(row=4, column=0, padx=8, pady=6, sticky="w")
+        ttk.Label(docs, text="来源表格名称").grid(row=4, column=0, padx=8, pady=6, sticky="w")
         ttk.Entry(docs, textvariable=self.source_doc_title, state="readonly").grid(row=4, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
 
-        ttk.Label(docs, text="Target document").grid(row=5, column=0, padx=8, pady=6, sticky="w")
+        ttk.Label(docs, text="目标表格名称").grid(row=5, column=0, padx=8, pady=6, sticky="w")
         ttk.Entry(docs, textvariable=self.target_doc_title, state="readonly").grid(row=5, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
 
-        ttk.Label(docs, text="Local file").grid(row=6, column=0, padx=8, pady=6, sticky="w")
+        ttk.Label(docs, text="本地文件").grid(row=6, column=0, padx=8, pady=6, sticky="w")
         ttk.Entry(docs, textvariable=self.local_file).grid(row=6, column=1, padx=8, pady=6, sticky="ew")
         file_buttons = ttk.Frame(docs)
         file_buttons.grid(row=6, column=2, padx=8, pady=6)
-        ttk.Button(file_buttons, text="Browse", command=self.browse_local_file).pack(side="left")
-        ttk.Button(file_buttons, text="Refresh sheets", command=self.refresh_local_sheets).pack(side="left", padx=(6, 0))
+        ttk.Button(file_buttons, text="选择文件", command=self.browse_local_file).pack(side="left")
+        ttk.Button(file_buttons, text="刷新工作表", command=self.refresh_local_sheets).pack(side="left", padx=(6, 0))
         ttk.Label(docs, textvariable=self.read_status, style="Muted.TLabel").grid(
             row=7, column=0, columnspan=3, padx=8, pady=(0, 6), sticky="w"
         )
         docs.columnconfigure(1, weight=1)
 
-        regions_frame = ttk.LabelFrame(root, text="Regions")
+        regions_frame = ttk.LabelFrame(root, text="写入区域")
         regions_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
         toolbar = ttk.Frame(regions_frame)
         toolbar.pack(fill="x", padx=8, pady=(8, 0))
-        ttk.Button(toolbar, text="Add region", command=self.add_region).pack(side="left")
-        ttk.Button(toolbar, text="Edit", command=self.edit_region).pack(side="left", padx=8)
-        ttk.Button(toolbar, text="Copy", command=self.copy_region).pack(side="left")
-        ttk.Button(toolbar, text="Remove", command=self.remove_region).pack(side="left", padx=8)
+        ttk.Button(toolbar, text="添加区域", command=self.add_region).pack(side="left")
+        ttk.Button(toolbar, text="编辑", command=self.edit_region).pack(side="left", padx=8)
+        ttk.Button(toolbar, text="复制", command=self.copy_region).pack(side="left")
+        ttk.Button(toolbar, text="删除", command=self.remove_region).pack(side="left", padx=8)
 
         tree_frame = ttk.Frame(regions_frame)
         tree_frame.pack(fill="both", expand=True, padx=8, pady=8)
         columns = ("source_sheet", "source_start", "source_end", "target_sheet", "target_start", "target_end")
         self.region_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=10)
         for key, label, width in [
-            ("source_sheet", "Source sheet", 180),
-            ("source_start", "Source start", 100),
-            ("source_end", "Source end", 100),
-            ("target_sheet", "Online sheet", 180),
-            ("target_start", "Online start", 100),
-            ("target_end", "Online end", 100),
+            ("source_sheet", "来源工作表", 180),
+            ("source_start", "来源起始单元格", 100),
+            ("source_end", "来源结束单元格", 100),
+            ("target_sheet", "目标工作表", 180),
+            ("target_start", "目标起始单元格", 100),
+            ("target_end", "目标结束单元格", 100),
         ]:
             self.region_tree.heading(key, text=label)
             self.region_tree.column(key, width=width)
@@ -1523,15 +1955,15 @@ class DocumentConfigDialog(tk.Toplevel):
 
         button_frame = ttk.Frame(root)
         button_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(button_frame, text="OK", command=self.on_ok).pack(side="right", padx=4)
-        ttk.Button(button_frame, text="Cancel", command=self.destroy).pack(side="right", padx=4)
+        ttk.Button(button_frame, text="保存配置", command=self.on_ok).pack(side="right", padx=4)
+        ttk.Button(button_frame, text="取消", command=self.destroy).pack(side="right", padx=4)
         self.refresh_regions()
 
     def browse_local_file(self) -> None:
         path = filedialog.askopenfilename(
             parent=self,
-            title="Choose Excel file",
-            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            title="选择来源表格文件",
+            filetypes=[("表格文件", "*.xlsx"), ("所有文件", "*.*")],
         )
         if path:
             self.local_file.set(path)
@@ -1544,7 +1976,7 @@ class DocumentConfigDialog(tk.Toplevel):
                 self.local_sheets = []
                 self.source_doc_title.set("")
                 if show_errors:
-                    messagebox.showerror("Missing URL", "Source KDocs URL is required.", parent=self)
+                    messagebox.showerror("请填写表格链接", "请填写来源表格链接。", parent=self)
                 return
             self._start_online_read("source", url, show_errors)
             return
@@ -1563,14 +1995,14 @@ class DocumentConfigDialog(tk.Toplevel):
         except Exception as exc:
             self.local_sheets = []
             if show_errors:
-                messagebox.showerror("Read source sheets failed", str(exc), parent=self)
+                messagebox.showerror("读取来源工作表失败", str(exc), parent=self)
 
     def refresh_online_sheets(self, auto: bool = False) -> None:
         url = self.kdocs_url.get().strip()
         if not url:
             if auto:
                 return
-            messagebox.showerror("Missing URL", "KDocs URL is required before reading online sheets.", parent=self)
+            messagebox.showerror("请填写表格链接", "请先填写目标表格链接，再刷新工作表。", parent=self)
             return
         if auto and url == self.last_online_sheet_url:
             return
@@ -1587,10 +2019,10 @@ class DocumentConfigDialog(tk.Toplevel):
         button = self.refresh_source_button if kind == "source" else self.refresh_target_button
         button.configure(state="disabled")
         if kind == "source":
-            self.source_doc_title.set("Loading...")
+            self.source_doc_title.set("正在读取…")
         else:
-            self.target_doc_title.set("Loading...")
-        self.read_status.set("Reading WPS document in the browser; this window remains usable...")
+            self.target_doc_title.set("正在读取…")
+        self.read_status.set("正在后台读取表格，您可以继续编辑配置…")
 
         # Keep the worker independent from this Toplevel. A browser read can outlive
         # the dialog, and retaining ``self`` from that thread lets Tk variables be
@@ -1658,15 +2090,14 @@ class DocumentConfigDialog(tk.Toplevel):
             button.configure(state="normal")
             if error is not None:
                 if kind == "source":
-                    self.local_sheets = []
-                    self.source_doc_title.set("")
-                    title = "Read source sheets failed"
+                    self.source_doc_title.set("读取失败")
+                    title = "读取来源工作表失败"
                 else:
-                    self.online_sheets = []
-                    self.target_doc_title.set("")
+                    self.target_doc_title.set("读取失败")
                     self.last_online_sheet_url = ""
-                    title = "Read online sheets failed"
-                self.read_status.set("WPS document read failed; use Refresh to try again.")
+                    title = "读取目标工作表失败"
+                self.read_status.set("读取失败，已保留原有工作表配置。请刷新重试或检查浏览器登录状态。")
+                self.log(f"{title}：{error}")
                 if show_errors:
                     messagebox.showerror(title, error, parent=self)
                 continue
@@ -1680,13 +2111,13 @@ class DocumentConfigDialog(tk.Toplevel):
                 self.online_sheets = sheets
                 self.target_doc_title.set(document_title)
                 self.last_online_sheet_url = url
-            self.read_status.set(f"Loaded {len(sheets)} sheet(s) from WPS.")
+            self.read_status.set(f"已读取 {len(sheets)} 个工作表。")
 
         if self._pending_online_reads:
             self._online_poll_after_id = self.after(50, self._drain_online_results)
 
     def add_region(self) -> None:
-        dialog = RegionDialog(self, "Add region", local_sheets=self.local_sheets, online_sheets=self.online_sheets)
+        dialog = RegionDialog(self, "添加区域", local_sheets=self.local_sheets, online_sheets=self.online_sheets)
         if dialog.result:
             self.regions.append(dialog.result)
             self.refresh_regions()
@@ -1699,7 +2130,7 @@ class DocumentConfigDialog(tk.Toplevel):
         index = self.region_tree.index(selected[0])
         dialog = RegionDialog(
             self,
-            "Edit region",
+            "编辑写入区域",
             self.regions[index],
             local_sheets=self.local_sheets,
             online_sheets=self.online_sheets,
@@ -1712,7 +2143,7 @@ class DocumentConfigDialog(tk.Toplevel):
     def copy_region(self) -> None:
         selected = self.region_tree.selection()
         if not selected:
-            messagebox.showinfo("Copy region", "Select one region row to copy.", parent=self)
+            messagebox.showinfo("复制写入区域", "请先选择要复制的写入区域。", parent=self)
             return
         index = self.region_tree.index(selected[0])
         source = self.regions[index]
@@ -1738,8 +2169,8 @@ class DocumentConfigDialog(tk.Toplevel):
             return
         count = len(selected)
         if not messagebox.askyesno(
-            "Confirm remove",
-            f"Remove {count} selected region(s)?",
+            "确认删除",
+            f"确定删除选中的 {count} 个写入区域吗？",
             parent=self,
         ):
             return
@@ -1759,7 +2190,7 @@ class DocumentConfigDialog(tk.Toplevel):
             return None
         if source_type == "kdocs" and not source_url:
             return None
-        name = self.config_name.get().strip() or Path(local_file).stem or "Config"
+        name = self.config_name.get().strip() or Path(local_file).stem or "未命名配置"
         return DocumentConfig(
             name=name,
             kdocs_url=kdocs_url,
@@ -1800,18 +2231,18 @@ class DocumentConfigDialog(tk.Toplevel):
         source_type = self.source_type.get()
         source_url = self.source_url.get().strip()
         if not kdocs_url:
-            messagebox.showerror("Invalid config", "Target KDocs URL is required.", parent=self)
+            messagebox.showerror("配置未填完整", "请填写目标表格链接。", parent=self)
             return
         if source_type == "excel" and not local_file:
-            messagebox.showerror("Invalid config", "Local file is required.", parent=self)
+            messagebox.showerror("配置未填完整", "请选择本地表格文件。", parent=self)
             return
         if source_type == "kdocs" and not source_url:
-            messagebox.showerror("Invalid config", "Source KDocs URL is required.", parent=self)
+            messagebox.showerror("配置未填完整", "请填写来源表格链接。", parent=self)
             return
         if not self.regions:
-            messagebox.showerror("Invalid config", "Add at least one region.", parent=self)
+            messagebox.showerror("配置未填完整", "请至少添加一个写入区域。", parent=self)
             return
-        name = self.config_name.get().strip() or Path(local_file).stem or "Config"
+        name = self.config_name.get().strip() or Path(local_file).stem or "未命名配置"
         self.result = DocumentConfig(
             name=name,
             kdocs_url=kdocs_url,
@@ -1830,22 +2261,26 @@ class WpsWriterFrame(ttk.Frame):
         super().__init__(parent)
         self.task_registry = task_registry
         self.log_queue: queue.Queue[str] = queue.Queue()
-        self.browser_event_queue: queue.Queue[tuple[bool, str]] = queue.Queue()
+        self.browser_event_queue: queue.Queue[tuple[bool, str, bool]] = queue.Queue()
+        self.login_event_queue: queue.Queue[tuple[str, str, WpsLoginStatus]] = queue.Queue()
         self.worker: threading.Thread | None = None
         self.browser_worker: threading.Thread | None = None
         self.configs: list[DocumentConfig] = []
-        self.log_window: tk.Toplevel | None = None
-        self.log_window_text: tk.Text | None = None
         self._drain_after_id: str | None = None
+        self._login_poll_after_id: str | None = None
 
         self.recent_urls: list[str] = []
         self.browser_mode = tk.StringVar(master=self, value="managed_cdp")
         self.cdp_url = tk.StringVar(master=self, value="http://127.0.0.1:9222")
-        self.browser_status = tk.StringVar(master=self, value="Dedicated WPS Chrome not checked")
+        self.browser_status = tk.StringVar(master=self, value="尚未检查浏览器连接")
+        self.login_status = tk.StringVar(master=self, value="尚未检查")
 
         self.create_widgets()
         self.load_initial_config()
         self.schedule_drain_logs()
+        self.bind("<Map>", self._schedule_login_check, add="+")
+        self.browser_mode.trace_add("write", self._invalidate_login_status)
+        self.cdp_url.trace_add("write", self._invalidate_login_status)
 
     def create_widgets(self) -> None:
         root = ttk.Frame(self, padding=10)
@@ -1854,143 +2289,181 @@ class WpsWriterFrame(ttk.Frame):
         root.rowconfigure(1, weight=4, minsize=DOCUMENT_CONFIGS_MIN_HEIGHT)
         root.rowconfigure(2, weight=1)
 
-        file_frame = ttk.LabelFrame(root, text="Browser")
+        file_frame = ttk.LabelFrame(root, text="浏览器连接")
         file_frame.grid(row=0, column=0, sticky="ew")
 
-        ttk.Label(file_frame, text="Browser mode").grid(row=0, column=0, padx=8, pady=8, sticky="w")
+        ttk.Label(file_frame, text="连接方式").grid(row=0, column=0, padx=8, pady=8, sticky="w")
         mode_frame = ttk.Frame(file_frame)
         mode_frame.grid(row=0, column=1, padx=8, pady=8, sticky="ew")
         ttk.Radiobutton(
             mode_frame,
-            text="Dedicated WPS Chrome (recommended)",
+            text="WPS 专用浏览器（推荐）",
             variable=self.browser_mode,
             value="managed_cdp",
         ).pack(side="left")
         ttk.Radiobutton(
             mode_frame,
-            text="One-time browser",
+            text="临时浏览器",
             variable=self.browser_mode,
             value="persistent",
         ).pack(side="left", padx=(16, 0))
         ttk.Radiobutton(
             mode_frame,
-            text="Existing Chrome CDP",
+            text="连接已打开的浏览器",
             variable=self.browser_mode,
             value="cdp",
         ).pack(side="left", padx=(16, 0))
 
-        ttk.Label(file_frame, text="CDP URL").grid(row=1, column=0, padx=8, pady=8, sticky="w")
+        ttk.Label(file_frame, text="浏览器连接地址").grid(row=1, column=0, padx=8, pady=8, sticky="w")
         ttk.Entry(file_frame, textvariable=self.cdp_url).grid(row=1, column=1, padx=8, pady=8, sticky="ew")
         browser_actions = ttk.Frame(file_frame)
         browser_actions.grid(row=2, column=1, padx=8, pady=(0, 8), sticky="ew")
         self.start_browser_button = ttk.Button(
             browser_actions,
-            text="Start/open dedicated Chrome",
+            text="登录 WPS",
             command=self.start_wps_browser,
         )
         self.start_browser_button.pack(side="left")
         self.check_browser_button = ttk.Button(
             browser_actions,
-            text="Check status",
+            text="刷新登录状态",
             command=self.check_wps_browser,
         )
         self.check_browser_button.pack(side="left", padx=(8, 0))
         ttk.Label(browser_actions, textvariable=self.browser_status, style="Muted.TLabel").pack(
             side="left", padx=(12, 0)
         )
+        ttk.Label(file_frame, text="WPS 登录状态").grid(
+            row=3, column=0, padx=8, pady=(0, 8), sticky="w"
+        )
+        self.login_status_label = ttk.Label(
+            file_frame, textvariable=self.login_status, wraplength=600
+        )
+        self.login_status_label.grid(row=3, column=1, padx=8, pady=(0, 8), sticky="w")
+        login_hint = ttk.Label(
+            file_frame,
+            text="首次使用或更换电脑后，请先登录。完成登录后，状态会自动刷新。",
+            style="Muted.TLabel", wraplength=600,
+        )
+        login_hint.grid(row=4, column=0, columnspan=2, padx=8, pady=(0, 8), sticky="w")
+        file_frame.bind("<Configure>", lambda event: (
+            self.login_status_label.configure(wraplength=max(160, event.width - 150)),
+            login_hint.configure(wraplength=max(240, event.width - 24)),
+        ))
         file_frame.columnconfigure(1, weight=1)
 
-        mapping_frame = ttk.LabelFrame(root, text="Document configs")
+        mapping_frame = ttk.LabelFrame(root, text="写入配置")
         mapping_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        mapping_frame.columnconfigure(0, weight=1)
+        mapping_frame.rowconfigure(1, weight=1)
 
         self.mapping_toolbar = ttk.Frame(mapping_frame)
-        self.mapping_toolbar.pack(fill="x", padx=8, pady=(8, 0))
-        self.mapping_toolbar.columnconfigure(0, weight=1)
+        self.mapping_toolbar.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 0))
+        self.mapping_toolbar.columnconfigure(2, weight=1)
 
         self.mapping_primary_toolbar = ttk.Frame(self.mapping_toolbar)
         self.mapping_primary_toolbar.grid(row=0, column=0, sticky="w")
         primary_actions = [
-            ("Add config", self.add_config),
-            ("Edit", self.edit_config),
-            ("Copy", self.copy_config),
-            ("Remove", self.remove_config),
+            ("添加配置", self.add_config),
+            ("编辑", self.edit_config),
+            ("复制", self.copy_config),
+            ("删除", self.remove_config),
         ]
         for column, (text, command) in enumerate(primary_actions):
             ttk.Button(
                 self.mapping_primary_toolbar,
                 text=text,
                 command=command,
+                width=0,
             ).grid(row=0, column=column, padx=(0 if column == 0 else 4, 0))
 
         self.mapping_sort_toolbar = ttk.Frame(self.mapping_toolbar)
         self.mapping_sort_toolbar.grid(
-            row=1, column=1, sticky="e", padx=(12, 0), pady=(6, 0)
+            row=0, column=3, sticky="e", padx=(12, 0)
         )
         ttk.Button(
-            self.mapping_sort_toolbar, text="Move up", command=self.move_config_up
+            self.mapping_sort_toolbar, text="上移", command=self.move_config_up, width=0
         ).pack(side="left")
         ttk.Button(
-            self.mapping_sort_toolbar, text="Move down", command=self.move_config_down
+            self.mapping_sort_toolbar, text="下移", command=self.move_config_down, width=0
         ).pack(side="left", padx=(4, 0))
 
         self.mapping_secondary_toolbar = ttk.Frame(self.mapping_toolbar)
         self.mapping_secondary_toolbar.grid(
-            row=1, column=0, sticky="w", pady=(6, 0)
+            row=0, column=1, sticky="w", padx=(12, 0)
         )
         ttk.Button(
-            self.mapping_secondary_toolbar, text="Import", command=self.import_config
+            self.mapping_secondary_toolbar, text="导入", command=self.import_config, width=0
         ).pack(side="left")
         ttk.Button(
-            self.mapping_secondary_toolbar, text="Export", command=self.export_config
+            self.mapping_secondary_toolbar, text="导出", command=self.export_config, width=0
         ).pack(side="left", padx=(4, 0))
 
         tree_frame = ttk.Frame(mapping_frame)
-        tree_frame.pack(fill="both", expand=True, padx=8, pady=8)
+        tree_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
 
         columns = ("name", "source_type", "source", "kdocs_url", "region_count", "summary")
         self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=8)
-        self.tree.heading("name", text="Name")
-        self.tree.heading("source_type", text="Source")
-        self.tree.heading("source", text="Source file/URL")
-        self.tree.heading("kdocs_url", text="Target KDocs URL")
-        self.tree.heading("region_count", text="Regions")
-        self.tree.heading("summary", text="First region")
-        self.tree.column("name", width=180)
-        self.tree.column("source_type", width=90)
-        self.tree.column("source", width=280)
-        self.tree.column("kdocs_url", width=280)
-        self.tree.column("region_count", width=80)
-        self.tree.column("summary", width=330)
-        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.heading("name", text="配置名称")
+        self.tree.heading("source_type", text="数据来源")
+        self.tree.heading("source", text="来源文件或链接")
+        self.tree.heading("kdocs_url", text="目标表格链接")
+        self.tree.heading("region_count", text="区域数量")
+        self.tree.heading("summary", text="首个写入区域")
+        # Match the reference image: compact names/counts, wider source and summary.
+        column_widths = (145, 115, 470, 320, 125, 495)
+        for column, width in zip(columns, column_widths):
+            self.tree.heading(column, anchor="center")
+            self.tree.column(column, width=width // 2, anchor="center", stretch=False)
+
+        def resize_config_columns(event) -> None:
+            # Keep all six columns visible at normal sizes, with horizontal
+            # scrolling available when the window is too narrow.
+            available = max(840, event.width - 2)
+            remaining = available
+            for index, (column, width) in enumerate(zip(columns, column_widths)):
+                actual_width = (
+                    remaining if index == len(columns) - 1
+                    else round(available * width / sum(column_widths))
+                )
+                self.tree.column(column, width=actual_width)
+                remaining -= actual_width
+
+        self.tree.bind("<Configure>", resize_config_columns)
+        self.tree.grid(row=0, column=0, sticky="nsew")
 
         scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
-        scrollbar.pack(side="left", fill="y")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        horizontal_scrollbar = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.tree.xview)
+        horizontal_scrollbar.grid(row=1, column=0, sticky="ew")
+        self.tree.configure(xscrollcommand=horizontal_scrollbar.set)
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.bind("<Double-1>", lambda _event: self.edit_config())
         self.tree.bind("<<TreeviewSelect>>", lambda _event: self.update_selection_status())
 
         self.execution_toolbar = ttk.Frame(mapping_frame)
-        self.execution_toolbar.pack(fill="x", padx=8, pady=(0, 8))
-        self.selection_status = tk.StringVar(value="Select a config to preview or write.")
+        self.execution_toolbar.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
+        self.selection_status = tk.StringVar(value="请先选择配置，再预览或写入。")
         ttk.Label(
             self.execution_toolbar,
             textvariable=self.selection_status,
             style="Muted.TLabel",
         ).pack(side="left")
         ttk.Button(
-            self.execution_toolbar, text="Write to WPS", command=self.write
+            self.execution_toolbar, text="开始写入", command=self.write, style="Primary.TButton"
         ).pack(side="right")
         ttk.Button(
-            self.execution_toolbar, text="Preview", command=self.preview
+            self.execution_toolbar, text="预览", command=self.preview
         ).pack(side="right", padx=(0, 6))
 
-        self.module_log_frame = ttk.LabelFrame(root, text="WPS operation log")
+        self.module_log_frame = ttk.LabelFrame(root, text="操作日志")
         self.module_log_frame.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
         log_actions = ttk.Frame(self.module_log_frame)
         log_actions.pack(fill="x", padx=8, pady=(8, 0))
-        ttk.Button(log_actions, text="Clear log", command=self.clear_log).pack(side="left")
-        ttk.Button(log_actions, text="Save log", command=self.save_log).pack(side="left", padx=8)
-        ttk.Button(log_actions, text="Open log window", command=self.open_log_window).pack(side="left")
+        ttk.Button(log_actions, text="清空日志", command=self.clear_log).pack(side="left")
+        ttk.Button(log_actions, text="保存日志", command=self.save_log).pack(side="left", padx=8)
         self.log_text = tk.Text(self.module_log_frame, height=8, wrap="word")
         self.log_text.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
         log_scroll = ttk.Scrollbar(
@@ -2002,7 +2475,7 @@ class WpsWriterFrame(ttk.Frame):
     def add_config(self) -> None:
         dialog = DocumentConfigDialog(
             self,
-            "Add config",
+            "添加配置",
             recent_urls=self.recent_urls,
             browser_mode=self.browser_mode.get(),
             cdp_url=self.cdp_url.get().strip(),
@@ -2019,9 +2492,6 @@ class WpsWriterFrame(ttk.Frame):
         if not selected:
             return
         index = self.tree.index(selected[0])
-        # Start (or reuse) the managed browser in parallel while the config
-        # dialog opens, and preload this config's target document.
-        self.start_wps_browser(initial_url=self.configs[index].kdocs_url)
 
         def autosave(config: DocumentConfig) -> None:
             self.configs[index] = config
@@ -2030,7 +2500,7 @@ class WpsWriterFrame(ttk.Frame):
 
         dialog = DocumentConfigDialog(
             self,
-            "Edit config",
+            "编辑配置",
             self.configs[index],
             recent_urls=self.recent_urls,
             browser_mode=self.browser_mode.get(),
@@ -2047,12 +2517,12 @@ class WpsWriterFrame(ttk.Frame):
     def copy_config(self) -> None:
         selected = self.tree.selection()
         if not selected:
-            messagebox.showinfo("Copy config", "Select one config row to copy.", parent=self)
+            messagebox.showinfo("复制配置", "请先选择要复制的配置。", parent=self)
             return
         index = self.tree.index(selected[0])
         source = self.configs[index]
         copied = DocumentConfig(
-            name=f"{source.name} Copy",
+            name=f"{source.name}（副本）",
             kdocs_url=source.kdocs_url,
             local_file=source.local_file,
             source_type=source.source_type,
@@ -2083,8 +2553,8 @@ class WpsWriterFrame(ttk.Frame):
             return
         count = len(selected)
         if not messagebox.askyesno(
-            "Confirm remove",
-            f"Remove {count} selected config(s)?",
+            "确认删除",
+            f"确定删除选中的 {count} 项配置吗？",
             parent=self,
         ):
             return
@@ -2136,11 +2606,11 @@ class WpsWriterFrame(ttk.Frame):
     def update_selection_status(self) -> None:
         indexes = self.selected_config_indexes()
         if not indexes:
-            self.selection_status.set("Select a config to preview or write.")
+            self.selection_status.set("请先选择配置，再预览或写入。")
         elif len(indexes) == 1:
-            self.selection_status.set(f"Selected: {self.configs[indexes[0]].name}")
+            self.selection_status.set(f"已选择：{self.configs[indexes[0]].name}")
         else:
-            self.selection_status.set(f"{len(indexes)} configs selected.")
+            self.selection_status.set(f"已选择 {len(indexes)} 项配置。")
 
     def refresh_tree(self) -> None:
         for item in self.tree.get_children():
@@ -2164,7 +2634,7 @@ class WpsWriterFrame(ttk.Frame):
                 "end",
                 values=(
                     config.name,
-                    "KDocs" if config.source_type == "kdocs" else "Excel",
+                    "金山文档" if config.source_type == "kdocs" else "本地表格",
                     config.source_url if config.source_type == "kdocs" else config.local_file,
                     config.kdocs_url,
                     len(config.regions),
@@ -2182,18 +2652,40 @@ class WpsWriterFrame(ttk.Frame):
         self.save_current_config()
         self._run_browser_action(start=True, initial_url=initial_url)
 
-    def check_wps_browser(self) -> None:
-        self._run_browser_action(start=False)
+    def check_wps_browser(self, *, quiet: bool = False) -> None:
+        self._run_browser_action(start=False, quiet=quiet)
+
+    def _invalidate_login_status(self, *_args) -> None:
+        self.login_status.set("尚未检查")
+        self.login_status_label.configure(foreground="#666666")
+
+    def _schedule_login_check(self, event) -> None:
+        if event.widget is self and self._login_poll_after_id is None:
+            # The toolbox also constructs this page during hidden warmup.
+            # Check only once it is visible, without delaying page creation.
+            self._login_poll_after_id = self.after(750, self._poll_login_status)
+
+    def _poll_login_status(self) -> None:
+        self._login_poll_after_id = None
+        if not self.winfo_ismapped():
+            return
+        if not (self.worker and self.worker.is_alive()):
+            self.check_wps_browser(quiet=True)
+        self._login_poll_after_id = self.after(LOGIN_STATUS_POLL_MS, self._poll_login_status)
 
     def _run_browser_action(
-        self, *, start: bool, initial_url: str | None = None
+        self, *, start: bool, initial_url: str | None = None, quiet: bool = False
     ) -> None:
         if self.browser_worker and self.browser_worker.is_alive():
             return
         self.start_browser_button.configure(state="disabled")
         self.check_browser_button.configure(state="disabled")
-        self.browser_status.set("Starting..." if start else "Checking...")
+        if not quiet:
+            self.browser_status.set("正在启动…" if start else "正在检查…")
+        if not quiet or self.login_status.get() == "尚未检查":
+            self.login_status.set("正在检查…")
         cdp_url = self.cdp_url.get().strip()
+        browser_mode = self.browser_mode.get()
 
         def worker() -> None:
             try:
@@ -2201,19 +2693,23 @@ class WpsWriterFrame(ttk.Frame):
                     result = ensure_wps_dedicated_chrome(
                         cdp_url,
                         self.log,
-                        initial_url=initial_url or "https://www.kdocs.cn/",
-                        preload_url=bool(initial_url),
+                        initial_url=initial_url or "https://www.kdocs.cn/latest",
+                        preload_url=True,
                     )
-                    action = "started" if result.get("started") else "reused"
-                    message = f"Dedicated WPS Chrome ready ({action})"
+                    action = "已启动" if result.get("started") else "已连接"
+                    message = f"专用浏览器{action}"
                 else:
-                    endpoint = try_resolve_cdp_endpoint(cdp_url)
-                    if not endpoint:
-                        raise RuntimeError("Dedicated WPS Chrome is not running")
-                    message = "Dedicated WPS Chrome is running and reachable"
-                self.browser_event_queue.put((True, message))
+                    message = "登录状态检查完成"
+                login = check_wps_login_status(
+                    browser_mode, cdp_url, (lambda _message: None) if quiet else self.log
+                )
+                self.login_event_queue.put((browser_mode, cdp_url, login))
+                self.browser_event_queue.put((True, message, quiet))
             except Exception as exc:
-                self.browser_event_queue.put((False, str(exc)))
+                self.login_event_queue.put((browser_mode, cdp_url, WpsLoginStatus(
+                    "unknown", "暂时无法确认，请检查网络或浏览器后刷新登录状态。"
+                )))
+                self.browser_event_queue.put((False, str(exc), quiet))
 
         self.browser_worker = self._start_tracked_thread(
             worker,
@@ -2270,13 +2766,27 @@ class WpsWriterFrame(ttk.Frame):
     def drain_logs(self) -> None:
         while True:
             try:
-                success, status = self.browser_event_queue.get_nowait()
+                browser_mode, cdp_url, login = self.login_event_queue.get_nowait()
             except queue.Empty:
                 break
-            self.browser_status.set(status)
+            if (browser_mode, cdp_url) != (self.browser_mode.get(), self.cdp_url.get().strip()):
+                continue
+            if self.login_status.get() != login.message:
+                self.log("WPS 登录状态：" + login.message)
+            self.login_status.set(login.message)
+            self.login_status_label.configure(foreground={
+                "logged_in": "#15803d", "logged_out": "#b45309", "unknown": "#666666",
+            }[login.state])
+        while True:
+            try:
+                success, status, quiet = self.browser_event_queue.get_nowait()
+            except queue.Empty:
+                break
             self.start_browser_button.configure(state="normal")
             self.check_browser_button.configure(state="normal")
-            self.log(("Browser ready: " if success else "Browser error: ") + status)
+            self.browser_status.set(status if success else "检查失败，请重试")
+            if not quiet:
+                self.log(status if success else "检查失败：" + status)
         while True:
             try:
                 message = self.log_queue.get_nowait()
@@ -2284,13 +2794,6 @@ class WpsWriterFrame(ttk.Frame):
                 break
             self.log_text.insert("end", f"{message}\n")
             self.log_text.see("end")
-            if self.log_window_text is not None:
-                try:
-                    self.log_window_text.insert("end", f"{message}\n")
-                    self.log_window_text.see("end")
-                except tk.TclError:
-                    self.log_window_text = None
-                    self.log_window = None
         self.schedule_drain_logs()
 
     def schedule_drain_logs(self) -> None:
@@ -2300,6 +2803,12 @@ class WpsWriterFrame(ttk.Frame):
             self._drain_after_id = None
 
     def destroy(self) -> None:
+        if self._login_poll_after_id is not None:
+            try:
+                self.after_cancel(self._login_poll_after_id)
+            except tk.TclError:
+                pass
+            self._login_poll_after_id = None
         if self._drain_after_id is not None:
             try:
                 self.after_cancel(self._drain_after_id)
@@ -2310,54 +2819,17 @@ class WpsWriterFrame(ttk.Frame):
 
     def clear_log(self) -> None:
         self.log_text.delete("1.0", "end")
-        if self.log_window_text is not None:
-            try:
-                self.log_window_text.delete("1.0", "end")
-            except tk.TclError:
-                self.log_window_text = None
-                self.log_window = None
 
     def save_log(self) -> None:
         path = filedialog.asksaveasfilename(
             parent=self,
-            title="Save run log",
+            title="保存操作日志",
             defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")],
         )
         if not path:
             return
         Path(path).write_text(self.log_text.get("1.0", "end"), encoding="utf-8")
-
-    def open_log_window(self) -> None:
-        if self.log_window is not None:
-            try:
-                self.log_window.lift()
-                self.log_window.focus()
-                return
-            except tk.TclError:
-                self.log_window = None
-                self.log_window_text = None
-
-        window = tk.Toplevel(self)
-        window.title("Run log monitor")
-        window.geometry("900x520")
-        center_window(window, 900, 520)
-        text = tk.Text(window, wrap="word")
-        text.pack(side="left", fill="both", expand=True)
-        scrollbar = ttk.Scrollbar(window, orient="vertical", command=text.yview)
-        scrollbar.pack(side="left", fill="y")
-        text.configure(yscrollcommand=scrollbar.set)
-        text.insert("end", self.log_text.get("1.0", "end"))
-        text.see("end")
-
-        def on_close() -> None:
-            self.log_window = None
-            self.log_window_text = None
-            window.destroy()
-
-        window.protocol("WM_DELETE_WINDOW", on_close)
-        self.log_window = window
-        self.log_window_text = text
 
     def load_initial_config(self) -> None:
         config = load_config()
@@ -2399,7 +2871,7 @@ class WpsWriterFrame(ttk.Frame):
                 )
             )
         return DocumentConfig(
-            name=row.get("name", "") or Path(row.get("local_file", "")).stem or "Config",
+            name=row.get("name", "") or Path(row.get("local_file", "")).stem or "未命名配置",
             kdocs_url=row.get("kdocs_url", ""),
             local_file=row.get("local_file", ""),
             regions=regions,
@@ -2451,7 +2923,7 @@ class WpsWriterFrame(ttk.Frame):
             )
         configs = []
         for index, ((kdocs_url, local_file), regions) in enumerate(grouped.items(), start=1):
-            name = Path(local_file).stem or f"Config {index}"
+            name = Path(local_file).stem or f"配置 {index}"
             configs.append(DocumentConfig(name=name, kdocs_url=kdocs_url, local_file=local_file, regions=regions))
         return configs
 
@@ -2500,8 +2972,8 @@ class WpsWriterFrame(ttk.Frame):
     def import_config(self) -> None:
         path_text = filedialog.askopenfilename(
             parent=self,
-            title="Import WPS writer config",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="导入写入配置",
+            filetypes=[("配置文件", "*.json"), ("所有文件", "*.*")],
         )
         if not path_text:
             return
@@ -2509,31 +2981,31 @@ class WpsWriterFrame(ttk.Frame):
             runtime_config = load_config_export(Path(path_text))
             self.apply_runtime_config(runtime_config)
         except Exception as exc:
-            messagebox.showerror("Import config failed", str(exc), parent=self)
-            self.log(f"ERROR: Import config failed: {exc}")
+            messagebox.showerror("导入配置失败", str(exc), parent=self)
+            self.log(f"导入配置失败：{exc}")
             return
-        self.log(f"Imported config: {Path(path_text).name}")
-        messagebox.showinfo("Import config", "Config imported and saved.", parent=self)
+        self.log(f"已导入配置：{Path(path_text).name}")
+        messagebox.showinfo("导入配置", "配置已导入并保存。", parent=self)
 
     def export_config(self) -> None:
-        default_name = f"wps_writer_config_export_{datetime.now().strftime('%Y%m%d')}.json"
+        default_name = f"写入配置_{datetime.now().strftime('%Y%m%d')}.json"
         path_text = filedialog.asksaveasfilename(
             parent=self,
-            title="Export WPS writer config",
+            title="导出写入配置",
             defaultextension=".json",
             initialfile=default_name,
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            filetypes=[("配置文件", "*.json"), ("所有文件", "*.*")],
         )
         if not path_text:
             return
         try:
             save_config_export(Path(path_text), self.current_runtime_config())
         except Exception as exc:
-            messagebox.showerror("Export config failed", str(exc), parent=self)
-            self.log(f"ERROR: Export config failed: {exc}")
+            messagebox.showerror("导出配置失败", str(exc), parent=self)
+            self.log(f"导出配置失败：{exc}")
             return
-        self.log(f"Exported config: {path_text}")
-        messagebox.showinfo("Export config", "Config exported.", parent=self)
+        self.log(f"配置已导出至：{path_text}")
+        messagebox.showinfo("导出配置", "配置已导出。", parent=self)
 
     def selected_config_indexes(self) -> list[int]:
         selected = self.tree.selection()
@@ -2562,7 +3034,7 @@ class WpsWriterFrame(ttk.Frame):
     def prepare_selected(self) -> list[PreparedMapping]:
         indexes = self.selected_config_indexes()
         if not indexes:
-            raise ValueError("Select at least one config before previewing or writing.")
+            raise ValueError("请先选择至少一项配置，再预览或写入。")
         configs = [self.configs[index] for index in indexes]
         return prepare_mappings(
             self.flatten_configs(configs),
@@ -2575,24 +3047,24 @@ class WpsWriterFrame(ttk.Frame):
         try:
             prepared = self.prepare_selected()
         except Exception as exc:
-            messagebox.showerror("Preview failed", str(exc), parent=self)
-            self.log(f"ERROR: Preview failed: {exc}")
+            messagebox.showerror("预览失败", str(exc), parent=self)
+            self.log(f"预览失败：{exc}")
             self.detail_log(f"PREVIEW ERROR: {exc}")
             self.detail_log(traceback.format_exc())
             return
         urls = len({item.kdocs_url for item in prepared})
         self.detail_log_prepared("PREVIEW OK", prepared)
-        self.log(f"Preview OK: {len(prepared)} region(s), {urls} target document(s).")
+        self.log(f"预览通过：共 {len(prepared)} 个写入区域，涉及 {urls} 份目标表格。")
 
     def write(self) -> None:
         if self.worker and self.worker.is_alive():
-            messagebox.showinfo("Busy", "A write task is already running.", parent=self)
+            messagebox.showinfo("正在写入", "写入任务正在进行，请等待完成。", parent=self)
             return
         try:
             prepared = self.prepare_selected()
         except Exception as exc:
-            messagebox.showerror("Write blocked", str(exc), parent=self)
-            self.log(f"ERROR: Write blocked: {exc}")
+            messagebox.showerror("暂时无法写入", str(exc), parent=self)
+            self.log(f"暂时无法写入：{exc}")
             self.detail_log(f"WRITE BLOCKED: {exc}")
             self.detail_log(traceback.format_exc())
             return
@@ -2607,7 +3079,7 @@ class WpsWriterFrame(ttk.Frame):
 
     def write_worker(self, prepared: list[PreparedMapping], browser_mode: str, cdp_url: str) -> None:
         try:
-            self.log(f"Write started: {len(prepared)} region(s).")
+            self.log(f"开始写入，共 {len(prepared)} 个区域。")
             self.detail_log(f"WRITE STARTED: browser_mode={browser_mode}; cdp_url={cdp_url}; regions={len(prepared)}")
             by_index = {item.index: item for item in prepared}
             all_ok = True
@@ -2618,7 +3090,7 @@ class WpsWriterFrame(ttk.Frame):
 
             for url, group in groups.items():
                 self.detail_log(f"WRITE TARGET: url={url}; regions={len(group)}")
-                result = write_to_wps(url, group, lambda _message: None, browser_mode=browser_mode, cdp_url=cdp_url)
+                result = write_to_wps(url, group, self.log, browser_mode=browser_mode, cdp_url=cdp_url)
                 self.detail_log(f"WRITE TARGET RESULT: url={url}; saved={result.get('saved')}; returned={len(result.get('results', []))}")
                 for entry in result.get("results", []):
                     item = by_index[entry["index"]]
@@ -2629,20 +3101,20 @@ class WpsWriterFrame(ttk.Frame):
                             f"VERIFY MISMATCH: index={item.index}; target={item.target_sheet}!{item.target_range}; "
                             f"mismatches={mismatches!r}; read_value={entry.get('value')!r}"
                         )
-                        self.log(f"#{item.index} verification failed: {item.target_sheet}!{item.target_range}")
+                        self.log(f"第 {item.index} 个区域回读不一致：{item.target_sheet}!{item.target_range}")
                         for mismatch in mismatches:
                             self.log(f"  {mismatch}")
                     else:
                         self.detail_log(f"VERIFY OK: index={item.index}; target={item.target_sheet}!{item.target_range}")
             if all_ok:
                 self.detail_log(f"WRITE OK: regions={len(prepared)}")
-                self.log(f"Write OK: {len(prepared)} region(s) saved and verified.")
+                self.log(f"写入完成：{len(prepared)} 个区域已保存，回读核对一致。")
             else:
                 self.detail_log("WRITE WARNING: verification mismatches detected")
-                self.log("WARNING: Write finished, but read-back verification found differences.")
+                self.log("写入已结束，但回读数据与来源不一致，请查看上方差异。")
         except Exception as exc:
-            self.log(f"ERROR: {exc}")
-            self.log(traceback.format_exc())
+            self.log(f"操作失败：{exc}")
+            self.log("详细错误信息已保存到日志目录。")
             self.detail_log(f"WRITE ERROR: {exc}")
             self.detail_log(traceback.format_exc())
 
@@ -2650,7 +3122,7 @@ class WpsWriterFrame(ttk.Frame):
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Excel to WPS/KDocs Writer")
+        self.title("WPS 写入工具")
         self.geometry("1120x760")
         self.minsize(980, 640)
         self.writer_frame = WpsWriterFrame(self)
@@ -2664,8 +3136,8 @@ if __name__ == "__main__":
             "http://127.0.0.1:9222", print
         )
         print(
-            "WPS dedicated Chrome is ready "
-            f"({'started' if launch_result.get('started') else 'already running'})."
+            "WPS 专用浏览器已就绪"
+            f"（{'已启动' if launch_result.get('started') else '已连接'}）。"
         )
     else:
         app = App()

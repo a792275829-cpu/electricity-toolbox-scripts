@@ -128,7 +128,6 @@ class ProcessRunnerTests(unittest.TestCase):
         assert process is not None
         self.assertIsNotNone(process.poll())
 
-    @unittest.skipUnless(sys.platform != "win32", "POSIX process group assertion")
     def test_cancellation_reaps_child_process_group(self) -> None:
         import os
         import tempfile

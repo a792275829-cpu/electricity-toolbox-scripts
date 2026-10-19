@@ -91,6 +91,22 @@ class RuntimeTests(unittest.TestCase):
                 paths.market_table_update,
                 workspace.resolve() / "市场表更新" / "update_market_table.py",
             )
+            self.assertEqual(
+                paths.daily_pdf_parser,
+                workspace.resolve()
+                / "广东运行日报PDF解析"
+                / "run_daily_pdf_parser.py",
+            )
+            self.assertEqual(
+                paths.spot_price_update,
+                workspace.resolve() / "现货价格更新" / "update_spot_prices.py",
+            )
+            self.assertEqual(
+                paths.transaction_info_update,
+                workspace.resolve()
+                / "交易系统信息更新"
+                / "update_transaction_info.py",
+            )
 
     def test_load_module_rejects_missing_file(self) -> None:
         from toolbox.runtime import load_module
@@ -99,6 +115,23 @@ class RuntimeTests(unittest.TestCase):
             missing = Path(directory) / "missing.py"
             with self.assertRaisesRegex(FileNotFoundError, "missing.py"):
                 load_module("missing_tool", missing)
+
+    def test_virtualenv_dependency_is_not_treated_as_local_module(self) -> None:
+        from toolbox.runtime import _module_is_local
+
+        dependency = mock.Mock(
+            __file__=str(
+                Path(sys.prefix)
+                / "lib"
+                / "python3.11"
+                / "site-packages"
+                / "dependency.py"
+            )
+        )
+
+        self.assertFalse(
+            _module_is_local(dependency, (Path(sys.prefix).resolve().parent,))
+        )
 
     def test_report_export_proxy_reads_environment(self) -> None:
         from toolbox.runtime import ToolPaths, load_module
@@ -116,6 +149,27 @@ class RuntimeTests(unittest.TestCase):
         online = load_module("online_energy_state_paths_test", paths.online_energy)
         market = load_module("market_table_state_paths_test", paths.market_table_update)
         group = load_module("group_upload_state_paths_test", paths.group_upload)
+        spot = load_module("spot_price_state_paths_test", paths.spot_price_update)
+        transaction = load_module(
+            "transaction_info_state_paths_test", paths.transaction_info_update
+        )
+        wind = load_module("wind_forecast_state_paths_test", paths.wind_forecast)
+
+        loaded_auth = {
+            "spot": spot.load_auth_module(),
+            "transaction": transaction.load_auth_module(),
+            "wind": wind.load_auth_module(),
+        }
+        for name, directory in (
+            ("spot", paths.spot_price_update_dir),
+            ("transaction", paths.transaction_info_update_dir),
+            ("wind", paths.wind_forecast_dir),
+        ):
+            auth = loaded_auth[name]
+            self.assertEqual(directory / "auth_state.json", auth.AUTH_STATE_PATH)
+            self.assertEqual(directory / "auth_state.json.lock", auth.AUTH_LOCK_PATH)
+            self.assertEqual(directory / ".browser-profile", auth.PROFILE_DIR)
+            self.assertEqual(directory / "config.json", auth.CONFIG_PATH)
 
         self.assertEqual(online.AUTH_STATE_PATH, paths.online_energy_dir / "auth_state.json")
         self.assertEqual(online.PROFILE_DIR, paths.online_energy_dir / ".browser-profile")
@@ -123,19 +177,35 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(market.online_export_module.PROFILE_DIR, paths.market_table_update_dir / ".browser-profile")
         self.assertEqual(group.AUTH_STATE_PATH, paths.group_upload_dir / "auth_state.json")
         self.assertEqual(group.PROFILE_DIR, paths.group_upload_dir / ".browser-profile")
+        self.assertEqual(spot.AUTH_STATE_PATH, paths.spot_price_update_dir / "auth_state.json")
+        self.assertEqual(spot.PROFILE_DIR, paths.spot_price_update_dir / ".browser-profile")
+        self.assertEqual(
+            transaction.AUTH_STATE_PATH,
+            paths.transaction_info_update_dir / "auth_state.json",
+        )
+        self.assertEqual(
+            transaction.PROFILE_DIR,
+            paths.transaction_info_update_dir / ".browser-profile",
+        )
 
         auth_paths = {
             online.AUTH_STATE_PATH,
             market.online_export_module.AUTH_STATE_PATH,
             group.AUTH_STATE_PATH,
+            spot.AUTH_STATE_PATH,
+            transaction.AUTH_STATE_PATH,
+            wind.AUTH_STATE_PATH,
         }
         profile_paths = {
             online.PROFILE_DIR,
             market.online_export_module.PROFILE_DIR,
             group.PROFILE_DIR,
+            spot.PROFILE_DIR,
+            transaction.PROFILE_DIR,
+            wind.PROFILE_DIR,
         }
-        self.assertEqual(len(auth_paths), 3)
-        self.assertEqual(len(profile_paths), 3)
+        self.assertEqual(len(auth_paths), 6)
+        self.assertEqual(len(profile_paths), 6)
 
     def test_online_energy_process_is_alive_detects_current_process(self) -> None:
         from toolbox.runtime import ToolPaths, load_module
@@ -193,6 +263,66 @@ class RuntimeTests(unittest.TestCase):
             module.daily_report_name("2026-07-03"),
             "广东电力现货市场监测评估日报（20260703）",
         )
+
+    def test_group_upload_startup_max_uses_day_ahead_when_realtime_is_missing(self) -> None:
+        from toolbox.runtime import ToolPaths, load_module
+
+        paths = ToolPaths(Path(__file__).resolve().parents[2])
+        module = load_module("group_upload_startup_fallback_test", paths.group_upload)
+
+        class DummyResponse:
+            status = 200
+
+            def __init__(self, data):
+                self._data = data
+
+            def text(self):
+                import json
+
+                return json.dumps({"retCode": "T200", "data": self._data})
+
+        class DummyRequest:
+            def __init__(self):
+                self.calls = 0
+
+            def post(self, *_args, **_kwargs):
+                self.calls += 1
+                if self.calls == 2:
+                    return DummyResponse([])
+                return DummyResponse(
+                    [
+                        {
+                            "date": "2026-07-18 00:00:00",
+                            "dataItemGroup": "DAY_AHEAD_CLEARANCE_COAL",
+                            "unitCount": [10, 12],
+                        },
+                        {
+                            "date": "2026-07-18 00:00:00",
+                            "dataItemGroup": "DAY_AHEAD_CLEARANCE_GAS",
+                            "unitCount": [3, 4],
+                        },
+                    ]
+                )
+
+        context = mock.Mock(request=DummyRequest())
+        with mock.patch.object(module, "log") as log:
+            result = module.fetch_startup_max(context, "2026-07-18", "044")
+
+        self.assertEqual(result, 16)
+        self.assertTrue(any("实时出清电量未完整返回" in call.args[0] for call in log.call_args_list))
+
+    def test_group_upload_startup_max_fails_when_neither_dataset_is_complete(self) -> None:
+        from toolbox.runtime import ToolPaths, load_module
+
+        paths = ToolPaths(Path(__file__).resolve().parents[2])
+        module = load_module("group_upload_startup_missing_test", paths.group_upload)
+        response = mock.Mock(status=200)
+        response.text.return_value = '{"retCode":"T200","data":[]}'
+        context = mock.Mock()
+        context.request.post.return_value = response
+
+        with self.assertRaisesRegex(RuntimeError, "日前和实时出清电量都没有返回"):
+            module.fetch_startup_max(context, "2026-07-18", "044")
 
     def test_group_upload_opens_day_report_from_authenticated_report_entry(self) -> None:
         from toolbox.runtime import ToolPaths, load_module
@@ -725,7 +855,7 @@ class ToolboxAppTests(unittest.TestCase):
 
         self.assertEqual(list(app.pages), list(PAGE_NAMES))
         first_page = app.pages["导出上网电量"]
-        app.show_page("电量汇总")
+        app.show_page("出清结果汇总上传")
         app.show_page("导出上网电量")
 
         self.assertEqual(app.current_page, "导出上网电量")
@@ -799,18 +929,25 @@ class PageAdapterTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         if hasattr(self, "root"):
+            # Finish asynchronous page imports before destroying their Tk owner.
+            for child in self.root.winfo_children():
+                loader = getattr(child, "_writer_loader", None)
+                if loader is not None and loader.ident is not None:
+                    loader.join(5)
+                    self.assertFalse(loader.is_alive(), "WPS page import did not finish")
             destroy_tk(self.root)
+            gc.collect()  # Tk variables must be finalized on the main thread.
 
     def test_core_pages_build_expected_paths_and_commands(self) -> None:
         from toolbox.pages import (
             OnlineEnergyPage,
-            SummaryPage,
+            SummaryUploadPage,
             TradeAnalysisPage,
         )
 
         online = OnlineEnergyPage(self.root, self.paths, self.registry)
         trade = TradeAnalysisPage(self.root, self.paths, self.registry)
-        summary = SummaryPage(self.root, self.paths, self.registry)
+        summary = SummaryUploadPage(self.root, self.paths, self.registry)
 
         export_command = online.build_export_command("2026-06-09")
         self.assertEqual(export_command[-1], "2026-06-09")
@@ -871,31 +1008,19 @@ class PageAdapterTests(unittest.TestCase):
                 fallback,
             )
 
-    def test_summary_and_private_pages_auto_fill_d_plus_one_folder(self) -> None:
-        from toolbox.pages import PrivateUploadPage, SummaryPage
+    def test_summary_upload_page_auto_fills_d_plus_one_folder(self) -> None:
+        from toolbox.pages import SummaryUploadPage
 
         with tempfile.TemporaryDirectory() as directory:
             review_root = Path(directory)
             target = review_root / "6-18"
             target.mkdir()
-
-            summary = SummaryPage(
-                self.root,
-                self.paths,
-                self.registry,
-                today=date(2026, 6, 17),
-                review_root=review_root,
+            page = SummaryUploadPage(
+                self.root, self.paths, self.registry,
+                today=date(2026, 6, 17), review_root=review_root,
             )
-            private = PrivateUploadPage(
-                self.root,
-                self.paths,
-                self.registry,
-                today=date(2026, 6, 17),
-                review_root=review_root,
-            )
-
-        self.assertEqual(Path(summary.input_dir.get()), target)
-        self.assertEqual(Path(private.source_folder.get()), target)
+            self.assertEqual(Path(page.input_dir.get()), target)
+            self.assertEqual(Path(page.output_file.get()), target / "6-18_汇总.xlsx")
 
     def test_report_page_maps_source_dates_and_builds_word_command(self) -> None:
         from toolbox.pages import ReportPage
@@ -922,19 +1047,19 @@ class PageAdapterTests(unittest.TestCase):
             GuangdongPricePage,
             GroupUploadPage,
             MarketTableUpdatePage,
-            PrivateUploadPage,
+            SummaryUploadPage,
         )
 
-        private = PrivateUploadPage(self.root, self.paths, self.registry)
+        private = SummaryUploadPage(self.root, self.paths, self.registry)
         group = GroupUploadPage(self.root, self.paths, self.registry)
         market = MarketTableUpdatePage(self.root, self.paths, self.registry)
         guangdong = GuangdongPricePage(
             self.root, self.paths, self.registry, today=date(2026, 7, 11)
         )
 
-        plan_command = private.build_command("--plan", Path(r"C:\review"))
+        plan_command = private.build_upload_command("--plan", Path(r"C:\review"))
         self.assertEqual(plan_command[-3:], ["--plan", "--source", r"C:\review"])
-        self.assertIn("--execute", private.build_command("--execute", Path(r"C:\review")))
+        self.assertIn("--execute", private.build_upload_command("--execute", Path(r"C:\review")))
 
         group_command = group.build_upload_command(
             [Path(r"C:\data\广东-能销数据-20260609.xlsx")],
@@ -957,13 +1082,81 @@ class PageAdapterTests(unittest.TestCase):
             self.paths.guangdong_price_output_dir / "广东电价数据总表.xlsx",
         )
         prediction_command = guangdong.build_prediction_command(
-            Path("/tmp/model.xlsx"), Path("/tmp/prediction"), 2, 3
+            Path("/tmp/model.xlsx"), Path("/tmp/prediction"), 1, 3
         )
         self.assertEqual(Path(prediction_command[1]), self.paths.guangdong_price_forecast)
         self.assertEqual(
             prediction_command[-4:],
-            ["--forecast-days", "2", "--training-months", "3"],
+            ["--forecast-days", "1", "--training-months", "3"],
         )
+
+    def test_group_upload_runs_in_toolbox_process_to_keep_macos_file_access(self) -> None:
+        from toolbox.pages import GroupUploadPage
+
+        page = GroupUploadPage(
+            self.root,
+            self.paths,
+            self.registry,
+            today=date(2000, 1, 1),
+        )
+        selected = [Path("/Desktop/广东-能销数据-20260718.xlsx")]
+        page.selected_paths = selected
+        page.force.set(True)
+        module = mock.Mock()
+        original_sink = object()
+        module.LOG_SINK = original_sink
+
+        with (
+            mock.patch("toolbox.pages.messagebox.askokcancel", return_value=True),
+            mock.patch("toolbox.pages.load_module", return_value=module),
+            mock.patch("toolbox.pages.run_group_upload_with_staging") as staged_upload,
+            mock.patch.object(page, "run_in_thread") as run_in_thread,
+            mock.patch.object(page, "run_process") as run_process,
+        ):
+            page.confirm_upload()
+            worker = run_in_thread.call_args.args[0]
+            worker()
+
+        run_process.assert_not_called()
+        staged_upload.assert_called_once_with(
+            module,
+            selected,
+            force=True,
+            on_log=page.append_log,
+        )
+        self.assertIs(module.LOG_SINK, original_sink)
+
+    def test_group_upload_stages_files_and_copies_generated_province_file_back(self) -> None:
+        from toolbox.pages import run_group_upload_with_staging
+        from toolbox.runtime import load_module
+
+        module = load_module("group_upload_staging_test", self.paths.group_upload)
+        with tempfile.TemporaryDirectory() as directory:
+            source_dir = Path(directory)
+            province = source_dir / "广东-省内数据-20260717.xlsx"
+            energy = source_dir / "广东-能销数据-20260718.xlsx"
+            province.write_bytes(b"province-template")
+            energy.write_bytes(b"energy")
+
+            def fake_upload(staged_paths, *, force):
+                self.assertTrue(force)
+                target_date, uploads = module.prepare_upload_files(staged_paths)
+                staged_province = next(item for item in uploads if item.kind == "省内")
+                output = module.province_output_path(staged_province.path, target_date)
+                output.write_bytes(b"updated-province")
+
+            logs: list[str] = []
+            with mock.patch.object(module, "run_api_upload", side_effect=fake_upload):
+                run_group_upload_with_staging(
+                    module,
+                    [province, energy],
+                    force=True,
+                    on_log=logs.append,
+                )
+
+            copied_output = source_dir / "广东-省内数据-20260718.xlsx"
+            self.assertEqual(copied_output.read_bytes(), b"updated-province")
+            self.assertTrue(any("复制回原目录" in line for line in logs))
 
     def test_market_mapping_panel_is_complete_and_scrollable(self) -> None:
         from toolbox.pages import MarketTableUpdatePage
@@ -984,7 +1177,10 @@ class PageAdapterTests(unittest.TestCase):
         from toolbox.pages import WpsWriterPage
 
         page = WpsWriterPage(self.root, self.paths, self.registry)
-
+        deadline = time.monotonic() + 5
+        while not hasattr(page, "writer_frame") and time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(0.01)
         self.assertTrue(hasattr(page, "writer_frame"))
         self.assertIs(page.writer_frame.task_registry, self.registry)
         self.assertFalse(hasattr(page, "open_button"))
@@ -1270,7 +1466,10 @@ class PageAdapterTests(unittest.TestCase):
         self.assertEqual(len({str(frame) for frame in frames}), len(PAGE_NAMES))
         self.assertIn("WPS写入工具", PAGE_NAMES)
         self.assertIn("市场表更新", PAGE_NAMES)
+        self.assertIn("现货价格分析表更新", PAGE_NAMES)
+        self.assertIn("交易系统信息更新", PAGE_NAMES)
         self.assertIn("广东电价预测", PAGE_NAMES)
+        self.assertIn("广东运行日报解析上传", PAGE_NAMES)
 
     def test_market_table_update_writes_actual_load_values_by_date(self) -> None:
         from openpyxl import Workbook, load_workbook
@@ -2523,6 +2722,10 @@ class LauncherTests(unittest.TestCase):
     def test_pythonw_launcher_can_be_loaded_without_starting_mainloop(self) -> None:
         old_cwd = Path.cwd()
         old_sys_path = list(sys.path)
+        old_toolbox_modules = {
+            name: module for name, module in sys.modules.items()
+            if name == "toolbox" or name.startswith("toolbox.")
+        }
         with tempfile.TemporaryDirectory() as directory:
             try:
                 os.chdir(directory)
@@ -2539,6 +2742,12 @@ class LauncherTests(unittest.TestCase):
                     run_name="toolbox_smoke",
                 )
             finally:
+                # Other collected tests retain references to these modules.
+                # Restore their identities so patches still reach the tested code.
+                for name in list(sys.modules):
+                    if name == "toolbox" or name.startswith("toolbox."):
+                        sys.modules.pop(name)
+                sys.modules.update(old_toolbox_modules)
                 sys.path[:] = old_sys_path
                 os.chdir(old_cwd)
         self.assertIn("main", namespace)
@@ -2551,71 +2760,32 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(self.workspace.parent.resolve(), workspace)
         self.assertTrue((workspace / "wps自动" / "wps_excel_to_kdocs_gui.py").is_file())
 
-    def test_root_keeps_only_hidden_vbs_launcher_as_file(self) -> None:
-        if sys.platform != "win32":
-            self.skipTest("Windows launcher layout expectation")
-        root_files = [item for item in self.script_root.iterdir() if item.is_file()]
-        self.assertEqual(1, len(root_files), [item.name for item in root_files])
-        self.assertEqual(".vbs", root_files[0].suffix.lower())
 
     def test_toolbox_bundle_contains_python_entrypoint(self) -> None:
         self.assertTrue((self.workspace / "toolbox_launcher.pyw").is_file())
         self.assertTrue((self.workspace / "toolbox" / "app.py").is_file())
-    def test_vbs_launcher_runs_powershell_hidden_and_can_move(self) -> None:
-        if sys.platform != "win32":
-            self.skipTest("Windows launcher smoke test")
-        source = next(item for item in self.script_root.iterdir() if item.is_file() and item.suffix.lower() == ".vbs")
-        content = source.read_text(encoding="utf-8")
 
-        self.assertIn("TOOLBOX_SMOKE", content)
-        self.assertIn("waitOnReturn = False", content)
-        self.assertIn("shell.Run command, 0, waitOnReturn", content)
-        self.assertNotIn("C:\\Users\\lllg\\Desktop\\脚本汇总", content)
-
-        with tempfile.TemporaryDirectory() as directory:
-            copied = Path(directory) / "moved-toolbox.vbs"
-            shutil.copy2(source, copied)
-            result = subprocess.run(
-                ["cscript.exe", "//nologo", str(copied)],
-                cwd=directory,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env={**os.environ, "TOOLBOX_SMOKE": "1"},
-                timeout=30,
-            )
-
-        self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("TOOLBOX_SCRIPT=", result.stdout)
-        self.assertIn("toolbox_launcher.pyw", result.stdout)
-
-    def test_macos_command_launcher_runs_from_moved_copy(self) -> None:
+    def test_macos_command_launcher_finds_python_entrypoint(self) -> None:
         if sys.platform != "darwin":
             self.skipTest("macOS launcher smoke test")
 
-        source = self.script_root / "电力工具箱.command"
+        source = self.script_root / "00_启动" / "电力工具箱.command"
         self.assertTrue(source.is_file())
         content = source.read_text(encoding="utf-8")
         self.assertIn("TOOLBOX_SMOKE", content)
         self.assertNotIn("C:\\Users\\lllg", content)
 
-        with tempfile.TemporaryDirectory() as directory:
-            copied = Path(directory) / "moved-toolbox.command"
-            shutil.copy2(source, copied)
-            copied.chmod(0o755)
-            result = subprocess.run(
-                [str(copied)],
-                cwd=directory,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env={**os.environ, "TOOLBOX_SMOKE": "1"},
-                timeout=30,
-            )
+        result = subprocess.run(
+            [str(source)],
+            cwd=self.script_root,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "TOOLBOX_SMOKE": "1"},
+            timeout=30,
+        )
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("TOOLBOX_SCRIPT=", result.stdout)
@@ -2625,7 +2795,7 @@ class LauncherTests(unittest.TestCase):
         readme = next(self.script_root.glob("*/README_*.txt"))
         content = readme.read_text(encoding="utf-8")
 
-        self.assertIn("电力工具箱.bat", content)
+        self.assertIn("00_启动/电力工具箱.command", content)
         self.assertIn("原有", content)
         self.assertIn("保留", content)
 

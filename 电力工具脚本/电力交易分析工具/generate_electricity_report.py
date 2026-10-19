@@ -8,6 +8,8 @@ import threading
 import tkinter as tk
 import datetime
 import re
+from collections import deque
+from itertools import islice
 from tkinter import filedialog, messagebox, ttk
 
 import openpyxl
@@ -25,10 +27,6 @@ def open_directory(path):
     path.mkdir(parents=True, exist_ok=True)
     if sys.platform == "darwin":
         subprocess.run(["open", str(path)], check=False)
-    elif sys.platform.startswith("win"):
-        import os
-
-        os.startfile(path)
     else:
         subprocess.run(["xdg-open", str(path)], check=False)
 
@@ -98,6 +96,33 @@ def classify_point(item, compare_mode):
         return POINT_TYPE_ORDER[3]
     return "平价平量"
 
+
+def iter_row_windows(rows, lookahead):
+    """Yield each row with only the following rows needed by the parser."""
+    iterator = iter(rows)
+    window = deque(islice(iterator, lookahead + 1))
+    while window:
+        yield window
+        window.popleft()
+        following = next(iterator, None)
+        if following is not None:
+            window.append(following)
+
+
+def read_cell_values(sheet, max_row, max_column):
+    """Read a small fixed region once instead of rescanning a read-only sheet."""
+    rows = tuple(sheet.iter_rows(
+        min_row=1, max_row=max_row, min_col=1, max_col=max_column,
+        values_only=True,
+    ))
+
+    def cell_value(row, column):
+        if row > len(rows) or column > len(rows[row - 1]):
+            return None
+        return rows[row - 1][column - 1]
+
+    return cell_value
+
 class ReportBuilder:
     def __init__(self, xlsx_path, out_path=None):
         self.xlsx_path = pathlib.Path(xlsx_path)
@@ -144,7 +169,25 @@ class ReportBuilder:
         return datetime.date.today().isoformat()
 
     def _parse_summary(self):
-        ws_sum = self.wb["日前"]
+        if "日前" in self.wb.sheetnames:
+            self._parse_legacy_summary(self.wb["日前"])
+            return
+
+        if "新" in self.wb.sheetnames:
+            sheet = self.wb["新"]
+            cell_value = read_cell_values(sheet, 60, 11)
+            if self._is_new_summary_layout(sheet, cell_value=cell_value):
+                self._parse_new_summary(sheet, cell_value=cell_value)
+                return
+
+        available = "、".join(self.wb.sheetnames)
+        raise ValueError(
+            "未找到可识别的交易汇总页（旧版‘日前’或新版‘新’）。"
+            f"当前工作表：{available}"
+        )
+
+    def _parse_legacy_summary(self, ws_sum):
+        cell_value = read_cell_values(ws_sum, 21, 11)
         summary_rows = {
             "分公司火电": 4,
             "汕头": 5,
@@ -160,22 +203,90 @@ class ReportBuilder:
         }
         for name, row in summary_rows.items():
             self.summary[name] = {
-                "capacity_10mw": num(ws_sum.cell(row, 3).value, None),
-                "cost": ws_sum.cell(row, 4).value,
-                "load_rate": ws_sum.cell(row, 5).value,
-                "da_mwh": num(ws_sum.cell(row, 6).value) * 10,
-                "da_price": num(ws_sum.cell(row, 7).value),
-                "ml_mwh": num(ws_sum.cell(row, 8).value) * 10,
-                "dev_mwh": num(ws_sum.cell(row, 9).value) * 10,
-                "dev_price": num(ws_sum.cell(row, 10).value, None),
-                "profit_wanyuan": num(ws_sum.cell(row, 11).value),
+                "capacity_10mw": num(cell_value(row, 3), None),
+                "cost": cell_value(row, 4),
+                "load_rate": cell_value(row, 5),
+                "da_mwh": num(cell_value(row, 6)) * 10,
+                "da_price": num(cell_value(row, 7)),
+                "ml_mwh": num(cell_value(row, 8)) * 10,
+                "dev_mwh": num(cell_value(row, 9)) * 10,
+                "dev_price": num(cell_value(row, 10), None),
+                "profit_wanyuan": num(cell_value(row, 11)),
+            }
+
+    @staticmethod
+    def _is_new_summary_layout(ws_sum, *, cell_value=None):
+        cell_value = cell_value or read_cell_values(ws_sum, 8, 7)
+        return (
+            cell_value(8, 1) in {"火电", "南方分公司"}
+            and cell_value(8, 4) == "中长期"
+            and cell_value(8, 7) == "日前出清"
+        )
+
+    def _parse_new_summary(self, ws_sum, *, cell_value=None):
+        cell_value = cell_value or read_cell_values(ws_sum, 60, 11)
+        if "快报" not in self.wb.sheetnames:
+            raise ValueError("新版交易汇总页需要配套的‘快报’工作表。")
+
+        ws_brief = self.wb["快报"]
+        brief_value = read_cell_values(ws_brief, 19, 11)
+        summary_rows = {
+            "分公司火电": (10, 7),
+            "汕头": (11, 8),
+            "汕头#1机组": (12, 9),
+            "汕头#2机组": (13, 10),
+            "汕头#3机组": (14, 11),
+            "海门": (15, 13),
+            "海门#1机组": (16, 14),
+            "海门#2机组": (17, 15),
+            "海门#3机组": (18, 16),
+            "海门#4机组": (19, 17),
+            "东莞": (20, 19),
+        }
+        if cell_value(8, 1) == "南方分公司":
+            found = {}
+            plant = None
+            for row in range(10, 61):
+                label = str(cell_value(row, 1) or "").strip()
+                unit = str(cell_value(row, 2) or "").strip()
+                if label in {"新能源", "备注：", "备注:"}:
+                    break
+                if label == "火电机组合计":
+                    name = "分公司火电"
+                elif label in {"汕头", "海门", "东莞"}:
+                    plant = label
+                    name = label
+                elif not label and plant in {"汕头", "海门"} and re.fullmatch(r"#[1-4]机组", unit):
+                    name = f"{plant}{unit}"
+                else:
+                    continue
+                if name in found:
+                    raise ValueError(f"新版交易汇总页存在重复标签：{name}")
+                found[name] = row
+            missing = set(summary_rows) - found.keys()
+            if missing:
+                raise ValueError(f"新版交易汇总页缺少标签：{'、'.join(sorted(missing))}")
+            summary_rows = {name: (found[name], brief_row)
+                            for name, (_, brief_row) in summary_rows.items()}
+        for name, (summary_row, brief_row) in summary_rows.items():
+            self.summary[name] = {
+                "capacity_10mw": num(brief_value(brief_row, 3), None),
+                "cost": cell_value(summary_row, 3),
+                "load_rate": num(brief_value(brief_row, 11), None),
+                "da_mwh": num(cell_value(summary_row, 7)) * 10,
+                "da_price": num(cell_value(summary_row, 8)),
+                "ml_mwh": num(cell_value(summary_row, 4)) * 10,
+                "dev_mwh": num(cell_value(summary_row, 9)) * 10,
+                "dev_price": num(cell_value(summary_row, 10), None),
+                "profit_wanyuan": num(cell_value(summary_row, 11)),
             }
 
     def _parse_offer_cards(self):
         ws_comp = self.wb["运行补偿"]
-        rows = list(ws_comp.iter_rows(values_only=True))
         cards = {}
-        for idx, row in enumerate(rows):
+        for window in iter_row_windows(ws_comp.iter_rows(values_only=True), 25):
+            rows = list(window)
+            row = rows[0]
             label = row[0]
             if not isinstance(label, str):
                 continue
@@ -197,13 +308,13 @@ class ReportBuilder:
             plant_rate = None
             segments = []
             for offset in range(1, 16):
-                if idx + offset >= len(rows):
+                if offset >= len(rows):
                     break
-                candidate = rows[idx + offset]
+                candidate = rows[offset]
                 if candidate[16] == "厂用电率":
                     plant_rate = num(candidate[17], None)
                 if candidate[16] == "段号":
-                    for segment_row in rows[idx + offset + 1 : idx + offset + 11]:
+                    for segment_row in rows[offset + 1 : offset + 11]:
                         start = num(segment_row[17], None)
                         end = num(segment_row[18], None)
                         price = num(segment_row[19], None)
@@ -216,11 +327,12 @@ class ReportBuilder:
 
     def _parse_blocks(self, sheet_name, company_name):
         ws = self.wb[sheet_name]
-        row2 = [ws.cell(2, c).value for c in range(1, 22)]
+        cell_value = read_cell_values(ws, 26, 21)
+        row2 = [cell_value(2, c) for c in range(1, 22)]
         blocks = {}
         if any(isinstance(value, str) and "实时电量" in value for value in row2):
             for start_col in range(2, 18, 4):
-                label = ws.cell(1, start_col).value
+                label = cell_value(1, start_col)
                 if not isinstance(label, str) or "合计" in label:
                     continue
                 clean = label.strip()
@@ -230,7 +342,7 @@ class ReportBuilder:
                     unit_name = f"{company_name}#{clean[0]}机组"
                 data = []
                 for row_idx in range(3, 27):
-                    time_value = ws.cell(row_idx, 1).value
+                    time_value = cell_value(row_idx, 1)
                     if isinstance(time_value, datetime.time):
                         time_text = f"{time_value.hour}:00"
                     else:
@@ -240,10 +352,10 @@ class ReportBuilder:
                             "time": time_text,
                             "ml": 0.0,
                             "ml_price": 0.0,
-                            "da": num(ws.cell(row_idx, start_col).value),
-                            "da_price": num(ws.cell(row_idx, start_col + 1).value),
-                            "rt": num(ws.cell(row_idx, start_col + 2).value, 0.0),
-                            "rt_price": num(ws.cell(row_idx, start_col + 3).value, 0.0),
+                            "da": num(cell_value(row_idx, start_col)),
+                            "da_price": num(cell_value(row_idx, start_col + 1)),
+                            "rt": num(cell_value(row_idx, start_col + 2), 0.0),
+                            "rt_price": num(cell_value(row_idx, start_col + 3), 0.0),
                             "dev_ml": 0.0,
                             "price_diff_ml": 0.0,
                             "profit_ml": 0.0,
@@ -252,9 +364,11 @@ class ReportBuilder:
                     )
                 blocks[unit_name] = data
 
-        rows = list(ws.iter_rows(values_only=True))
-        for idx in range(len(rows) - 30):
-            label = rows[idx][0] if rows[idx] else None
+        for window in iter_row_windows(ws.iter_rows(values_only=True), 30):
+            if len(window) < 31:
+                break
+            rows = list(window)
+            label = rows[0][0] if rows[0] else None
             if not isinstance(label, str):
                 continue
             clean = label.strip()
@@ -262,7 +376,7 @@ class ReportBuilder:
                 continue
             data = []
             ok = True
-            for ridx in range(idx + 3, idx + 27):
+            for ridx in range(3, 27):
                 row = rows[ridx]
                 time_value = row[0]
                 if not (isinstance(time_value, str) and ":" in time_value):
@@ -303,17 +417,18 @@ class ReportBuilder:
     def _parse_renewables(self):
         for sheet_name in RENEWABLE_UNITS:
             ws = self.wb[sheet_name]
+            cell_value = read_cell_values(ws, 28, 31)
             data = []
             for row in range(4, 28):
-                time_value = ws.cell(row, 1).value
+                time_value = cell_value(row, 1)
                 if not (isinstance(time_value, str) and ":" in time_value):
                     continue
-                da = num(ws.cell(row, 2).value)
-                da_price = num(ws.cell(row, 3).value)
-                rt = num(ws.cell(row, 4).value, 0.0)
-                rt_price = num(ws.cell(row, 5).value, 0.0)
-                ml = num(ws.cell(row, 12).value)
-                ml_price = num(ws.cell(row, 13).value)
+                da = num(cell_value(row, 2))
+                da_price = num(cell_value(row, 3))
+                rt = num(cell_value(row, 4), 0.0)
+                rt_price = num(cell_value(row, 5), 0.0)
+                ml = num(cell_value(row, 12))
+                ml_price = num(cell_value(row, 13))
                 data.append(
                     {
                         "time": time_value,
@@ -346,7 +461,7 @@ class ReportBuilder:
                 "dev_rt_mwh": rt_total - da_total,
                 "profit_rt_wanyuan": sum((item.get("rt", 0.0) - item["da"]) * (item.get("rt_price", 0.0) - item["da_price"]) / 10000 for item in data),
                 "load_rate": None,
-                "full_price": num(ws["AE28"].value, None),
+                "full_price": num(cell_value(28, 31), None),
             }
 
     def _has_realtime_data(self):

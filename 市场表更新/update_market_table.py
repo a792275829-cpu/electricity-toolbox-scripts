@@ -2,15 +2,20 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import os
 import re
+import stat
 import sys
+import tempfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import copy
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import openpyxl
+from openpyxl.styles.numbers import is_date_format
 from openpyxl.utils import get_column_letter
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
@@ -18,6 +23,11 @@ from playwright.sync_api import sync_playwright
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE = SCRIPT_DIR.parent
+if str(WORKSPACE) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE))
+from toolbox_auth_loader import load_login_module
+from toolbox_excel_read import read_cell_snapshots
+
 ONLINE_SCRIPTS_DIR = WORKSPACE / "上网电量抓取"
 REPORT_SCRIPTS_DIR = WORKSPACE / "每日生产经营情况汇报自动生成工具" / "scripts"
 if str(ONLINE_SCRIPTS_DIR) not in sys.path:
@@ -25,18 +35,11 @@ if str(ONLINE_SCRIPTS_DIR) not in sys.path:
 if str(REPORT_SCRIPTS_DIR) not in sys.path:
     sys.path.append(str(REPORT_SCRIPTS_DIR))
 
-online_export_spec = importlib.util.spec_from_file_location(
-    "export_online_energy",
-    ONLINE_SCRIPTS_DIR / "export_online_energy.py",
+online_export_module = load_login_module(
+    WORKSPACE,
+    module_name="export_online_energy",
+    state_dir=SCRIPT_DIR,
 )
-if online_export_spec is None or online_export_spec.loader is None:
-    raise ImportError("无法加载上网电量登录模块")
-online_export_module = importlib.util.module_from_spec(online_export_spec)
-sys.modules["export_online_energy"] = online_export_module
-online_export_spec.loader.exec_module(online_export_module)
-online_export_module.PROFILE_DIR = SCRIPT_DIR / ".browser-profile"
-online_export_module.AUTH_STATE_PATH = SCRIPT_DIR / "auth_state.json"
-online_export_module.AUTH_LOCK_PATH = Path(str(online_export_module.AUTH_STATE_PATH) + ".lock")
 AuthStateLock = online_export_module.AuthStateLock
 ensure_login = online_export_module.ensure_login
 interactive_login = online_export_module.interactive_login
@@ -223,6 +226,100 @@ def load_workbook_checked(workbook_path: Path | str, **kwargs):
         raise workbook_permission_error(path) from exc
 
 
+class WorkbookWriteSession:
+    """Keep one workbook open for a complete market-table update."""
+
+    def __init__(self, path: Path | str):
+        self.path = Path(path).expanduser().resolve()
+        self.workbook = None
+        self.date_rows: dict[tuple[str, date], int] = {}
+        self.expected_cells: dict[tuple[str, str], tuple[Any, str]] = {}
+
+    def get_workbook(self):
+        if self.workbook is None:
+            self.workbook = load_workbook_checked(self.path)
+        return self.workbook
+
+    def record(self, cell) -> None:
+        self.expected_cells[(cell.parent.title, cell.coordinate)] = (
+            cell.value,
+            cell.number_format,
+        )
+
+    def commit(self) -> None:
+        if self.workbook is None or not self.expected_cells:
+            return
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                prefix=f".{self.path.stem}.", suffix=".xlsx", dir=self.path.parent,
+                delete=False,
+            ) as temporary_file:
+                temporary_path = Path(temporary_file.name)
+            self.workbook.save(temporary_path)
+            os.chmod(temporary_path, stat.S_IMODE(self.path.stat().st_mode))
+            saved = load_workbook_checked(temporary_path, read_only=True, data_only=False)
+            try:
+                actual_cells = read_cell_snapshots(saved, self.expected_cells)
+                for (sheet_name, coordinate), expected in self.expected_cells.items():
+                    actual = actual_cells[(sheet_name, coordinate)]
+                    if actual[0] != expected[0] or (
+                        expected[0] is not None and actual[1] != expected[1]
+                    ):
+                        raise RuntimeError(
+                            f"市场表保存后回读不一致：{sheet_name}!{coordinate}"
+                        )
+            finally:
+                saved.close()
+            os.replace(temporary_path, self.path)
+        except PermissionError as exc:
+            raise workbook_permission_error(self.path) from exc
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+
+
+_active_write_session: ContextVar[WorkbookWriteSession | None] = ContextVar(
+    "market_table_write_session", default=None
+)
+
+
+@contextmanager
+def workbook_write_session(path: Path | str):
+    session = WorkbookWriteSession(path)
+    token = _active_write_session.set(session)
+    try:
+        yield session
+        session.commit()
+    finally:
+        _active_write_session.reset(token)
+        if session.workbook is not None:
+            session.workbook.close()
+
+
+def active_session_for(path: Path | str) -> WorkbookWriteSession | None:
+    session = _active_write_session.get()
+    if session is not None and session.path == Path(path).expanduser().resolve():
+        return session
+    return None
+
+
+def workbook_for_write(path: Path):
+    session = active_session_for(path)
+    return session.get_workbook() if session is not None else load_workbook_checked(path)
+
+
+def record_written_cell(path: Path, cell) -> None:
+    session = active_session_for(path)
+    if session is not None:
+        session.record(cell)
+
+
+def save_written_workbook(path: Path, workbook) -> None:
+    if active_session_for(path) is None:
+        workbook.save(path)
+
+
 def ensure_workbook_accessible(workbook_path: Path | str) -> None:
     workbook = load_workbook_checked(workbook_path, read_only=True, data_only=False)
     workbook.close()
@@ -233,6 +330,15 @@ def find_date_row_in_workbook(
     target: date,
     sheet_name: str = MARKET_SHEET_NAME,
 ) -> int:
+    session = active_session_for(workbook_path)
+    if session is not None:
+        workbook = session.get_workbook()
+        if sheet_name not in workbook.sheetnames:
+            raise RuntimeError(f"Excel 中未找到工作表：{sheet_name}")
+        key = (sheet_name, target)
+        if key not in session.date_rows:
+            session.date_rows[key] = find_date_row(workbook[sheet_name], target)
+        return session.date_rows[key]
     workbook = load_workbook_checked(workbook_path, read_only=True, data_only=False)
     try:
         if sheet_name not in workbook.sheetnames:
@@ -313,6 +419,18 @@ def normalize_report_number(value: Any, *, convert_percent: bool = False) -> int
     return normalize_number(value)
 
 
+def find_style_source_row(sheet, run_date: date, target_row: int) -> int | None:
+    if run_date.day != 1:
+        return target_row - 1 if target_row > 1 else None
+    # 月初前一行可能是月份汇总行，必须按日期查找上月最后一天。
+    previous_date = run_date - timedelta(days=1)
+    try:
+        return find_date_row(sheet, previous_date)
+    except RuntimeError:
+        log(f"{sheet.title} 未找到 {previous_date.isoformat()} 的格式来源，保留目标单元格原格式。")
+        return None
+
+
 def copy_cell_style(source, target) -> None:
     if source.has_style:
         target._style = copy(source._style)
@@ -328,6 +446,17 @@ def copy_cell_style(source, target) -> None:
         target.alignment = copy(source.alignment)
     if source.protection:
         target.protection = copy(source.protection)
+
+
+def copy_numeric_cell_style(source, target) -> None:
+    original_number_format = target.number_format
+    copy_cell_style(source, target)
+    if is_date_format(target.number_format):
+        target.number_format = (
+            original_number_format
+            if not is_date_format(original_number_format)
+            else "General"
+        )
 
 
 def cell_is_non_empty(cell) -> bool:
@@ -916,10 +1045,11 @@ def write_market_row_values(
 
     path = Path(workbook_path).expanduser()
     row = find_date_row_in_workbook(path, run_date)
-    workbook = load_workbook_checked(path)
+    workbook = workbook_for_write(path)
     if MARKET_SHEET_NAME not in workbook.sheetnames:
         raise RuntimeError(f"Excel 中未找到工作表：{MARKET_SHEET_NAME}")
     sheet = workbook[MARKET_SHEET_NAME]
+    style_row = find_style_source_row(sheet, run_date, row)
     start_column_index = openpyxl.utils.column_index_from_string(start_column)
 
     written_count = 0
@@ -929,12 +1059,13 @@ def write_market_row_values(
         if cell_is_non_empty(cell) and not overwrite:
             skipped_count += 1
             continue
-        if row > 1:
-            copy_cell_style(sheet.cell(row=row - 1, column=start_column_index + offset), cell)
+        if style_row is not None:
+            copy_numeric_cell_style(sheet.cell(row=style_row, column=start_column_index + offset), cell)
         cell.value = value
+        record_written_cell(path, cell)
         written_count += 1
 
-    workbook.save(path)
+    save_written_workbook(path, workbook)
     end_column = start_column_index + len(values) - 1
     return {
         "workbook": str(path),
@@ -956,10 +1087,11 @@ def write_unit_cost_price_values(
 
     path = Path(workbook_path).expanduser()
     row = find_date_row_in_workbook(path, run_date, COST_SHEET_NAME)
-    workbook = load_workbook_checked(path)
+    workbook = workbook_for_write(path)
     if COST_SHEET_NAME not in workbook.sheetnames:
         raise RuntimeError(f"Excel 中未找到工作表：{COST_SHEET_NAME}")
     sheet = workbook[COST_SHEET_NAME]
+    style_row = find_style_source_row(sheet, run_date, row)
     start_column = openpyxl.utils.column_index_from_string(UNIT_COST_START_COLUMN)
 
     written_count = 0
@@ -969,12 +1101,13 @@ def write_unit_cost_price_values(
         if cell_is_non_empty(cell):
             skipped_count += 1
             continue
-        if row > 1:
-            copy_cell_style(sheet.cell(row=row - 1, column=start_column + offset), cell)
+        if style_row is not None:
+            copy_numeric_cell_style(sheet.cell(row=style_row, column=start_column + offset), cell)
         cell.value = value
+        record_written_cell(path, cell)
         written_count += 1
 
-    workbook.save(path)
+    save_written_workbook(path, workbook)
     end_column = start_column + len(values) - 1
     return {
         "workbook": str(path),
@@ -996,10 +1129,11 @@ def write_market_board_online_unit_values(
 
     path = Path(workbook_path).expanduser()
     row = find_date_row_in_workbook(path, run_date, COST_SHEET_NAME)
-    workbook = load_workbook_checked(path)
+    workbook = workbook_for_write(path)
     if COST_SHEET_NAME not in workbook.sheetnames:
         raise RuntimeError(f"Excel 中未找到工作表：{COST_SHEET_NAME}")
     sheet = workbook[COST_SHEET_NAME]
+    style_row = find_style_source_row(sheet, run_date, row)
 
     written_count = 0
     skipped_count = 0
@@ -1011,12 +1145,13 @@ def write_market_board_online_unit_values(
         if cell_is_non_empty(cell):
             skipped_count += 1
             continue
-        if row > 1:
-            copy_cell_style(sheet.cell(row=row - 1, column=column), cell)
+        if style_row is not None:
+            copy_numeric_cell_style(sheet.cell(row=style_row, column=column), cell)
         cell.value = value
+        record_written_cell(path, cell)
         written_count += 1
 
-    workbook.save(path)
+    save_written_workbook(path, workbook)
     return {
         "workbook": str(path),
         "sheet": sheet.title,
@@ -1037,10 +1172,11 @@ def write_spot_clearing_unit_count_values(
 
     path = Path(workbook_path).expanduser()
     row = find_date_row_in_workbook(path, run_date, COST_SHEET_NAME)
-    workbook = load_workbook_checked(path)
+    workbook = workbook_for_write(path)
     if COST_SHEET_NAME not in workbook.sheetnames:
         raise RuntimeError(f"Excel 中未找到工作表：{COST_SHEET_NAME}")
     sheet = workbook[COST_SHEET_NAME]
+    style_row = find_style_source_row(sheet, run_date, row)
     start_column = openpyxl.utils.column_index_from_string(
         SPOT_CLEARING_UNIT_COUNT_START_COLUMN
     )
@@ -1052,12 +1188,13 @@ def write_spot_clearing_unit_count_values(
         if cell_is_non_empty(cell):
             skipped_count += 1
             continue
-        if row > 1:
-            copy_cell_style(sheet.cell(row=row - 1, column=start_column + offset), cell)
+        if style_row is not None:
+            copy_numeric_cell_style(sheet.cell(row=style_row, column=start_column + offset), cell)
         cell.value = value
+        record_written_cell(path, cell)
         written_count += 1
 
-    workbook.save(path)
+    save_written_workbook(path, workbook)
     return {
         "workbook": str(path),
         "sheet": sheet.title,
@@ -1080,7 +1217,7 @@ def copy_previous_day_unit_operation_mode(
     target_row = find_date_row_in_workbook(path, run_date, COST_SHEET_NAME)
     source_row = find_date_row_in_workbook(path, source_date, COST_SHEET_NAME)
 
-    workbook = load_workbook_checked(path)
+    workbook = workbook_for_write(path)
     if COST_SHEET_NAME not in workbook.sheetnames:
         raise RuntimeError(f"Excel 中未找到工作表：{COST_SHEET_NAME}")
     sheet = workbook[COST_SHEET_NAME]
@@ -1097,9 +1234,10 @@ def copy_previous_day_unit_operation_mode(
             continue
         copy_cell_style(source, target)
         target.value = source.value
+        record_written_cell(path, target)
         written_count += 1
 
-    workbook.save(path)
+    save_written_workbook(path, workbook)
     return {
         "workbook": str(path),
         "sheet": sheet.title,
@@ -1134,6 +1272,16 @@ def run_update(
     headless: bool,
 ) -> dict[str, Any]:
     ensure_workbook_accessible(workbook_path)
+    with workbook_write_session(workbook_path):
+        return _run_update_with_session(workbook_path, run_date, headless=headless)
+
+
+def _run_update_with_session(
+    workbook_path: Path,
+    run_date: date,
+    *,
+    headless: bool,
+) -> dict[str, Any]:
     config = load_config()
     config.headless = headless
 

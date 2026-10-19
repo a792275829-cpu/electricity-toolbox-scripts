@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
 import unittest
 import gc
 from pathlib import Path
 
 
 class CatalogTests(unittest.TestCase):
-    def test_catalog_has_ten_unique_tools_in_business_groups(self) -> None:
+    def test_catalog_has_fifteen_unique_tools_in_business_groups(self) -> None:
         from toolbox.catalog import default_catalog
 
         catalog = default_catalog()
-        self.assertEqual(10, len(catalog))
-        self.assertEqual(10, len({item.tool_id for item in catalog}))
+        self.assertEqual(15, len(catalog))
+        self.assertEqual(15, len({item.tool_id for item in catalog}))
         self.assertEqual(
             {"数据采集", "分析与报告", "上传与写入"},
             {item.category for item in catalog},
         )
+        self.assertEqual("数据采集", next(item.category for item in catalog if item.tool_id == "summary-upload"))
+        categories = [item.category for item in catalog]
+        self.assertEqual(3, sum(index == 0 or value != categories[index - 1] for index, value in enumerate(categories)))
 
     def test_adapter_registry_matches_catalog_and_marks_side_effects(self) -> None:
         from toolbox.adapters import default_adapters
@@ -28,7 +32,14 @@ class CatalogTests(unittest.TestCase):
             set(adapters),
         )
         self.assertFalse(adapters["trade-analysis"].destructive)
+        self.assertFalse(adapters["daily-pdf-parser"].destructive)
+        self.assertTrue(adapters["wind-forecast"].retryable_read)
+        self.assertTrue(adapters["summary-upload"].destructive)
         self.assertTrue(adapters["group-upload"].destructive)
+        self.assertTrue(adapters["spot-price"].destructive)
+        self.assertTrue(adapters["spot-price"].retryable_read)
+        self.assertTrue(adapters["transaction-info"].destructive)
+        self.assertTrue(adapters["transaction-info"].retryable_read)
         self.assertTrue(adapters["guangdong-price"].retryable_read)
 
 
@@ -91,7 +102,7 @@ class WorkbenchTests(unittest.TestCase):
                 pass
             gc.collect()
 
-    def test_lazy_app_starts_with_dashboard_and_creates_page_once(self) -> None:
+    def test_lazy_app_starts_with_first_tool_and_creates_page_once(self) -> None:
         from toolbox.app import PAGE_NAMES, ToolboxApp
 
         self.root.destroy()
@@ -112,11 +123,11 @@ class WorkbenchTests(unittest.TestCase):
         app.withdraw()
         self.root = app
 
-        self.assertEqual("今日概览", app.current_page)
-        self.assertEqual([], created)
-        app.show_page("电量汇总")
-        app.show_page("电量汇总")
-        self.assertEqual(["电量汇总"], created)
+        self.assertEqual("导出上网电量", app.current_page)
+        self.assertEqual(["导出上网电量"], created)
+        app.show_page("出清结果汇总上传")
+        app.show_page("出清结果汇总上传")
+        self.assertEqual(["导出上网电量", "出清结果汇总上传"], created)
         self.assertTrue(hasattr(app, "task_center"))
         self.assertIsNotNone(app.diagnostic_center)
         self.assertEqual("grid", app.diagnostic_center.winfo_manager())
@@ -126,6 +137,75 @@ class WorkbenchTests(unittest.TestCase):
             int(app.task_center.grid_info()["row"]),
             int(app.diagnostic_center.grid_info()["row"]),
         )
+
+    def test_default_window_contains_every_navigation_module(self) -> None:
+        from toolbox.app import PAGE_NAMES, ToolboxApp
+
+        self.root.destroy()
+        self.root = None
+        factories = {
+            name: (lambda parent, _paths, _registry: tk.Frame(parent))
+            for name in PAGE_NAMES
+        }
+        app = ToolboxApp(
+            workspace=Path.cwd(),
+            page_factories=factories,
+            lazy_pages=True,
+        )
+        self.root = app
+        app.update_idletasks()
+
+        last_button = app.nav_buttons[PAGE_NAMES[-1]]
+        navigation_bottom = last_button.winfo_rooty() + last_button.winfo_height()
+        status_top = app.status_bar.winfo_rooty()
+
+        self.assertLessEqual(navigation_bottom, status_top)
+        self.assertLessEqual(app.winfo_height(), app.winfo_screenheight())
+
+    def test_sidebar_contains_only_business_navigation(self) -> None:
+        from toolbox.app import PAGE_NAMES, ToolboxApp
+        from toolbox.catalog import default_catalog
+        self.root.destroy()
+        app = ToolboxApp(page_factories={name: (lambda parent, _paths, _registry: tk.Frame(parent)) for name in PAGE_NAMES}, lazy_pages=True)
+        self.root = app
+        self.assertFalse(hasattr(app, "search_entry"))
+        self.assertNotIn("今日概览", app.nav_buttons)
+        visible_names = [widget.cget("text") for widget in app.navigation.pack_slaves() if isinstance(widget, ttk.Button)]
+        self.assertEqual([item.name for item in default_catalog()], visible_names)
+
+    def test_auxiliary_panel_toggle_preserves_panels_and_expands_workspace(self) -> None:
+        from toolbox.app import PAGE_NAMES, ToolboxApp
+
+        self.root.destroy()
+        app = ToolboxApp(page_factories={name: (lambda parent, _paths, _registry: tk.Frame(parent)) for name in PAGE_NAMES}, lazy_pages=True)
+        self.root = app
+        app.update_idletasks()
+        previous_width = app.page_host.winfo_width()
+        original_task_center = app.task_center
+        app.toggle_right_rail()
+        app.update_idletasks()
+        self.assertEqual("", app.right_rail.winfo_manager())
+        self.assertGreater(app.page_host.winfo_width(), previous_width)
+        app.toggle_right_rail()
+        app.update_idletasks()
+        self.assertEqual("grid", app.right_rail.winfo_manager())
+        self.assertIs(original_task_center, app.task_center)
+
+    def test_navigation_scroll_keeps_last_module_accessible_in_small_window(self) -> None:
+        from toolbox.app import PAGE_NAMES, ToolboxApp
+
+        self.root.destroy()
+        app = ToolboxApp(page_factories={name: (lambda parent, _paths, _registry: tk.Frame(parent)) for name in PAGE_NAMES}, lazy_pages=True)
+        self.root = app
+        app.minsize(720, 400)
+        app.geometry("980x440")
+        app.update()
+        self.assertEqual("pack", app.nav_scrollbar.winfo_manager())
+        app.nav_canvas.yview_moveto(1)
+        app.update_idletasks()
+        last = app.nav_buttons["WPS写入工具"]
+        self.assertGreaterEqual(last.winfo_rooty(), app.nav_canvas.winfo_rooty())
+        self.assertLessEqual(last.winfo_rooty() + last.winfo_height(), app.status_bar.master.winfo_rooty())
 
 
 class TaskCenterTests(unittest.TestCase):

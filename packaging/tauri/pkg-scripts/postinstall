@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$SCRIPT_DIR/common.sh"
+identified "$CANONICAL" || { echo '安装后的应用标识核对失败。' >&2; exit 1; }
+installed_version=$(plist_value "$CANONICAL" CFBundleShortVersionString)
+candidates | while IFS= read -r bundle; do
+  retirable "$bundle" || continue
+  old_version=$(plist_value "$bundle" CFBundleShortVersionString) || continue
+  # Never remove a newer or unrecognised version.
+  /usr/bin/awk -v old="$old_version" -v new="$installed_version" 'BEGIN {
+    if (old !~ /^[0-9]+\.[0-9]+\.[0-9]+$/ || new !~ /^[0-9]+\.[0-9]+\.[0-9]+$/) exit 1;
+    split(old,a,"."); split(new,b,".");
+    for (i=1;i<=3;i++) {if (a[i]+0 > b[i]+0) exit 1; if (a[i]+0 < b[i]+0) exit 0} exit 0
+  }' || continue
+  # Rename first on the same filesystem; restore on failure to create an entry.
+  backup=$(/usr/bin/mktemp -d "$(/usr/bin/dirname "$bundle")/.toolbox-replace.XXXXXX")
+  /bin/mv "$bundle" "$backup/old.app"
+  if [ "$bundle" = "$USER_HOME/Desktop/$APP_NAME" ]; then
+    if ! /bin/ln -s "$CANONICAL" "$bundle"; then
+      /bin/mv "$backup/old.app" "$bundle"
+      /bin/rmdir "$backup"
+      exit 1
+    fi
+    /usr/sbin/chown -h "$CONSOLE_USER" "$bundle"
+  fi
+  /bin/rm -rf "$backup"
+done
+/bin/rm -f "$MARKER"

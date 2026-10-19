@@ -37,7 +37,7 @@ def analyze_section_gaps(
     topology_path: Path,
     workbook_path: Path,
     output_dir: Path,
-    threshold: float = 100.0,
+    threshold: float = 80.0,
 ) -> AnalysisResult:
     topology_path = Path(topology_path)
     workbook_path = Path(workbook_path)
@@ -103,7 +103,7 @@ def analyze_section_gaps(
                     "direction": f"{low}->{high}",
                 }
             )
-        interval_records.extend(_sustained_records(edge_records, time_headers))
+        interval_records.extend(_accumulated_records(edge_records, time_headers))
 
     edge_summary = summarize_edges(interval_records, time_headers)
     group_summary = summarize_groups(interval_records)
@@ -179,52 +179,57 @@ def parse_topology_edges(topology_path: Path) -> tuple[list[TopologyEdge], list[
 
 def read_price_workbook(workbook_path: Path) -> tuple[list[str], list[dict[str, object]]]:
     workbook = load_workbook(workbook_path, read_only=True, data_only=True)
-    for sheet in workbook.worksheets:
-        rows = sheet.iter_rows(values_only=True)
-        try:
-            header = next(rows)
-        except StopIteration:
-            continue
-
-        column_map = _column_map(header)
-        if column_map is None:
-            continue
-
-        price_rows = []
-        for row in rows:
-            node_name = _cell(row, column_map["node"])
-            if node_name is None or str(node_name).strip() == "":
+    try:
+        for sheet in workbook.worksheets:
+            rows = sheet.iter_rows(values_only=True)
+            try:
+                header = next(rows)
+            except StopIteration:
                 continue
 
-            prices = {}
-            for index, time_header in zip(column_map["time_columns"], column_map["time_headers"]):
-                prices[time_header] = _to_float(_cell(row, index))
+            column_map = _column_map(header)
+            if column_map is None:
+                continue
 
-            price_rows.append(
-                {
-                    "raw_name": str(node_name).strip(),
-                    "normalized_name": normalize_price_node_name(node_name),
-                    "prices": prices,
-                }
-            )
+            price_rows = []
+            for row in rows:
+                node_name = _cell(row, column_map["node"])
+                if node_name is None or str(node_name).strip() == "":
+                    continue
 
-        if price_rows:
-            return column_map["time_headers"], price_rows
+                prices = {}
+                for index, time_header in zip(column_map["time_columns"], column_map["time_headers"]):
+                    prices[time_header] = _to_float(_cell(row, index))
 
-    raise ValueError(f"未找到包含“节点名称”和分时时间列的工作表: {workbook_path}")
+                price_rows.append(
+                    {
+                        "raw_name": str(node_name).strip(),
+                        "normalized_name": normalize_price_node_name(node_name),
+                        "prices": prices,
+                    }
+                )
+
+            if price_rows:
+                return column_map["time_headers"], price_rows
+
+        raise ValueError(f"未找到包含“节点名称”和分时时间列的工作表: {workbook_path}")
+    finally:
+        workbook.close()
 
 
 def match_price_rows(topology_nodes: Iterable[str], price_rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    by_normalized_name: dict[str, list[dict[str, object]]] = {}
+    for row in price_rows:
+        by_normalized_name.setdefault(row["normalized_name"], []).append(row)
     matched = {}
     for node in topology_nodes:
-        candidates = [row for row in price_rows if row["normalized_name"] == node]
+        candidates = by_normalized_name.get(node, [])
         if not candidates:
             candidates = [row for row in price_rows if node in str(row["raw_name"])]
         if not candidates:
             continue
 
-        candidates.sort(key=lambda row: _price_row_priority(str(row["raw_name"])))
-        matched[node] = candidates[0]
+        matched[node] = min(candidates, key=lambda row: _price_row_priority(str(row["raw_name"])))
     return matched
 
 
@@ -353,29 +358,13 @@ def _direction_counts(records: list[dict[str, object]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def _sustained_records(records: list[dict[str, object]], time_headers: list[str]) -> list[dict[str, object]]:
+def _accumulated_records(records: list[dict[str, object]], time_headers: list[str]) -> list[dict[str, object]]:
     if not records:
         return []
 
     time_index = {time_header: index for index, time_header in enumerate(time_headers)}
     sorted_records = sorted(records, key=lambda record: time_index[str(record["time"])])
-    sustained = []
-    run = [sorted_records[0]]
-
-    for record in sorted_records[1:]:
-        previous_index = time_index[str(run[-1]["time"])]
-        current_index = time_index[str(record["time"])]
-        if current_index == previous_index + 1:
-            run.append(record)
-            continue
-
-        if len(run) >= MIN_SECTION_INTERVALS:
-            sustained.extend(run)
-        run = [record]
-
-    if len(run) >= MIN_SECTION_INTERVALS:
-        sustained.extend(run)
-    return sustained
+    return sorted_records if len(sorted_records) >= MIN_SECTION_INTERVALS else []
 
 
 def _windows(times: list[str], time_headers: list[str]) -> str:
@@ -402,7 +391,7 @@ def main() -> None:
     parser.add_argument("--topology", required=True, type=Path, help="拓扑 Markdown 文件路径")
     parser.add_argument("--prices", required=True, type=Path, help="500kV节点电价 Excel 文件路径")
     parser.add_argument("--output-dir", default=Path("."), type=Path, help="Excel 输出目录")
-    parser.add_argument("--threshold", default=100.0, type=float, help="价差阈值，默认 100 元/MWh")
+    parser.add_argument("--threshold", default=80.0, type=float, help="价差阈值，默认 80 元/MWh")
     args = parser.parse_args()
 
     result = analyze_section_gaps(

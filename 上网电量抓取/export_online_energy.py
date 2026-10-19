@@ -20,16 +20,25 @@ from playwright.sync_api import sync_playwright
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+WORKSPACE = SCRIPT_DIR.parent
+if str(WORKSPACE) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE))
+from toolbox_credentials import mark_browser_session, prepare_browser_session, read_login_config
+from toolbox_auth_loader import wait_for_login
+from toolbox_dates import normalize_date_input
+
 APP_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name in {"scripts", "\u811a\u672c"} else SCRIPT_DIR
 BASE_URL = "https://xhxt.chng.com.cn"
 FIRE_APP_URL = f"{BASE_URL}/gdfire/PrivateDataManage/PowerSituationReport"
 ENERGY_APP_URL = f"{BASE_URL}/gdfire/PrivateDataManageCE/PowerSituationReport"
 LOGIN_URL = f"{BASE_URL}/usercenter/#/login"
-PROFILE_DIR = SCRIPT_DIR / ".browser-profile"
-AUTH_STATE_PATH = SCRIPT_DIR / "auth_state.json"
+from toolbox_storage import data_path
+
+PROFILE_DIR = data_path(SCRIPT_DIR / ".browser-profile")
+AUTH_STATE_PATH = data_path(SCRIPT_DIR / "auth_state.json")
 AUTH_LOCK_PATH = Path(str(AUTH_STATE_PATH) + ".lock")
-CONFIG_PATH = SCRIPT_DIR / "config.json"
-OUTPUT_DIR = APP_ROOT / "\u8f93\u51fa"
+CONFIG_PATH = data_path(SCRIPT_DIR / "config.json")
+OUTPUT_DIR = data_path(APP_ROOT / "\u8f93\u51fa")
 
 FALLBACK_COMPANIES = [
     {"tenantId": "e4e6eb5c80731ac70180fab1ba2f0559", "name": "汕头电厂"},
@@ -68,24 +77,13 @@ def log(message: str) -> None:
 def process_is_alive(pid: int) -> bool:
     if pid <= 0:
         return False
-    if os.name != "nt":
-        try:
-            os.kill(pid, 0)
-            return True
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
     try:
-        import ctypes
-
-        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-        if not handle:
-            return False
-        ctypes.windll.kernel32.CloseHandle(handle)
+        os.kill(pid, 0)
         return True
-    except Exception:
+    except ProcessLookupError:
         return False
+    except PermissionError:
+        return True
 
 
 def parse_lock_timestamp(value: Any) -> float | None:
@@ -162,24 +160,18 @@ class AuthStateLock:
 
 
 def load_config() -> Config:
-    if not CONFIG_PATH.exists():
-        return Config()
-    raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    raw = read_login_config(CONFIG_PATH)
     return Config(
         username=str(raw.get("username", "") or ""),
         password=str(raw.get("password", "") or ""),
         headless=bool(raw.get("headless", True)),
         request_delay_seconds=float(raw.get("requestDelaySeconds", 1.0)),
-        output_dir=Path(raw.get("outputDir", str(OUTPUT_DIR))).expanduser(),
+        output_dir=data_path(Path(raw.get("outputDir", str(OUTPUT_DIR))).expanduser()),
     )
 
 
 def validate_date(value: str) -> str:
-    value = value.strip()
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-        raise ValueError("日期格式应为 YYYY-MM-DD，例如 2026-05-10")
-    datetime.strptime(value, "%Y-%m-%d")
-    return value
+    return normalize_date_input(value)
 
 
 def ask_date() -> str:
@@ -256,6 +248,7 @@ def load_saved_auth_state(context) -> None:
 
 def save_auth_state(context) -> None:
     AUTH_STATE_PATH.write_text(json.dumps(context.storage_state(), ensure_ascii=False, indent=2), encoding="utf-8")
+    mark_browser_session(context, AUTH_STATE_PATH)
 
 
 def playwright_proxy() -> dict[str, str] | None:
@@ -278,7 +271,7 @@ def launch_context(playwright, *, headless: bool):
     try:
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_DIR),
-            channel="chrome",
+            channel=None if os.environ.get("TOOLBOX_PORTABLE") == "1" else "chrome",
             **launch_options,
         )
     except PlaywrightError:
@@ -286,7 +279,8 @@ def launch_context(playwright, *, headless: bool):
             str(PROFILE_DIR),
             **launch_options,
         )
-    load_saved_auth_state(context)
+    if not prepare_browser_session(context, AUTH_STATE_PATH):
+        load_saved_auth_state(context)
     return context
 
 
@@ -390,6 +384,7 @@ def try_ui_login(context, username: str, password: str) -> bool:
 
 
 def try_auto_login(context, username: str, password: str) -> bool:
+    context._qingneng_login_credentials = (username, password)
     try:
         log("正在尝试接口登录...")
         if try_api_login(context, username, password):
@@ -409,23 +404,23 @@ def interactive_login(context, config: Config) -> None:
 
     page = context.new_page()
     page.goto(FIRE_APP_URL, wait_until="domcontentloaded")
-    log("请在打开的浏览器里完成登录，然后回到这里按 Enter。")
-    input()
-    if not is_logged_in(context):
-        raise RuntimeError("仍未检测到有效登录态，请确认浏览器里已经登录成功。")
-    save_auth_state(context)
-    page.close()
+    log("请在打开的浏览器里完成登录；工具会自动检测并保存登录态（最长等待5分钟）。")
+    try:
+        wait_for_login(lambda: is_logged_in(context))
+        save_auth_state(context)
+    finally:
+        page.close()
     log("登录态已保存。")
 
 
 def ensure_login(context, config: Config) -> None:
-    if is_logged_in(context):
+    if getattr(context, "_qingneng_account_changed", False) is not True and is_logged_in(context):
         return
     if not config.username or not config.password:
-        raise RuntimeError("未检测到有效登录态，且 config.json 没有填写账号密码。")
-    log("未检测到有效登录态，正在使用 config.json 的账号密码自动登录...")
+        raise RuntimeError("未检测到有效登录态，请在任务中心下方填写清能网站账号密码。")
+    log("正在使用已配置的清能网站账号密码自动登录...")
     if not try_auto_login(context, config.username, config.password):
-        raise RuntimeError("自动登录失败，请运行 login.bat 手动保存一次登录态。")
+        raise RuntimeError("自动登录失败，请在清能网站账号区检查账号密码后重新运行任务。")
     log("自动登录成功。")
 
 

@@ -44,14 +44,11 @@ class ProcessRunner:
         on_output: Callable[[str], None],
     ) -> ProcessResult:
         lines: Queue[str | None] = Queue()
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        if os.name == "nt":
-            creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         process = subprocess.Popen(
             list(command), cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, encoding="utf-8",
             errors="replace", env=dict(env) if env is not None else None,
-            creationflags=creationflags, start_new_session=os.name != "nt",
+            start_new_session=True,
             close_fds=True, bufsize=1,
         )
         with self._lock:
@@ -97,16 +94,10 @@ class ProcessRunner:
 
     def terminate(self, process: subprocess.Popen[str]) -> None:
         try:
-            if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(process.pid), "/T"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-            else:
-                self._signal_owned_process(process, signal.SIGTERM)
+            self._signal_owned_process(process, signal.SIGTERM)
             process.wait(timeout=self.terminate_timeout)
         except subprocess.TimeoutExpired:
-            if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-            else:
-                self._signal_owned_process(process, signal.SIGKILL)
+            self._signal_owned_process(process, signal.SIGKILL)
             process.wait(timeout=self.terminate_timeout)
         except OSError:
             pass

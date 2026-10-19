@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$SCRIPT_DIR/common.sh"
+# Ask the running application to save and exit. It rejects the request if a
+# business task is active; no forced termination of a workbook write is allowed.
+candidates | while IFS= read -r bundle; do
+  if [ "$bundle" != "$CANONICAL" ]; then retirable "$bundle" || continue; fi
+  identified "$bundle" || continue
+  binary=$(plist_value "$bundle" CFBundleExecutable) || continue
+  executable="$bundle/Contents/MacOS/$binary"
+  running() {
+    /bin/ps -axo command= | /usr/bin/awk -v exe="$executable" '$0 == exe || index($0, exe " ") == 1 {found=1} END {exit !found}'
+  }
+  if running; then
+    user_uid=$(/usr/bin/id -u "$CONSOLE_USER")
+    /bin/launchctl asuser "$user_uid" /usr/bin/sudo -u "$CONSOLE_USER" "$executable" --quit >/dev/null 2>&1 &
+    attempt=0
+    while running; do
+      attempt=$((attempt + 1))
+      if [ "$attempt" -ge 30 ]; then
+        echo '工具箱仍有任务运行或配置未保存。请完成任务并退出工具箱后重新安装。' >&2
+        exit 1
+      fi
+      /bin/sleep 1
+    done
+  fi
+done

@@ -9,12 +9,16 @@ from datetime import date, timedelta
 from pathlib import Path
 from tkinter import ttk
 
+WORKSPACE = Path(__file__).resolve().parents[2]
+if str(WORKSPACE) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE))
+from toolbox_dates import DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
+from toolbox_date_input import DateInput
+
 
 def open_directory(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
-    if sys.platform == "win32":
-        os.startfile(str(path))  # type: ignore[attr-defined]
-    elif sys.platform == "darwin":
+    if sys.platform == "darwin":
         subprocess.run(["open", str(path)], check=False)
     else:
         subprocess.run(["xdg-open", str(path)], check=False)
@@ -31,7 +35,8 @@ def default_review_folder_for_date(today: date, review_root: Path | None = None)
     if preferred.is_dir():
         return preferred
     if root.is_dir():
-        directories = [path for path in root.iterdir() if path.is_dir()]
+        directories = [path for path in root.iterdir()
+                       if path.is_dir() and path.name != "模板" and not path.name.startswith(".")]
         if directories:
             return max(directories, key=lambda path: path.stat().st_mtime)
     return preferred
