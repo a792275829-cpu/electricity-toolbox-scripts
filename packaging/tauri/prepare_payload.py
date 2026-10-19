@@ -231,6 +231,7 @@ def prepare(target: str, runtime_from: Path | None = None):
     (payload / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    build_support.normalize_permissions(payload)
     if target == native:
         run(
             [

@@ -105,6 +105,17 @@ MARKER='{self.marker}'
     def test_real_pkg_build_and_expand_contains_application_and_scripts(self):
         sys.path.insert(0, str(ROOT / "packaging/tauri"))
         from build_pkg import build
+        resource = self.canonical / "Contents/Resources/模板/日报.docx"
+        resource.parent.mkdir(parents=True)
+        resource.write_bytes(b"template")
+        resource.chmod(0o600)
+        resource.parent.chmod(0o700)
+        binary = self.canonical / "Contents/MacOS/toolbox"
+        binary.chmod(0o700)
+        external = self.base / "private.txt"
+        external.write_text("private")
+        external.chmod(0o600)
+        (resource.parent / "link").symlink_to(external)
         path = build(self.canonical, self.base / "output")
         self.assertTrue(path.is_file())
         self.assertTrue(path.with_suffix(".pkg.sha256").is_file())
@@ -116,6 +127,15 @@ MARKER='{self.marker}'
         info = next(expanded.rglob("PackageInfo")).read_text()
         self.assertIn('relocatable="false"', info)
         self.assertIn('overwrite-permissions="true"', info)
+        installed = next(expanded.rglob("日报.docx"))
+        self.assertEqual(installed.read_bytes(), b"template")
+        self.assertEqual(installed.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(installed.parent.stat().st_mode & 0o777, 0o755)
+        installed_binary = next(expanded.rglob("MacOS/toolbox"))
+        self.assertEqual(installed_binary.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(resource.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(external.stat().st_mode & 0o777, 0o600)
+        self.assertTrue((installed.parent / "link").is_symlink())
 
 
 if __name__ == "__main__":

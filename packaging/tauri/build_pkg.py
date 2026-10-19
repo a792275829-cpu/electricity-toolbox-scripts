@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from build_support import normalize_permissions
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -25,6 +27,7 @@ def build(app: Path, output: Path) -> Path:
         target = root / "Applications/电力工具箱.app"
         target.parent.mkdir(parents=True)
         subprocess.run(["/usr/bin/ditto", "--norsrc", "--noextattr", "--noqtn", str(app), str(target)], check=True)
+        normalize_permissions(target)
         components = staging / "components.plist"
         subprocess.run(["/usr/bin/pkgbuild", "--analyze", "--root", str(root), str(components)], check=True)
         data = plistlib.loads(components.read_bytes())

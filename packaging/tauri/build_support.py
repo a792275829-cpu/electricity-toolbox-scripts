@@ -12,6 +12,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 NODE_VERSION = "22.23.3"
 PLAYWRIGHT_VERSION = "1.55.0"
+
+
+def normalize_permissions(root: Path) -> None:
+    """Make bundled files readable after PKG installation changes their owner."""
+    for path in (root, *root.rglob("*")):
+        if path.is_symlink():
+            continue
+        mode = path.stat().st_mode
+        path.chmod(0o755 if path.is_dir() or mode & 0o111 else 0o644)
+
+
 EXCLUDED_PARTS = {".git", ".venv", "node_modules", "dist", "__pycache__", ".codegraph",
                   ".toolbox", ".state", ".qingneng-session", ".browser-profile",
                   ".browser-profile-uploader", "wps-browser-profile", "输出", "logs", "local_data", "result", "测试样例"}
