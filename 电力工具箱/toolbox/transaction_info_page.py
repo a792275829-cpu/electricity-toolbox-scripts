@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import tkinter as tk
+from toolbox_choices import SettingCheckbutton
+
 from datetime import date
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -71,7 +73,7 @@ class TransactionInfoUpdatePage(ToolPage):
         ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
             row=2, column=2, sticky="w", padx=(8, 0), pady=4
         )
-        ttk.Checkbutton(
+        SettingCheckbutton(
             form, text="写入前生成时间戳备份", variable=self.create_backup
         ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(7, 0))
 

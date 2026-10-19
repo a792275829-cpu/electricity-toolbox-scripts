@@ -7,6 +7,8 @@ import sys
 import tempfile
 import threading
 import tkinter as tk
+from toolbox_choices import OptionCheckbutton, SettingCheckbutton
+
 from collections.abc import Mapping
 from datetime import date, timedelta
 from pathlib import Path
@@ -407,10 +409,10 @@ class ReportPage(ToolPage):
 
         options = ttk.Frame(self.content)
         options.grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Checkbutton(
+        OptionCheckbutton(
             options, text="抓取网站数据并汇总 Excel", variable=self.fetch_data
         ).pack(side="left")
-        ttk.Checkbutton(
+        OptionCheckbutton(
             options, text="生成 Word 报告", variable=self.generate_word
         ).pack(side="left", padx=(16, 0))
 
@@ -649,7 +651,7 @@ class GroupUploadPage(ToolPage):
             actions, text="开始上传", command=self.confirm_upload
         )
         self.upload_button.pack(side="left", padx=(8, 0))
-        ttk.Checkbutton(
+        SettingCheckbutton(
             actions, text="已上传数据也覆盖", variable=self.force
         ).pack(side="right")
         self.register_busy_widgets(

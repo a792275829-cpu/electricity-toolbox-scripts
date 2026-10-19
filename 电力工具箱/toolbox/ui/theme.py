@@ -79,6 +79,78 @@ def _button_style(style: ttk.Style, name: str, fill: str, foreground: str,
     style.map(name, foreground=[("disabled", "#b5b5b0"), ("!disabled", foreground)])
 
 
+def _choice_styles(style: ttk.Style) -> None:
+    images = style.master._toolbox_theme_images
+
+    def indicator(selected=False, disabled=False, focus=False):
+        scale, size = 3, 18
+        bitmap = Image.new("RGB", (size * scale, size * scale), BACKGROUND)
+        draw = ImageDraw.Draw(bitmap)
+        ink = "#b5b5b0" if disabled else ACCENT
+        draw.rounded_rectangle((2 * scale, 2 * scale, 16 * scale, 16 * scale),
+                               radius=3 * scale, fill="#f5f5f3" if disabled else SURFACE,
+                               outline=ink if selected or focus else "#a3a39c", width=scale)
+        if selected:
+            draw.line([(5 * scale, 9 * scale), (8 * scale, 12 * scale),
+                       (13 * scale, 6 * scale)], fill=ink, width=2 * scale,
+                      joint="curve")
+        photo = ImageTk.PhotoImage(bitmap.resize((size, size), Image.Resampling.LANCZOS), master=style.master)
+        images.append(photo)
+        return photo
+
+    check = f"Toolbox{len(images)}.Check"
+    style.element_create(check, "image", indicator(),
+                         ("disabled", "selected", indicator(True, True)),
+                         ("disabled", indicator(disabled=True)),
+                         ("selected", indicator(True)),
+                         ("focus", indicator(focus=True)), sticky="w", width=22)
+    style.layout("TCheckbutton", [("Checkbutton.padding", {"sticky": "nsew", "children": [
+        (check, {"side": "left", "sticky": "w"}),
+        ("Checkbutton.focus", {"side": "left", "sticky": "nsew", "children": [
+            ("Checkbutton.label", {"sticky": "nsew"}),
+        ]}),
+    ]})])
+    style.configure("TCheckbutton", padding=(0, 6), background=BACKGROUND, foreground=TEXT)
+    style.map("TCheckbutton", foreground=[("disabled", "#b5b5b0")],
+              background=[("active", BACKGROUND)])
+
+    option = _rounded_element(style, "Option", SURFACE, outline=BORDER, states=(
+        ("disabled", "#f5f5f3", BORDER),
+        ("selected", "#e9e9e4", "#92928a"),
+        ("focus", "#f5f5f2", "#92928a"),
+        ("active", "#f5f5f2", BORDER),
+    ))
+    style.layout("Option.TCheckbutton", [(option, {"sticky": "nsew", "children": [
+        ("Checkbutton.padding", {"sticky": "nsew", "children": [
+            (check, {"side": "left", "sticky": "w"}),
+            ("Checkbutton.focus", {"side": "left", "sticky": "nsew", "children": [
+                ("Checkbutton.label", {"sticky": "nsew"}),
+            ]}),
+        ]}),
+    ]})])
+    style.configure("Option.TCheckbutton", padding=(10, 6))
+
+    group = _rounded_element(style, "ChoiceGroup", "#f1f1ed", radius=8)
+    style.layout("ChoiceGroup.TFrame", [(group, {"sticky": "nsew", "children": [
+        ("Frame.padding", {"sticky": "nsew"}),
+    ]})])
+    segment = _rounded_element(style, "Segment", "#f1f1ed", radius=6, states=(
+        ("disabled", "#f5f5f3", None),
+        ("selected", ACCENT, None),
+        ("focus", "#e1e1db", "#92928a"),
+        ("active", "#e7e7e1", None),
+    ))
+    style.layout("Segment.TRadiobutton", [(segment, {"sticky": "nsew", "children": [
+        ("Radiobutton.padding", {"sticky": "nsew", "children": [
+            ("Radiobutton.focus", {"sticky": "nsew", "children": [
+                ("Radiobutton.label", {"sticky": "nsew"}),
+            ]}),
+        ]}),
+    ]})])
+    style.configure("Segment.TRadiobutton", padding=(12, 7), anchor="center", foreground=TEXT)
+    style.map("Segment.TRadiobutton", foreground=[("disabled", "#b5b5b0"), ("selected", SURFACE)])
+
+
 def configure_theme(style: ttk.Style) -> None:
     style.theme_use("clam")
     family = font.nametofont("TkDefaultFont", root=style.master).actual("family")
@@ -110,6 +182,7 @@ def configure_theme(style: ttk.Style) -> None:
     style.configure("TLabelframe.Label", foreground=MUTED, font=(family, 10, "normal"))
     style.configure("TCheckbutton", padding=(0, 3), indicatorbackground=SURFACE, indicatorforeground=TEXT)
     style.configure("TRadiobutton", padding=(0, 3), indicatorbackground=SURFACE, indicatorforeground=TEXT)
+    _choice_styles(style)
     style.map("TCheckbutton", background=[("active", BACKGROUND)])
     style.map("TRadiobutton", background=[("active", BACKGROUND)])
     style.configure("Treeview", background=SURFACE, fieldbackground=SURFACE, rowheight=30,

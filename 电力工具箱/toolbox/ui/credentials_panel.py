@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import tkinter as tk
+
 from pathlib import Path
 from tkinter import ttk
 
@@ -9,6 +10,7 @@ WORKSPACE = Path(__file__).resolve().parents[3]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
 from toolbox_credentials import CredentialStore
+from toolbox_choices import SettingCheckbutton
 
 
 class CredentialsPanel(ttk.Frame):
@@ -35,7 +37,7 @@ class CredentialsPanel(ttk.Frame):
         self.password_entry.grid(row=1, column=1, sticky="ew")
         actions = ttk.Frame(self)
         actions.pack(fill="x", pady=(2, 4))
-        ttk.Checkbutton(actions, text="显示密码", variable=self.show_password_var, command=self._toggle_password).pack(side="left")
+        SettingCheckbutton(actions, text="显示密码", variable=self.show_password_var, command=self._toggle_password).pack(side="left")
         ttk.Button(actions, text="保存", command=self.save).pack(side="right")
         ttk.Label(self, textvariable=self.status_var, style="Muted.TLabel", wraplength=250).pack(fill="x")
         ttk.Label(self, text="默认自动保存，供各模块下次登录使用。", style="Muted.TLabel", wraplength=250).pack(fill="x", pady=(2, 0))

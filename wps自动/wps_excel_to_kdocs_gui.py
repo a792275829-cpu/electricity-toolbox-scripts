@@ -43,6 +43,8 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR.parent) not in sys.path:
     sys.path.insert(0, str(BASE_DIR.parent))
 from toolbox_storage import data_path
+from toolbox_log_console import LogConsole, explain_error, redact
+from toolbox_choices import SegmentedGroup
 
 DATA_DIR = data_path(BASE_DIR)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -1886,10 +1888,9 @@ class DocumentConfigDialog(tk.Toplevel):
         ttk.Entry(docs, textvariable=self.config_name).grid(row=0, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
 
         ttk.Label(docs, text="数据来源").grid(row=1, column=0, padx=8, pady=6, sticky="w")
-        source_frame = ttk.Frame(docs)
-        source_frame.grid(row=1, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
-        ttk.Radiobutton(source_frame, text="本地表格", variable=self.source_type, value="excel").pack(side="left")
-        ttk.Radiobutton(source_frame, text="金山文档", variable=self.source_type, value="kdocs").pack(side="left", padx=(16, 0))
+        source_frame = SegmentedGroup(docs, variable=self.source_type,
+                                      choices=(("excel", "本地表格"), ("kdocs", "金山文档")))
+        source_frame.grid(row=1, column=1, columnspan=2, padx=8, pady=6, sticky="w")
 
         ttk.Label(docs, text="来源表格链接").grid(row=2, column=0, padx=8, pady=6, sticky="w")
         source_url_combo = ttk.Combobox(docs, textvariable=self.source_url, values=self.recent_urls)
@@ -2293,26 +2294,12 @@ class WpsWriterFrame(ttk.Frame):
         file_frame.grid(row=0, column=0, sticky="ew")
 
         ttk.Label(file_frame, text="连接方式").grid(row=0, column=0, padx=8, pady=8, sticky="w")
-        mode_frame = ttk.Frame(file_frame)
-        mode_frame.grid(row=0, column=1, padx=8, pady=8, sticky="ew")
-        ttk.Radiobutton(
-            mode_frame,
-            text="WPS 专用浏览器（推荐）",
-            variable=self.browser_mode,
-            value="managed_cdp",
-        ).pack(side="left")
-        ttk.Radiobutton(
-            mode_frame,
-            text="临时浏览器",
-            variable=self.browser_mode,
-            value="persistent",
-        ).pack(side="left", padx=(16, 0))
-        ttk.Radiobutton(
-            mode_frame,
-            text="连接已打开的浏览器",
-            variable=self.browser_mode,
-            value="cdp",
-        ).pack(side="left", padx=(16, 0))
+        mode_frame = SegmentedGroup(file_frame, variable=self.browser_mode, choices=(
+            ("managed_cdp", "WPS 专用浏览器（推荐）"),
+            ("persistent", "临时浏览器"),
+            ("cdp", "连接已打开的浏览器"),
+        ))
+        mode_frame.grid(row=0, column=1, padx=8, pady=8, sticky="w")
 
         ttk.Label(file_frame, text="浏览器连接地址").grid(row=1, column=0, padx=8, pady=8, sticky="w")
         ttk.Entry(file_frame, textvariable=self.cdp_url).grid(row=1, column=1, padx=8, pady=8, sticky="ew")
@@ -2458,19 +2445,10 @@ class WpsWriterFrame(ttk.Frame):
             self.execution_toolbar, text="预览", command=self.preview
         ).pack(side="right", padx=(0, 6))
 
-        self.module_log_frame = ttk.LabelFrame(root, text="操作日志")
+        self.log_console = LogConsole(root, module="WPS写入工具", directory=LOG_DIR / "runs")
+        self.module_log_frame = self.log_console
         self.module_log_frame.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
-        log_actions = ttk.Frame(self.module_log_frame)
-        log_actions.pack(fill="x", padx=8, pady=(8, 0))
-        ttk.Button(log_actions, text="清空日志", command=self.clear_log).pack(side="left")
-        ttk.Button(log_actions, text="保存日志", command=self.save_log).pack(side="left", padx=8)
-        self.log_text = tk.Text(self.module_log_frame, height=8, wrap="word")
-        self.log_text.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
-        log_scroll = ttk.Scrollbar(
-            self.module_log_frame, orient="vertical", command=self.log_text.yview
-        )
-        log_scroll.pack(side="left", fill="y", pady=8)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
+        self.log_text = self.log_console.text
 
     def add_config(self) -> None:
         dialog = DocumentConfigDialog(
@@ -2744,12 +2722,17 @@ class WpsWriterFrame(ttk.Frame):
         return thread
 
     def detail_log(self, message: str) -> None:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-        now = datetime.now()
-        log_path = LOG_DIR / f"wps_write_{now.strftime('%Y-%m-%d')}.log"
-        line = f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n"
-        with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(line)
+        if "Traceback (most recent call last)" in message:
+            self.log_queue.put(message)
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            now = datetime.now()
+            log_path = LOG_DIR / f"wps_write_{now.strftime('%Y-%m-%d')}.log"
+            line = redact(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write(line)
+        except OSError as exc:
+            self.log_queue.put(f"详细日志未能保存：{exc}；仍可复制本次运行日志。")
 
     def detail_log_prepared(self, action: str, prepared: list[PreparedMapping]) -> None:
         self.detail_log(f"{action}: {len(prepared)} region(s)")
@@ -2792,8 +2775,16 @@ class WpsWriterFrame(ttk.Frame):
                 message = self.log_queue.get_nowait()
             except queue.Empty:
                 break
-            self.log_text.insert("end", f"{message}\n")
-            self.log_text.see("end")
+            self.log_console.append(message)
+            if any(marker in message for marker in ("操作失败：", "预览失败：", "暂时无法写入：", "检查失败：", "回读数据与来源不一致")):
+                diagnosis = explain_error(message) or (message, "点击“复制错误”提供完整日志；重试前核对是否已有部分写入。")
+                self.log_console.finish("执行失败", *diagnosis)
+            elif "Traceback (most recent call last)" in message:
+                diagnosis = explain_error(message)
+                if diagnosis:
+                    self.log_console.finish("执行失败", *diagnosis)
+            elif "写入完成：" in message or "预览通过：" in message:
+                self.log_console.finish("已完成")
         self.schedule_drain_logs()
 
     def schedule_drain_logs(self) -> None:
@@ -2818,18 +2809,17 @@ class WpsWriterFrame(ttk.Frame):
         super().destroy()
 
     def clear_log(self) -> None:
-        self.log_text.delete("1.0", "end")
+        # Finish persisting pending messages before starting a separate run.
+        while True:
+            try:
+                self.log_console.append(self.log_queue.get_nowait())
+            except queue.Empty:
+                break
+        self.log_console.begin()
 
     def save_log(self) -> None:
-        path = filedialog.asksaveasfilename(
-            parent=self,
-            title="保存操作日志",
-            defaultextension=".txt",
-            filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")],
-        )
-        if not path:
-            return
-        Path(path).write_text(self.log_text.get("1.0", "end"), encoding="utf-8")
+        # Compatibility for older callers: logs are now copied, never exported.
+        self.log_console.copy_error()
 
     def load_initial_config(self) -> None:
         config = load_config()
@@ -3044,10 +3034,16 @@ class WpsWriterFrame(ttk.Frame):
         )
 
     def preview(self) -> None:
+        if self.worker and self.worker.is_alive():
+            messagebox.showinfo("正在写入", "写入任务正在进行，请等待完成。", parent=self)
+            return
+        self.clear_log()
+        self.log_console.status.set("正在预览…")
         try:
             prepared = self.prepare_selected()
         except Exception as exc:
-            messagebox.showerror("预览失败", str(exc), parent=self)
+            diagnosis = explain_error(type(exc).__name__ + ": " + str(exc))
+            messagebox.showerror("预览失败", "\n\n".join(diagnosis) if diagnosis else str(exc), parent=self)
             self.log(f"预览失败：{exc}")
             self.detail_log(f"PREVIEW ERROR: {exc}")
             self.detail_log(traceback.format_exc())
@@ -3060,15 +3056,19 @@ class WpsWriterFrame(ttk.Frame):
         if self.worker and self.worker.is_alive():
             messagebox.showinfo("正在写入", "写入任务正在进行，请等待完成。", parent=self)
             return
+        self.clear_log()
+        self.log_console.status.set("正在检查写入配置…")
         try:
             prepared = self.prepare_selected()
         except Exception as exc:
-            messagebox.showerror("暂时无法写入", str(exc), parent=self)
+            diagnosis = explain_error(type(exc).__name__ + ": " + str(exc))
+            messagebox.showerror("暂时无法写入", "\n\n".join(diagnosis) if diagnosis else str(exc), parent=self)
             self.log(f"暂时无法写入：{exc}")
             self.detail_log(f"WRITE BLOCKED: {exc}")
             self.detail_log(traceback.format_exc())
             return
 
+        self.log_console.status.set("正在写入…")
         self.save_current_config()
         self.detail_log_prepared("WRITE PREPARED", prepared)
         self.worker = self._start_tracked_thread(

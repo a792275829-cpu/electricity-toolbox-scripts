@@ -90,13 +90,18 @@ class WpsToolbarLayoutTests(unittest.TestCase):
         self.assertEqual(page.actions.winfo_manager(), "")
         self.assertIsNot(page.log_text, page.writer_frame.log_text)
 
+        from toolbox_log_console import LogConsole
+
+        visible_consoles = [widget for widget in descendants(page)
+                            if isinstance(widget, LogConsole) and widget.winfo_ismapped()]
+        self.assertEqual(1, len(visible_consoles))
         visible_log_frames = [
             str(widget.cget("text"))
             for widget in descendants(page)
             if isinstance(widget, ttk.LabelFrame) and widget.winfo_ismapped()
         ]
-        self.assertIn("操作日志", visible_log_frames)
-        self.assertNotIn("运行日志", visible_log_frames)
+        self.assertIs(visible_consoles[0], page.writer_frame.log_console)
+        self.assertNotIn("操作日志", visible_log_frames)
 
         page.destroy()
         root.destroy()

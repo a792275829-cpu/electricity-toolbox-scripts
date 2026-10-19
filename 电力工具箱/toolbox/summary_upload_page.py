@@ -4,6 +4,8 @@ import shlex
 import queue
 import threading
 import tkinter as tk
+from toolbox_choices import SegmentedGroup
+
 from datetime import date, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -63,13 +65,9 @@ class SummaryUploadPage(ToolPage):
             command=self.choose_input_dir, button_text="选择文件夹",
         )
         ttk.Label(form, text="执行功能").grid(row=1, column=0, sticky="w", pady=8)
-        modes = ttk.Frame(form)
+        modes = SegmentedGroup(form, variable=self.mode, choices=self.MODE_LABELS.items())
         modes.grid(row=1, column=1, columnspan=2, sticky="w")
-        mode_buttons = []
-        for value, label in self.MODE_LABELS.items():
-            button = ttk.Radiobutton(modes, text=label, variable=self.mode, value=value)
-            button.pack(side="left", padx=(0, 16))
-            mode_buttons.append(button)
+        mode_buttons = modes.buttons
 
         self.summary_form = ttk.Frame(form)
         self.summary_form.grid(row=2, column=0, columnspan=3, sticky="ew")

@@ -26,20 +26,37 @@ class UserFacingError:
     cause: BaseException
 
 
-def classify_error(exc: BaseException) -> UserFacingError:
-    text = str(exc).lower()
+def classify_error(exc: BaseException, output: str = "") -> UserFacingError:
+    import re
+    from toolbox_log_console import explain_error, redact
+
     if isinstance(exc, TaskCancelled):
         return UserFacingError(ErrorCategory.CANCELLED, "任务已取消", "可以调整参数后重新运行。", exc)
     if isinstance(exc, FileNotFoundError):
         return UserFacingError(ErrorCategory.INPUT, "找不到输入文件或程序文件", "请重新选择文件，并确认项目目录完整。", exc)
     if isinstance(exc, PermissionError):
-        return UserFacingError(ErrorCategory.PERMISSION, "文件无权访问或正被占用", "请关闭占用该文件的 Excel/WPS 后重试。", exc)
+        return UserFacingError(ErrorCategory.PERMISSION, "文件无权访问或正被占用", "请关闭占用该文件的 Excel/WPS，并检查目录访问权限后重试。", exc)
+    diagnosis = explain_error(exc.__class__.__name__ + ": " + str(exc))
+    if diagnosis is None:
+        # Prefer the final concrete exception over earlier recovered failures.
+        for line in reversed(output.splitlines()):
+            diagnosis = explain_error(line)
+            if diagnosis:
+                break
+    if diagnosis:
+        summary, advice = diagnosis
+        category = ErrorCategory.UNKNOWN
+        for word, candidate in (("依赖", ErrorCategory.DEPENDENCY), ("登录", ErrorCategory.AUTHENTICATION),
+                                ("超时", ErrorCategory.NETWORK), ("网络", ErrorCategory.NETWORK),
+                                ("权限", ErrorCategory.PERMISSION), ("文件", ErrorCategory.INPUT)):
+            if word in summary:
+                category = candidate
+                break
+        return UserFacingError(category, summary, advice, exc)
     if isinstance(exc, ProcessExecutionError):
-        return UserFacingError(ErrorCategory.EXTERNAL_PROCESS, str(exc), "请查看任务日志中的最后一段输出。", exc)
-    if isinstance(exc, (ImportError, ModuleNotFoundError)):
-        return UserFacingError(ErrorCategory.DEPENDENCY, "缺少运行依赖", "请重新运行 setup_macos.command。", exc)
-    if any(marker in text for marker in ("登录", "login", "auth", "认证")):
-        return UserFacingError(ErrorCategory.AUTHENTICATION, "登录状态不可用", "请检查对应网站的账号配置和网络后重新运行任务。", exc)
-    if any(marker in text for marker in ("timeout", "timed out", "network", "socket", "连接")):
-        return UserFacingError(ErrorCategory.NETWORK, "网络请求失败", "请检查网络和代理后重试。上传任务需重新确认。", exc)
-    return UserFacingError(ErrorCategory.UNKNOWN, str(exc) or exc.__class__.__name__, "请查看完整日志和 traceback。", exc)
+        for line in reversed(output.splitlines()):
+            if re.search(r"(?:[A-Za-z_]+(?:Error|Exception)|失败|错误)[:：]\s*\S", line):
+                return UserFacingError(ErrorCategory.EXTERNAL_PROCESS, redact(line.strip())[:300],
+                                       "请根据上述原始错误检查参数或输入文件；点击“复制错误”可提供完整排查信息。", exc)
+        return UserFacingError(ErrorCategory.EXTERNAL_PROCESS, "任务执行失败，暂未识别具体原因", "点击“复制错误”获取完整日志用于排查；上传或写入任务请先核对是否已有部分成功。", exc)
+    return UserFacingError(ErrorCategory.UNKNOWN, str(exc) or exc.__class__.__name__, "请点击“复制错误”，提供完整日志以便排查。", exc)

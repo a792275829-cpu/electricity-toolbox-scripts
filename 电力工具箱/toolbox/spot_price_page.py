@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import tkinter as tk
+from toolbox_choices import OptionCheckbutton, SettingCheckbutton
+
 from datetime import date, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -102,15 +104,15 @@ class SpotPriceUpdatePage(ToolPage):
         ttk.Label(stations, text="更新场站：").pack(side="left")
         self.station_checkbuttons = []
         for label, variable in self.selected_stations.items():
-            button = ttk.Checkbutton(stations, text=label, variable=variable)
-            button.pack(side="left", padx=(0, 18))
+            button = OptionCheckbutton(stations, text=label, variable=variable)
+            button.pack(side="left", padx=(0, 12))
             self.station_checkbuttons.append(button)
 
         options = ttk.Frame(form)
         options.grid(row=5, column=0, columnspan=5, sticky="w", pady=(7, 0))
-        ttk.Checkbutton(options, text="覆盖已有非空价格", variable=self.overwrite).pack(side="left")
-        ttk.Checkbutton(options, text="写入前生成时间戳备份", variable=self.create_backup).pack(
-            side="left", padx=(18, 0)
+        SettingCheckbutton(options, text="覆盖已有非空价格", variable=self.overwrite).pack(anchor="w")
+        SettingCheckbutton(options, text="写入前生成时间戳备份", variable=self.create_backup).pack(
+            anchor="w", pady=(4, 0)
         )
 
         mapping = ttk.LabelFrame(self.content, text="固定映射", padding=12)

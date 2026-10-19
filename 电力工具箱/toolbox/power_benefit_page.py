@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import tkinter as tk
+from toolbox_choices import OptionCheckbutton, SettingCheckbutton
+
 from datetime import date
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -37,14 +39,14 @@ class PowerBenefitUpdatePage(ToolPage):
             buttons.append(add_path_row(
                 form, row=index, label=f"{station}工作簿", variable=self.workbooks[index],
                 command=lambda i=index: self.choose_workbook(i), button_text="选择文件"))
-            ttk.Checkbutton(form, text="更新", variable=self.selected[index]).grid(
+            OptionCheckbutton(form, text="更新", variable=self.selected[index]).grid(
                 row=index, column=3, padx=(8, 0))
         for row, label, variable in ((2, "开始日期", self.start_date), (3, "截止日期 D", self.end_date)):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", pady=4)
             DateInput(form, textvariable=variable, width=16).grid(row=row, column=1, sticky="w", pady=4)
         ttk.Label(form, text="开始日期留空：检查模板所有历史空白；" + DATE_INPUT_HINT,
                   style="Muted.TLabel").grid(row=4, column=0, columnspan=4, sticky="w", pady=4)
-        ttk.Checkbutton(form, text="写入前生成时间戳备份", variable=self.create_backup).grid(
+        SettingCheckbutton(form, text="写入前生成时间戳备份", variable=self.create_backup).grid(
             row=5, column=0, columnspan=3, sticky="w", pady=4)
         mapping = ttk.LabelFrame(self.content, text="更新口径", padding=12)
         mapping.grid(row=1, column=0, sticky="ew", pady=(10, 0))

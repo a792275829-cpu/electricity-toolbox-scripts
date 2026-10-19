@@ -48,7 +48,7 @@ class ToolPageTaskTests(unittest.TestCase):
         self.page._drain_log_queue()
         lines = self.page.log_text.get("1.0", "end-1c").splitlines()
         self.assertEqual(5_000, len(lines))
-        self.assertEqual("line-9999", lines[-1])
+        self.assertTrue(lines[-1].endswith("line-9999"))
 
     def test_process_output_uses_engine_and_page_recovers(self) -> None:
         self.page.run_process(

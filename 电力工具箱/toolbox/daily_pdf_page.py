@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import tkinter as tk
+from toolbox_choices import SegmentedGroup
+
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -67,13 +69,9 @@ class DailyPdfParserPage(ToolPage):
             button_text="选择位置",
         )
         ttk.Label(settings, text="执行功能").grid(row=2, column=0, sticky="w", pady=8)
-        modes = ttk.Frame(settings)
+        modes = SegmentedGroup(settings, variable=self.mode, choices=(("both", "解析并上传"), ("parse", "仅解析"), ("upload", "仅上传")))
         modes.grid(row=2, column=1, columnspan=2, sticky="w")
-        mode_buttons = []
-        for value, label in (("both", "解析并上传"), ("parse", "仅解析"), ("upload", "仅上传")):
-            button = ttk.Radiobutton(modes, text=label, variable=self.mode, value=value)
-            button.pack(side="left", padx=(0, 16))
-            mode_buttons.append(button)
+        mode_buttons = modes.buttons
         self.mode.trace_add("write", self._update_mode)
 
         notes = ttk.LabelFrame(self.content, text="输出说明", padding=10)

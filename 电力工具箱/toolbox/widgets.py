@@ -4,10 +4,14 @@ import queue
 import threading
 import inspect
 import traceback
+import shlex
+from datetime import datetime
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Callable, TypeVar
+
+from toolbox_log_console import LogConsole
 
 from .runtime import TaskRegistry, utf8_environment
 from .tasks import TaskSnapshot, TaskState, classify_error
@@ -28,13 +32,12 @@ class ToolPage(ttk.Frame):
         super().__init__(parent, padding=18)
         self.registry = registry
         self.busy = False
-        self.status_var = tk.StringVar(master=self, value="就绪")
+        self.status_var = tk.StringVar(master=self, value="")
         self._busy_widgets: list[tk.Widget] = []
         self.current_task_id: str | None = None
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._completion_queue: queue.Queue[tuple[TaskSnapshot, Callable | None]] = queue.Queue()
         self._poll_after_id: str | None = None
-        self._max_log_lines = 5_000
         self._current_cancellable = True
 
         self.columnconfigure(0, weight=1)
@@ -80,23 +83,10 @@ class ToolPage(ttk.Frame):
             row=1, column=0, sticky="w", pady=(5, 0)
         )
 
-        log_frame = ttk.LabelFrame(self.footer, text="运行日志", padding=8)
-        log_frame.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-        self.log_text = tk.Text(
-            log_frame,
-            height=6,
-            wrap="word",
-            font="TkFixedFont",
-            borderwidth=0,
-        )
-        self.log_text.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(
-            log_frame, orient="vertical", command=self.log_text.yview
-        )
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.log_text.configure(yscrollcommand=scrollbar.set)
+        self.log_console = LogConsole(self.footer, module=title or "工具箱")
+        self.log_console.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
+        self.log_text = self.log_console.text
+        self.log_text.configure(height=10)
         self._schedule_poll()
 
     def _resize_description(self, event) -> None:
@@ -138,10 +128,14 @@ class ToolPage(ttk.Frame):
             self.progress.grid_remove()
         if status:
             self.status_var.set(status)
+            if busy:
+                self.log_console.status.set(status)
+            elif status == "无数据":
+                self.log_console.finish(status)
         self.cancel_button.configure(state="normal" if busy and self._current_cancellable else "disabled")
 
     def append_log(self, text: str) -> None:
-        self._log_queue.put(text.rstrip("\n") + "\n")
+        self._log_queue.put(f"[{datetime.now():%H:%M:%S}] " + text.rstrip("\n") + "\n")
         if threading.current_thread() is threading.main_thread():
             self._drain_log_queue()
 
@@ -169,20 +163,11 @@ class ToolPage(ttk.Frame):
                 break
         if not chunks:
             return
-        self.log_text.insert("end", "".join(chunks))
-        line_count = int(self.log_text.index("end-1c").split(".")[0])
-        excess = max(0, line_count - 1 - self._max_log_lines)
-        if excess:
-            self.log_text.delete("1.0", f"{excess + 1}.0")
-        self.log_text.see("end")
+        self.log_console.append("".join(chunks))
 
     def clear_log(self) -> None:
-        while True:
-            try:
-                self._log_queue.get_nowait()
-            except queue.Empty:
-                break
-        self.log_text.delete("1.0", "end")
+        self._drain_log_queue()
+        self.log_console.begin()
 
     def run_in_thread(
         self,
@@ -194,7 +179,10 @@ class ToolPage(ttk.Frame):
     ) -> None:
         if self.busy:
             return
+        if not self.log_console._initialized or self.log_console.finished:
+            self.log_console.begin(status)
         self._current_cancellable = cancellable
+        self.log_console.status.set(status)
         self.set_busy(True, status)
 
         def task_worker(token, _emit):
@@ -215,15 +203,18 @@ class ToolPage(ttk.Frame):
         result: T,
         callback: Callable[[T], None] | None,
     ) -> None:
+        self.log_console.finish("已完成")
         self.set_busy(False, "已完成")
         if callback is not None:
             callback(result)
 
     def _finish_error(self, exc: Exception, details: str) -> None:
+        error = classify_error(exc, details)
+        self.log_console.finish("执行失败", error.summary, error.advice)
         self.append_log(f"失败：{exc}")
         self.append_log(details)
         self.set_busy(False, "执行失败")
-        messagebox.showerror("执行失败", str(exc), parent=self)
+        messagebox.showerror("执行失败", f"{error.summary}\n\n{error.advice}", parent=self)
 
     def cancel_current_task(self) -> None:
         if self.current_task_id and self.registry.cancel(self.current_task_id):
@@ -231,16 +222,23 @@ class ToolPage(ttk.Frame):
 
     def _finish_snapshot(self, snapshot: TaskSnapshot, callback: Callable | None) -> None:
         self.current_task_id = None
+        self._drain_log_queue()
         if snapshot.state is TaskState.SUCCEEDED:
-            self.set_busy(False, "已完成")
+            output = self.log_console.contents()
+            warning = any(marker in output for marker in ("跳过", "回读不一致", "读取失败", "数据缺失", "无数据："))
+            state = "完成（有提示）" if warning else "已完成"
+            self.log_console.finish(state)
+            self.set_busy(False, state)
             if callback is not None:
                 callback(snapshot.result)
             return
         if snapshot.state is TaskState.CANCELLED:
+            self.log_console.finish("已取消")
             self.append_log("任务已取消。")
             self.set_busy(False, "已取消")
             return
-        error = classify_error(snapshot.error or RuntimeError("未知错误"))
+        error = classify_error(snapshot.error or RuntimeError("未知错误"), self.log_console.contents())
+        self.log_console.finish("执行失败", error.summary, error.advice)
         self.append_log(f"失败：{error.summary}")
         self.append_log(f"建议：{error.advice}")
         if snapshot.error is not None:
@@ -261,8 +259,11 @@ class ToolPage(ttk.Frame):
     ) -> None:
         if self.busy:
             return
-        self.append_log(f"> {' '.join(command)}")
+        if not self.log_console._initialized or self.log_console.finished:
+            self.log_console.begin(status)
+        self.append_log(f"工作目录：{cwd}\n> {shlex.join(command)}")
         self._current_cancellable = cancellable
+        self.log_console.status.set(status)
         self.set_busy(True, status)
         self.current_task_id = self.registry.start_process(
             status,
