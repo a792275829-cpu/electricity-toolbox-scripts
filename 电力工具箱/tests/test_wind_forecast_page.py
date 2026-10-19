@@ -35,20 +35,24 @@ class WindForecastPageTests(unittest.TestCase):
         self.assertEqual(paths.wind_forecast_output_dir, workspace / "风力预测截图" / "输出")
         page.destroy()
 
-    def test_first_navigation_loads_only_wind_page_and_reuses_it(self) -> None:
-        # A fresh process catches eager imports even when other tests loaded pages.
+    def test_first_navigation_creates_only_wind_page_and_reuses_it(self) -> None:
+        # A fresh process catches heavy imports and unwanted page creation.
         result = subprocess.run(
             [sys.executable, "-c", """
 import sys
 from toolbox.app import ToolboxApp
 app = ToolboxApp()
 try:
+    assert app.current_page == "导出上网电量"
+    assert set(app.pages) == {"导出上网电量"}
     app.show_page("风力预测截图")
     app.update_idletasks()
     page = app.pages["风力预测截图"]
     assert page.__class__.__name__ == "WindForecastPage"
     assert page.winfo_manager() == "grid"
-    for name in ("toolbox.pages", "toolbox.summary_upload_page", "openpyxl", "numpy", "playwright"):
+    # The default export page imports page classes without constructing them.
+    assert set(app.pages) == {"导出上网电量", "风力预测截图"}
+    for name in ("openpyxl", "numpy", "playwright"):
         assert name not in sys.modules, name
     page.run_date.set("2026-08-21")
     app.show_page("今日概览")
