@@ -49,29 +49,4 @@ def build_index(tag, assets, signatures, notes="", date=None):
 
 
 if __name__ == "__main__":
-    tag = sys.argv[1]
-    release = json.loads(
-        run("gh", "release", "view", tag, "--json", "assets,body,isDraft")
-    )
-    if not release["isDraft"]:
-        raise ValueError("只能为草稿发行版生成索引")
-    # gh CLI assets use name/url; translate to REST naming.
-    repository = run(
-        "gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
-    )
-    release_id = run(
-        "gh", "release", "view", tag, "--json", "databaseId", "--jq", ".databaseId"
-    )
-    assets = json.loads(run("gh", "api", f"repos/{repository}/releases/{release_id}"))[
-        "assets"
-    ]
-    with tempfile.TemporaryDirectory() as directory:
-        run("gh", "release", "download", tag, "--pattern", "*.sig", "--dir", directory)
-        signatures = {p.name: p.read_text() for p in Path(directory).glob("*.sig")}
-        index = build_index(tag, assets, signatures, release["body"])
-        path = Path(directory) / "latest.json"
-        path.write_text(
-            json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        run("gh", "release", "upload", tag, str(path), "--clobber")
-    print("Validated signed update assets for darwin-aarch64")
+    raise SystemExit("已停止发布 App 更新包和 latest.json；请仅发布 DMG 及校验文件")

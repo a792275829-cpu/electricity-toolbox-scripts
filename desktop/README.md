@@ -2,7 +2,7 @@
 
 Tauri 2 负责单实例和系统托盘；主窗口和更新窗口直接使用原来的 Tk 界面，React 仅保留启动故障提示。当前仅维护 Apple 芯片 Mac（macOS 14+），不包含 Intel Mac。
 
-主界面没有另一套网页实现：原来的布局、控件、字体主题、日期选择、文件对话框、快捷键、任务取消、账号保存、日志、WPS 配置表格和弹窗，都由原版代码执行。Mac 发行包固定携带 Tcl/Tk 8.6.18，与本机原版一致，避免 Tk 9 的字体／缩放差异。启动和重新打开时后台检查 GitHub 正式版，发现新版在“电力工作台”下显示红色 `new`。点击可查看更新说明、下载进度、取消或重试；点击一次“下载并更新”后，由 Tauri 下载并验证内置公钥签名，检查任务和保存配置，再自动替换应用并重启。右下角更新入口已移除，Mac 菜单栏图标仍保留手动检查。侧栏仅展示业务模块，启动默认进入“导出上网电量”。现有 Tk 启动器保留。
+主界面没有另一套网页实现：原来的布局、控件、字体主题、日期选择、文件对话框、快捷键、任务取消、账号保存、日志、WPS 配置表格和弹窗，都由原版代码执行。Mac 发行包固定携带 Tcl/Tk 8.6.18，与本机原版一致，避免 Tk 9 的字体／缩放差异。启动和重新打开时后台检查 GitHub 正式版，发现新版在“电力工作台”下显示红色 `new`。点击可查看更新说明、下载 DMG、查看进度、取消或重试；下载通过 SHA-256 校验后打开镜像，退出工具箱后运行镜像中的安装命令覆盖更新。右下角更新入口已移除，Mac 菜单栏图标仍保留手动检查。侧栏仅展示业务模块，启动默认进入“导出上网电量”。现有 Tk 启动器保留。
 
 ## 日常维护
 
@@ -29,7 +29,7 @@ python packaging/tauri/build_dmg.py desktop/src-tauri/target/release/bundle/maco
 
 构建机需要 `uv`、Node/npm、Rust 和根目录 Python 依赖。资源输出到 Git 忽略的 `desktop/src-tauri/payload/`；安装包位于 `desktop/src-tauri/target/release/bundle/`，指定 `--target` 时多一层目标目录。
 
-本地生成签名包需要设置 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；不要把私钥写入仓库、命令行参数或日志。首次生成的本机私钥保存在 `~/.config/electricity-toolbox/signing/updater.key`，目录权限 700、文件权限 600。请单独备份，不能每次发版重新生成。其公钥已写入 `src-tauri/tauri.conf.json`。
+DMG 内部仍需构建 `.app` 作为中间产物，并保留 macOS ad-hoc 代码签名；不生成或分发独立 App 压缩包。
 
 ## GitHub 发布与应用内更新
 
@@ -38,12 +38,12 @@ python packaging/tauri/build_dmg.py desktop/src-tauri/target/release/bundle/maco
 1. 提交需要分发的源码和桌面相关文件，先让 Desktop checks 通过。当前工作区中的未提交、未跟踪业务源码不会自动出现在 GitHub 的构建机上。
 2. `.venv/bin/python packaging/tauri/version.py set X.Y.Z --notes "具体新增或修复内容"` 同步 npm、Tauri、Cargo、锁文件版本和根目录 `CHANGELOG.md`；多项变更重复传入 `--notes`。补充实际验证结果，提交这些修改。
 3. 执行 `.venv/bin/python packaging/tauri/version.py check --tag vX.Y.Z --require-notes`，再创建并推送对应标签 `vX.Y.Z`。发布流程自动提取该版本日志并拼接通用安装说明，缺少日志时阻止发布。
-4. Actions 创建草稿 → Mac arm64 原生构建 → 生成并上传 `ElectricityToolbox-<版本>-apple-silicon.dmg` 及 `.sha256` → 校验 GitHub 附件摘要和大小 → 发布。同时上传统一命名的签名 `.app.tar.gz`、`.sig` 与 `latest.json`，供新版自动更新。0.1.6 及更早的 PKG 客户端需从发布页面下载 DMG 迁移一次。
+4. Actions 创建草稿 → Mac arm64 原生构建 → 仅生成并上传 `ElectricityToolbox-<版本>-apple-silicon.dmg` 及 `.dmg.sha256` → 校验 GitHub 附件摘要和大小 → 发布。校验器拒绝 App 压缩包、签名及 `latest.json`。
 5. 新版客户端直接请求 GitHub `/releases/latest`，只提示数字版本更高的正式版。自动检查错误保持安静，菜单手动检查显示具体错误。
 
-GitHub Actions 使用仓库 Secrets `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（当前私钥无密码，后者可留空）。本次已配置前者；发布流程缺少签名私钥时会失败，不会发布无签名更新。不要在客户端内置 GitHub PAT。更新索引只包含 `darwin-aarch64`，构建失败保留草稿，不发布不完整版本。
+构建失败保留草稿，不发布不完整版本。不再使用 Tauri 更新签名私钥，也不上传 `.app.tar.gz`、`.sig` 或 `latest.json`。不要在客户端内置 GitHub PAT。
 
-Mac 当前采用 ad-hoc 签名，尚未使用 Apple Developer ID 或公证；外部分发首次打开仍可能需要在系统“隐私与安全性”中允许。更新包的 Tauri 签名与系统发行证书是两个独立机制。
+Mac 当前采用 ad-hoc 签名，尚未使用 Apple Developer ID 或公证；首次打开仍可能需要在系统“隐私与安全性”中允许。
 
 ## 数据与更新行为
 
@@ -66,12 +66,11 @@ WPS 的 3 项写入配置及 34 个写入区域作为功能默认配置随软件
 
 旧 PKG 版从 DMG 迁移一次。`~/Library/Application Support/com.electricity.toolbox` 继续使用，账号、独立登录态、业务数据和样例保留。`/Applications` 的旧副本不会自动删除；确认新版运行正常后可手动删除旧副本，并更新 Dock 或桌面快捷方式，今后从 `~/Applications` 启动。
 
-## 自动更新行为
+## DMG 更新行为
 
-点击“下载并更新”后，原生 Tauri 组件读取 `latest.json`，核对所选版本，下载应用包并验证内置公钥签名。下载可取消，期间不锁定业务操作。验签后再次检查任务并保存配置；有任务或保存失败时阻止替换并说明原因。安装阶段锁定业务输入，失败恢复可用；成功后正常退出原版 Tk 并自动重启新版，不经过 PKG 安装器。
+点击“下载 DMG”后，后台下载 GitHub 正式发行版的 DMG，核对文件大小及 GitHub SHA-256 摘要，下载可取消，校验失败删除不完整文件。校验成功后打开镜像。请等待当前任务完成、保存配置并退出工具箱，再双击镜像中的“安装到我的应用程序.command”，覆盖用户目录中的应用；原配置、登录态、业务数据和样例保留。
 
-仅允许在当前用户拥有、可写的 `~/Applications/电力工具箱.app` 中自动更新。系统目录、挂载 DMG 和其他路径均提示迁移，避免正常流程触发管理员授权。开发版源码启动不执行自动安装，继续使用原开发启动器。首次运行的 macOS 安全确认及设备管理策略仍由系统决定。
-
+安装命令拒绝替换运行中的应用，失败时回滚。不再使用 App 压缩包自动替换及自动重启机制。DMG 内部包含运行所需 `.app`，它不作为独立附件发布。
 
 ## 验证
 

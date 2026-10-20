@@ -20,9 +20,9 @@ PAYLOAD = b"test installer bytes"
 def release():
     return {"tag_name": "v1.2.0", "html_url": f"https://github.com/{REPO}/releases/tag/v1.2.0",
             "draft": False, "prerelease": False, "body": "测试更新说明", "assets": [
-                {"name": "ElectricityToolbox-1.2.0-aarch64.app.tar.gz", "size": len(PAYLOAD),
+                {"name": "ElectricityToolbox-1.2.0-apple-silicon.dmg", "size": len(PAYLOAD),
                  "digest": "sha256:" + hashlib.sha256(PAYLOAD).hexdigest(),
-                 "browser_download_url": f"https://github.com/{REPO}/releases/download/v1.2.0/test.app.tar.gz"}]}
+                 "browser_download_url": f"https://github.com/{REPO}/releases/download/v1.2.0/test.dmg"}]}
 
 
 class Response(io.BytesIO):
@@ -54,6 +54,9 @@ class GitHubUpdateTests(unittest.TestCase):
         data = release()
         data["assets"] = []
         self.assertIsNone(parse_release(data, "0.1.3").asset)
+        data = release()
+        data["assets"][0]["name"] = "ElectricityToolbox-1.2.0-aarch64.app.tar.gz"
+        self.assertIsNone(parse_release(data, "0.1.3").asset)
 
     def test_api_request_and_http_errors(self):
         requests = []
@@ -78,12 +81,13 @@ class GitHubUpdateTests(unittest.TestCase):
         path = updater.download(candidate, threading.Event(), fractions.append)
         try:
             self.assertEqual(path.read_bytes(), PAYLOAD)
+            self.assertEqual(path.suffix, ".dmg")
             self.assertEqual(fractions[-1], 1)
         finally:
             shutil.rmtree(path.parent)
         for field, value in (("size", len(PAYLOAD) + 1), ("size", len(PAYLOAD) - 1),
                              ("digest", "sha256:" + "0" * 64), ("digest", None),
-                             ("browser_download_url", "http://github.com/test.app.tar.gz")):
+                             ("browser_download_url", "http://github.com/test.dmg")):
             data = release()
             data["assets"][0][field] = value
             with self.subTest(field=field, value=value), self.assertRaises(UpdateError):
@@ -100,6 +104,11 @@ class GitHubUpdateTests(unittest.TestCase):
         data["assets"][0]["name"] = "ElectricityToolbox-1.2.0-apple-silicon.dmg"
         data["assets"].append({"name": data["assets"][0]["name"] + ".sha256"})
         validate(data)
+        for name in ("legacy.app.tar.gz", "legacy.app.tar.gz.sig", "latest.json", "legacy.app.zip"):
+            invalid = copy.deepcopy(data)
+            invalid["assets"].append({"name": name})
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                validate(invalid)
         for field, value in (("digest", None), ("size", 0), ("name", "wrong.pkg")):
             invalid = copy.deepcopy(data)
             invalid["assets"][0][field] = value

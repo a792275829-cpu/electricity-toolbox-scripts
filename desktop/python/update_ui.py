@@ -1,14 +1,15 @@
-"""Original Tk update UI with signed native download, replacement and restart."""
+"""Tk update UI for digest-verified DMG downloads."""
 from __future__ import annotations
 
 import os
 import queue
+import subprocess
 import threading
 import tkinter as tk
 import webbrowser
 from tkinter import messagebox, ttk
 
-from github_update import GitHubUpdater
+from github_update import Cancelled, GitHubUpdater
 
 
 class UpdateController:
@@ -88,6 +89,8 @@ class UpdateWindow(tk.Toplevel):
         super().__init__(controller.app)
         self.controller, self.release = controller, release
         self.downloading = self.installing = False
+        self.cancel_download = threading.Event()
+        self.downloaded_path = None
         self.title("软件更新")
         self.transient(controller.app)
         self.geometry("560x510")
@@ -116,7 +119,7 @@ class UpdateWindow(tk.Toplevel):
         notes.configure(state="disabled")
         self.progress = ttk.Progressbar(body, maximum=100)
         self.progress.grid(sticky="ew", pady=(12, 8))
-        self.status = tk.StringVar(self, "下载完成后自动验签、更新并重新启动；有运行任务时暂停安装。")
+        self.status = tk.StringVar(self, "下载并校验 DMG 后打开；请先退出工具箱，再运行镜像中的安装命令。配置和数据会保留。")
         ttk.Label(body, textvariable=self.status, wraplength=490).grid(sticky="w", pady=(0, 16))
         actions = ttk.Frame(body)
         actions.grid(sticky="ew")
@@ -124,7 +127,7 @@ class UpdateWindow(tk.Toplevel):
         ttk.Button(actions, text="发布页面", command=lambda: webbrowser.open(release.page)).grid(row=0, column=0)
         self.cancel_button = ttk.Button(actions, text="稍后", command=self.dismiss)
         self.cancel_button.grid(row=0, column=2, padx=(8, 8))
-        self.primary = ttk.Button(actions, text="下载并更新", command=self.perform, style="Primary.TButton")
+        self.primary = ttk.Button(actions, text="下载 DMG", command=self.perform, style="Primary.TButton")
         self.primary.grid(row=0, column=3)
         if not release.asset:
             self.primary.state(["disabled"])
@@ -134,7 +137,7 @@ class UpdateWindow(tk.Toplevel):
         if self.installing:
             return
         if self.downloading:
-            self.controller.service.call("cancel_update", {})
+            self.cancel_download.set()
             self.status.set("正在取消下载…")
             return
         self.destroy()
@@ -142,14 +145,49 @@ class UpdateWindow(tk.Toplevel):
     def perform(self):
         if self.downloading or self.installing:
             return
+        if self.downloaded_path:
+            self.open_dmg()
+            return
+        self.cancel_download.clear()
         self.downloading = True
         self.primary.configure(text="下载中…", state="disabled")
         self.cancel_button.configure(text="取消下载")
         self.status.set("正在连接 GitHub…")
+        def progress(fraction):
+            self.controller.messages.put((self.download_progress, fraction, None))
+        self.controller.worker(
+            lambda: self.controller.updater.download(self.release, self.cancel_download, progress),
+            self.download_finished,
+        )
+
+    def download_progress(self, fraction, error):
+        if self.winfo_exists():
+            self.progress["value"] = fraction * 100
+            self.status.set(f"正在下载并校验 DMG · {fraction:.0%}")
+
+    def download_finished(self, path, error):
+        if not self.winfo_exists():
+            return
+        self.downloading = False
+        if isinstance(error, Cancelled):
+            self.destroy()
+            return
+        self.cancel_button.configure(text="关闭")
+        self.primary.configure(state="normal", text="重试下载")
+        if error:
+            self.status.set(str(error))
+            return
+        self.downloaded_path = path
+        self.primary.configure(text="打开 DMG")
+        self.open_dmg()
+
+    def open_dmg(self):
         try:
-            self.controller.service.call("begin_update", {"version": self.release.version})
+            subprocess.run(["/usr/bin/open", str(self.downloaded_path)], check=True)
         except Exception as exc:
-            self.update_event("update_failed", {"error": str(exc)})
+            self.status.set(f"打开 DMG 失败：{exc}；安装包位于 {self.downloaded_path}")
+            return
+        self.status.set("DMG 校验通过并已打开。请先退出工具箱，再双击镜像中的“安装到我的应用程序.command”；原配置和数据保留。")
 
     def update_event(self, method, params):
         if method == "update_cancelled":

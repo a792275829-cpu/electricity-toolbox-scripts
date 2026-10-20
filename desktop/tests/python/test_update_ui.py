@@ -27,7 +27,7 @@ class UpdateUiTests(unittest.TestCase):
         self.updater.check.return_value = None
         self.controller = UpdateController(self.app, self.service, self.updater)
         self.service.updater = self.controller
-        self.release = Release("v0.2.0", "测试更新说明", "https://github.com/test/repo/releases/tag/v0.2.0", {"name": "test.pkg"})
+        self.release = Release("v0.2.0", "测试更新说明", "https://github.com/test/repo/releases/tag/v0.2.0", {"name": "test.dmg"})
 
     def tearDown(self):
         self.app.destroy()
@@ -47,7 +47,7 @@ class UpdateUiTests(unittest.TestCase):
         self.updater.check.return_value = self.release
         self.controller.check(manual=True)
         self.pump(lambda: self.controller.window is not None)
-        self.assertEqual(self.controller.window.primary.cget("text"), "下载并更新")
+        self.assertEqual(self.controller.window.primary.cget("text"), "下载 DMG")
         self.assertIs(self.controller.window.controller.app, self.app)
 
     def test_automatic_errors_are_silent_but_manual_errors_are_visible(self):
@@ -58,18 +58,20 @@ class UpdateUiTests(unittest.TestCase):
             self.controller.checked(None, ValueError("离线"))
             error.assert_called_once()
 
-    def test_one_click_starts_native_signed_update_and_cancel_waits_for_ack(self):
+    def test_dmg_download_cancellation_waits_for_worker_ack(self):
         self.controller.release = self.release
         self.controller.show()
         window = self.controller.window
-        window.perform()
-        self.service.emit.assert_called_once_with({"event": {"kind": "begin_update", "version": "v0.2.0"}})
-        self.assertTrue(window.downloading)
-        window.dismiss()
-        self.assertTrue(window.winfo_exists())
-        self.assertEqual(self.service.emit.call_args.args[0]["event"]["kind"], "cancel_update")
-        self.service.call("update_cancelled", {})
-        self.assertFalse(window.winfo_exists())
+        with patch.object(self.controller, "worker") as worker:
+            window.perform()
+            self.assertTrue(window.downloading)
+            self.service.emit.assert_not_called()
+            window.dismiss()
+            self.assertTrue(window.cancel_download.is_set())
+            self.assertTrue(window.winfo_exists())
+            from github_update import Cancelled
+            worker.call_args.args[1](None, Cancelled("已取消下载"))
+            self.assertFalse(window.winfo_exists())
 
     def test_automatic_install_keeps_task_guard_and_failure_unlocks_inputs(self):
         self.controller.release = self.release
@@ -92,14 +94,32 @@ class UpdateUiTests(unittest.TestCase):
         self.assertEqual(window.status.get(), "签名校验失败")
         self.assertEqual(window.primary.cget("text"), "重试更新")
 
-    def test_direct_source_start_does_not_install_or_request_privileges(self):
-        self.service.emit = None
+    def test_verified_dmg_opens_without_installing_or_locking_tasks(self):
         self.controller.release = self.release
         self.controller.show()
         window = self.controller.window
-        window.perform()
+        self.updater.download.return_value = Path(self.temp.name) / "test.dmg"
+        with patch("update_ui.subprocess.run") as run:
+            window.perform()
+            self.pump(lambda: window.downloaded_path is not None)
+            run.assert_called_once_with(["/usr/bin/open", str(self.updater.download.return_value)], check=True)
+        self.service.emit.assert_not_called()
         self.assertFalse(window.downloading)
-        self.assertIn("源码启动模式", window.status.get())
+        self.assertFalse(self.service.maintenance)
+        self.assertIn("请先退出工具箱", window.status.get())
+        self.assertEqual(window.primary.cget("text"), "打开 DMG")
+
+    def test_failed_download_can_be_retried_without_opening(self):
+        self.controller.release = self.release
+        self.controller.show()
+        window = self.controller.window
+        self.updater.download.side_effect = ValueError("安装包校验失败")
+        with patch("update_ui.subprocess.run") as run:
+            window.perform()
+            self.pump(lambda: not window.downloading)
+            run.assert_not_called()
+        self.assertIn("校验失败", window.status.get())
+        self.assertEqual(window.primary.cget("text"), "重试下载")
 
 
 if __name__ == "__main__":

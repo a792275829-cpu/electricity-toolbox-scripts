@@ -10,6 +10,8 @@ import re
 
 def validate(data):
     name = f"ElectricityToolbox-{data['tag_name'].removeprefix('v')}-apple-silicon.dmg"
+    if len(data["assets"]) != 2 or {a["name"] for a in data["assets"]} != {name, name + ".sha256"}:
+        raise ValueError("当前仅发布对应版本的 DMG 及校验文件，不允许 App 更新包或更新索引")
     assets = [asset for asset in data["assets"] if asset["name"] == name]
     if len(assets) != 1:
         raise ValueError("缺少当前版本唯一的 DMG 安装镜像")
