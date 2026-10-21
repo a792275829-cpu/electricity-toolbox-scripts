@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "电力工具箱",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "identifier": "com.electricity.toolbox",
   "build": {
     "beforeDevCommand": "npm run web:dev",

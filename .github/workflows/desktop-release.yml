@@ -22,6 +22,7 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       release: ${{ steps.draft.outputs.release }}
+      should_release: ${{ steps.draft.outputs.should_release }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,13 +39,16 @@ jobs:
           if ! gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > draft-state.txt 2>/dev/null; then
             gh release create "$RELEASE_TAG" --verify-tag --draft --title "电力工具箱 $RELEASE_TAG" --notes-file release-notes.md
           elif [ "$(cat draft-state.txt)" != "true" ]; then
-            echo 'Refusing to replace an already published release.' >&2
-            exit 1
+            echo 'should_release=false' >> "$GITHUB_OUTPUT"
+            echo "### $RELEASE_TAG 已正式发布，本次正常跳过构建和发布。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           gh release edit "$RELEASE_TAG" --notes-file release-notes.md
           gh release view "$RELEASE_TAG" --json databaseId --jq '"release=" + (.databaseId|tostring)' >> "$GITHUB_OUTPUT"
+          echo 'should_release=true' >> "$GITHUB_OUTPUT"
   build:
     needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +121,7 @@ jobs:
           gh release upload "$RELEASE_TAG" dist/*.dmg dist/*.dmg.sha256 --clobber
   publish:
     needs: [prepare, build]
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
