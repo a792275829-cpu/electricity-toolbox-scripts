@@ -230,28 +230,6 @@ def parse_load_dataset(
     }
 
 
-def adjust_day_ahead_b_class(
-    day_ahead: dict[str, tuple[int | float, ...]],
-    actual: dict[str, tuple[int | float, ...]],
-) -> dict[str, tuple[int | float, ...]]:
-    """日前 B 类逐项扣减 D-3 实际西电，其他类别保持不变。"""
-    b_class = day_ahead.get("B类")
-    actual_west = actual.get("西电")
-    if b_class is None or actual_west is None:
-        raise RuntimeError("计算日前 B 类时缺少日前 B 类或 D-3 实际西电数据。")
-    if len(b_class) != 4 or len(actual_west) != 4:
-        raise RuntimeError("日前 B 类和 D-3 实际西电都必须包含最大、最小、平均、总电量四项。")
-
-    adjusted = dict(day_ahead)
-    adjusted["B类"] = tuple(
-        _number(day_value - actual_value, label=f"日前 B 类扣减实际西电第 {index} 项")
-        for index, (day_value, actual_value) in enumerate(
-            zip(b_class, actual_west), start=1
-        )
-    )
-    return adjusted
-
-
 def build_daily_load_pair(
     day_ahead_date: date,
     day_payload: dict[str, Any],
@@ -263,7 +241,7 @@ def build_daily_load_pair(
     return DailyLoadPair(
         day_ahead_date=day_ahead_date,
         actual_date=actual_date,
-        day_ahead=adjust_day_ahead_b_class(day_ahead, actual),
+        day_ahead=day_ahead,
         actual=actual,
     )
 

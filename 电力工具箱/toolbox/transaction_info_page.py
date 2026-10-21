@@ -85,7 +85,7 @@ class TransactionInfoUpdatePage(ToolPage):
             mapping,
             text=(
                 "左侧日前：统调、B类、A类、地方电、粤港联络线；西电行保留但数值留空。\n"
-                "日前 B 类四项分别扣减 D-3 实际西电对应数值。\n"
+                "日前 B 类直接取网站数值，不扣减实际西电。\n"
                 "右侧实际：写入六类数据。每类依次为最大、最小、平均、总电量。"
             ),
             justify="left",

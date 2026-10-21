@@ -104,7 +104,7 @@ class TransactionInfoUpdateTests(unittest.TestCase):
         self.assertEqual(actual["西电"], (3000, 300, 1500.375, 36009))
         self.assertEqual(actual["粤港联络线"], (6000, 600, 3000.75, 72018))
 
-    def test_build_pair_subtracts_d_minus_3_actual_west_from_day_ahead_b(self) -> None:
+    def test_build_pair_keeps_day_ahead_b_without_subtracting_actual_west(self) -> None:
         day_ahead_date = date(2026, 9, 11)
         actual_date = day_ahead_date - timedelta(days=3)
 
@@ -115,7 +115,7 @@ class TransactionInfoUpdateTests(unittest.TestCase):
         )
 
         self.assertEqual(pair.actual_date, actual_date)
-        self.assertEqual(pair.day_ahead["B类"], (-1000, -100, -500.125, -12003))
+        self.assertEqual(pair.day_ahead["B类"], (2000, 200, 1000.25, 24006))
         self.assertEqual(pair.actual["西电"], (3000, 300, 1500.375, 36009))
         self.assertEqual(pair.day_ahead["统调"], (1000, 100, 500.125, 12003))
 
@@ -146,8 +146,8 @@ class TransactionInfoUpdateTests(unittest.TestCase):
                 self.assertIsNone(sheet["H10"].value)
                 self.assertEqual(sheet["L10"].value, 3000)
                 self.assertEqual(sheet["O10"].value, 36009)
-                self.assertEqual(sheet["E9"].value, -1000)
-                self.assertEqual(sheet["H9"].value, -12003)
+                self.assertEqual(sheet["E9"].value, 2000)
+                self.assertEqual(sheet["H9"].value, 24006)
                 self.assertEqual(sheet["E8"].number_format, sheet["E1"].number_format)
                 self.assertEqual(workbook["保留工作表"]["A1"].value, "不应改动")
             finally:
