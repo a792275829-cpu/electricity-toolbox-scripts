@@ -46,9 +46,15 @@ def validate(data, index_path=None):
         listed = set()
         for edge in index['patches']:
             if edge['target'] == version:
-                if edge['name'] not in assets or any(
-                        edge[k] != assets[edge['name']].get(k)
-                        for k in ('size', 'digest', 'browser_download_url')):
+                patch = assets.get(edge['name'], {})
+                url = patch.get('browser_download_url', '')
+                # GitHub drafts expose temporary URLs until publication, even when
+                # tag_name is already set. Published releases must match exactly.
+                draft_url = (data.get('draft') is True and re.fullmatch(
+                    rf'https://github.com/{re.escape(REPOSITORY)}/releases/download/'
+                    rf'untagged-[A-Za-z0-9-]+/{re.escape(edge["name"])}', url))
+                if (not patch or any(edge[k] != patch.get(k) for k in ('size', 'digest'))
+                        or (url != edge['browser_download_url'] and not draft_url)):
                     raise ValueError('增量索引与本版本补丁附件不一致')
                 listed.add(edge['name'])
         if {n for n in assets if n.endswith('.patch.tar.xz')} != listed:

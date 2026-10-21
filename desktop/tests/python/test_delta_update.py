@@ -242,6 +242,21 @@ class DeltaTests(unittest.TestCase):
         self.assertEqual([e['target'] for e in select_route(index,'1.0.1','1.0.3',100_000,REPOSITORY)],
                          ['1.0.2','1.0.3'])
 
+    def test_draft_temporary_urls_are_valid_only_before_publication(self):
+        e=edge('1.0.1','1.0.3',10)
+        raw=json.dumps(dict(format=1,version='1.0.3',patches=[e])).encode()
+        index_file=self.root/INDEX_NAME;index_file.write_bytes(raw)
+        full=asset('ElectricityToolbox-1.0.3-apple-silicon.dmg',b'F'*100)
+        patch_asset=dict(e,browser_download_url=f"https://github.com/{REPOSITORY}/releases/download/untagged-123abc/{e['name']}")
+        data=dict(tag_name='v1.0.3',draft=True,assets=[full,dict(name=full['name']+'.sha256'),asset(INDEX_NAME,raw),patch_asset])
+        validate(data,index_file)
+        data['draft']=False
+        with self.assertRaises(ValueError):validate(data,index_file)
+        data['draft']=True;patch_asset['size']+=1
+        with self.assertRaises(ValueError):validate(data,index_file)
+        patch_asset['size']-=1;patch_asset['browser_download_url']+='wrong'
+        with self.assertRaises(ValueError):validate(data,index_file)
+
     def test_publication_binds_index_and_patch_to_github_assets(self):
         e=edge('1.0.1','1.0.3',10)
         raw=json.dumps(dict(format=1,version='1.0.3',patches=[e])).encode()
