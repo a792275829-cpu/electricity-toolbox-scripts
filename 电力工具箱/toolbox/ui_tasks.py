@@ -143,7 +143,7 @@ class RemoteTaskRegistry(TaskRegistry):
                 values[key + "_workbook"] = page.station_workbooks[label].get()
                 values[key + "_selected"] = page.selected_stations[label].get()
         if tool_id == "power-benefit":
-            for index, key in enumerate(("guihu", "tuolian")):
+            for index, key in enumerate(("guihu", "tuolian", "haifeng")):
                 values[key + "_workbook"] = page.workbooks[index].get()
                 values[key + "_selected"] = page.selected[index].get()
         action = "run"

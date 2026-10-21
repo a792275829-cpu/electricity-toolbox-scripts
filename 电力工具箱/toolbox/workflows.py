@@ -99,12 +99,14 @@ def plan(paths, tool_id, action, p):
         return [(commands.transaction_info(paths, required_path(p, "workbook"), day("end_date"),
                 start_date=optional_start, create_backup=p["create_backup"]), paths.transaction_info_update_dir)]
     elif tool_id == "power-benefit":
-        workbooks = [required_path(p, key + "_workbook") for key in ("guihu", "tuolian") if p[key + "_selected"]]
+        workbooks = [required_path(p, key + "_workbook") for key in ("guihu", "tuolian", "haifeng") if p[key + "_selected"]]
         if not workbooks:
             raise ValueError("请至少选择一个工作簿")
         for path in workbooks:
-            if path.suffix.lower() != ".xlsx" or sum(station in path.name for station in ("归湖", "鮀莲")) != 1:
-                raise ValueError("文件名必须包含且仅包含归湖或鮀莲中的一个名称，并使用 .xlsx 格式")
+            if path.suffix.lower() != ".xlsx" or sum(station in path.name for station in ("归湖", "鮀莲", "海风")) != 1:
+                raise ValueError("文件名必须包含且仅包含归湖、鮀莲或海风中的一个名称，并使用 .xlsx 格式")
+        if any("海风" in path.name for path in workbooks) and optional_start is None:
+            raise ValueError("海风覆盖更新必须填写开始日期")
         return [(commands.power_benefit(paths, workbooks, day("end_date"), start_date=optional_start,
                 create_backup=p["create_backup"]), paths.power_benefit_update_dir)]
     elif tool_id == "spot-price":

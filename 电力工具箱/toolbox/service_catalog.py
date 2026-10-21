@@ -31,7 +31,8 @@ def desktop_catalog(paths):
                               f("start_date", "日前开始日期（留空接续）", "date"), f("end_date", "日前结束日期", "date", day), backup], [("run", "开始更新")]),
         "power-benefit": ([workbook("guihu_workbook", "归湖工作簿", "功率预测调整收益统计-归湖.xlsx"), f("guihu_selected", "更新归湖", "boolean", True),
                            workbook("tuolian_workbook", "鮀莲工作簿", "功率预测调整收益统计-鮀莲(2)(2).xlsx"), f("tuolian_selected", "更新鮀莲", "boolean", True),
-                           f("start_date", "开始日期（留空检查历史空白）", "date"), f("end_date", "截止日期 D", "date", day),
+                           workbook("haifeng_workbook", "海风工作簿", "海风博弈收益统计-新.xlsx"), f("haifeng_selected", "更新海风（覆盖五列）", "boolean", False),
+                           f("start_date", "开始日期（海风覆盖必填）", "date"), f("end_date", "截止日期 D", "date", day),
                            f("create_backup", "写入前生成时间戳备份", "boolean", True)], [("run", "抓取并更新")]),
         "spot-price": ([f("start_date", "开始日期", "date", yesterday), f("end_date", "结束日期", "date", day),
                         *[item for key, label, name in [
@@ -65,7 +66,7 @@ def desktop_catalog(paths):
     notes = {
         "section-analysis": "相邻节点一涨一跌＋价差严格大于阈值＋全天累计至少4个时点。",
         "transaction-info": "来源口径：日前 D、实际 D-3；目标 Sheet1，沿用现有字段顺序与接续规则。",
-        "power-benefit": "C 原始功率；J 申报功率；K 日前电量；L 日前电价；M 上网电量；N 实时电价。0–23 点，非空（含 0、公式）跳过。",
+        "power-benefit": "归湖/鮀莲：C 原始功率；J 申报功率；K 日前电量；L 日前电价；M 上网电量；N 实时电价。0–23 点，非空（含 0、公式）跳过。海风：C 原始功率、R 申报功率、N 上网电量、M 日前电价、O 实时电价；覆盖所选日期内五列的值及公式，开始日期必填。",
         "report": "三个 Excel 来源日期依次为 D-1、D、D-2。",
         "summary-upload": "混放文件会先移入六个单元文件夹。汇总输出请放在复盘目录根目录或目录外。",
     }

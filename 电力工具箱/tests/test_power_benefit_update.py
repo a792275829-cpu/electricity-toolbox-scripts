@@ -6,6 +6,7 @@ import unittest
 import zipfile
 from datetime import date, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill
@@ -179,6 +180,57 @@ class PowerBenefitTests(unittest.TestCase):
         self.assertEqual(auth.PROFILE_DIR,m.SCRIPT_DIR/".browser-profile")
         self.assertNotEqual(auth.AUTH_STATE_PATH,self.paths.online_energy_dir/"auth_state.json")
 
+    def haifeng_template(self, folder):
+        path = Path(folder) / "海风博弈收益统计-新.xlsx"
+        w = openpyxl.Workbook(); s = w.active; s.title = "10月份"
+        for column, label in self.module.HAIFENG_HEADERS.items():
+            s[f"{column}2"] = label
+        for first, day in ((4, datetime(2026,10,16)), (29, "=A4+1")):
+            s.cell(first, 1, day).number_format = "yyyy-mm-dd"
+            for hour in range(24):
+                row = first + hour
+                s.cell(row, 2, f"{hour}:00")
+                for col in self.module.HAIFENG_LAYOUT:
+                    s[f"{col}{row}"] = 99
+                    s[f"{col}{row}"].number_format = "0.0000"
+                for col, source in (("M","T"),("N","U"),("O","V")):
+                    s[f"{col}{row}"] = f"={source}{row}"
+                for col in ("J","K","L","S","T","U","V"):
+                    s[f"{col}{row}"] = 777
+        w.save(path); w.close()
+        return path
+
+    def test_haifeng_overwrites_only_five_columns_in_selected_dates(self):
+        m = self.module
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.haifeng_template(folder)
+            with self.assertRaisesRegex(ValueError,"开始日期"):
+                m.inspect_workbook(path,end_date=date(2026,10,17))
+            plan = m.inspect_workbook(path,start_date=date(2026,10,16),end_date=date(2026,10,16))
+            for backend in ("stream", "full"):
+                with patch.dict("os.environ", {"TOOLBOX_BENEFIT_INSPECT_BACKEND": backend}):
+                    self.assertEqual(m.inspect_workbook(path,start_date=date(2026,10,16),end_date=date(2026,10,16)), plan)
+            self.assertEqual(len(plan.cells),120)
+            self.assertEqual({c.field for c in plan.cells},{"C","J","M","L","N"})
+            data = {date(2026,10,16): {col: (float(index),)*24 for index,col in enumerate(("C","J","M","L","N"), 1)}}
+            item = m.prepare_workbook(plan,data)
+            w = openpyxl.load_workbook(item.temporary); s=w["10月份"]
+            for col,expected in (("C",1),("R",2),("N",3),("M",4),("O",5)):
+                self.assertEqual(s[f"{col}4"].value,expected)
+                self.assertEqual(s[f"{col}4"].number_format,"0.0000")
+            for col in ("J","K","L","S","T","U","V"):
+                self.assertEqual(s[f"{col}4"].value,777)
+            self.assertEqual(s["C29"].value,99)
+            self.assertEqual(s["M29"].value,"=T29")
+            w.close();item.temporary.unlink()
+
+    def test_partial_shared_formula_overwrite_preserves_unavailable_followers(self):
+        source = b'<worksheet><row r="4"><c r="M4" s="1"><f t="shared" ref="M4:O4" si="2">T4</f><v>1</v></c><c r="N4" s="1"><f t="shared" si="2"/><v>2</v></c><c r="O4" s="1"><f t="shared" si="2"/><v>3</v></c></row></worksheet>'
+        result = self.module.patch_sparse_sheet(source,{"M4":300})
+        self.assertIn(b'<c r="M4" s="1"><v>300</v></c>',result)
+        self.assertIn(b'<f>U4</f><v>2</v>',result)
+        self.assertIn(b'<f>V4</f><v>3</v>',result)
+
 
 class PowerBenefitPageTests(unittest.TestCase):
     def test_page_factory_and_command(self):
@@ -196,8 +248,31 @@ class PowerBenefitPageTests(unittest.TestCase):
             self.assertEqual(command.count("--workbook"),2)
             self.assertNotIn("--no-backup",command)
             self.assertNotIn("--start-date",command)
+            self.assertEqual(len(page.workbooks),3)
+            self.assertIn("海风博弈收益统计-新.xlsx",page.workbooks[2].get())
+            self.assertFalse(page.selected[2].get())
             page.destroy()
         finally: root.destroy()
+
+
+class PowerBenefitDesktopTests(unittest.TestCase):
+    def test_service_routes_haifeng_and_requires_explicit_overwrite_dates(self):
+        from toolbox.service_catalog import desktop_catalog
+        from toolbox.workflows import validate, plan
+        paths = ToolPaths(Path(__file__).resolve().parents[2])
+        tool = next(t for t in desktop_catalog(paths) if t["id"] == "power-benefit")
+        self.assertIn("haifeng_workbook", {f["key"] for f in tool["fields"]})
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/"海风博弈收益统计-新.xlsx";path.touch()
+            values = dict(guihu_selected=False,tuolian_selected=False,haifeng_selected=True,
+                          haifeng_workbook=str(path),end_date="2026-10-16")
+            with self.assertRaisesRegex(ValueError,"开始日期"):
+                validate(paths,"power-benefit","run",values)
+            values["start_date"] = "2026-10-16"
+            params = validate(paths,"power-benefit","run",values)
+            command, _ = plan(paths,"power-benefit","run",params)[0]
+            self.assertIn(str(path.resolve()),command)
+            self.assertEqual(command.count("--workbook"),1)
 
 
 if __name__=="__main__": unittest.main()

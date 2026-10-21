@@ -39,7 +39,7 @@ def default_catalog() -> tuple[ToolDescriptor, ...]:
         ToolDescriptor("market-table", "市场表更新", "数据采集", "MarketTableUpdatePage", "读取市场数据并更新年度表"),
         ToolDescriptor("spot-price", "现货价格分析表更新", "数据采集", "SpotPriceUpdatePage", "可选更新归湖、鮀莲、海风日前及实时24点价格", page_module=".spot_price_page"),
         ToolDescriptor("transaction-info", "交易系统信息更新", "数据采集", "TransactionInfoUpdatePage", "按日前 D、实际 D-3 接续更新市场负荷信息", page_module=".transaction_info_page"),
-        ToolDescriptor("power-benefit", "功率调整收益统计表更新", "数据采集", "PowerBenefitUpdatePage", "按日期补齐归湖、鮀莲六列24点数据，非空跳过", page_module=".power_benefit_page"),
+        ToolDescriptor("power-benefit", "功率调整收益统计表更新", "数据采集", "PowerBenefitUpdatePage", "归湖、鮀莲补齐六列；海风按日期覆盖五列24点数据", page_module=".power_benefit_page"),
         ToolDescriptor("guangdong-price", "广东电价预测", "数据采集", "GuangdongPricePage", "抓取广东现货数据并运行 D+1 日前电价预测"),
         ToolDescriptor("summary-upload", "出清结果汇总上传", "数据采集", "SummaryUploadPage", "共用复盘目录，汇总电量或上传出清结果", page_module=".summary_upload_page"),
         ToolDescriptor("daily-pdf-parser", "广东运行日报解析上传", "数据采集", "DailyPdfParserPage", "解析运行日报并上传 PDF 与报价容量 Excel", page_module=".daily_pdf_page"),

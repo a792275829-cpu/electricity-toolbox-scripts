@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""补齐功率调整收益模板的 C、J、K、L、M、N，保留其他 XLSX 部件。"""
+"""归湖、鮀莲补齐六列；海风按指定日期覆盖 C/R/N/M/O，保留其他 XLSX 部件。"""
 from __future__ import annotations
 
 import argparse
@@ -12,6 +12,7 @@ import stat
 import sys
 import uuid
 import zipfile
+from html import escape, unescape
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from functools import lru_cache
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import openpyxl
+from openpyxl.formula.translate import Translator
 from openpyxl.utils.datetime import from_excel
 from playwright.sync_api import sync_playwright
 
@@ -48,6 +50,16 @@ DEFAULT_WORKBOOKS = (
 )
 FIELDS = {"C": "原始功率", "J": "申报功率", "K": "日前电量",
           "L": "日前电价", "M": "上网电量", "N": "实时电价"}
+HAIFENG_WORKBOOK = DEFAULT_DIRECTORY / "海风博弈收益统计-新.xlsx"
+# 实际目标列 -> 既有采集字段；避免将海风 N 上网电量与原模板 N 实时电价混淆。
+HAIFENG_LAYOUT = {"C": "C", "R": "J", "N": "M", "M": "L", "O": "N"}
+HAIFENG_HEADERS = {"C": "功率预测", "R": "功率预测", "N": "上网电量", "M": "日前电价", "O": "实时电价"}
+
+
+def column_layout(station: str) -> dict[str, str]:
+    return HAIFENG_LAYOUT if station == "海风" else {col: col for col in FIELDS}
+
+
 HEADERS = {"C": "功率预测", "J": "功率预测", "K": "日前电量",
            "L": "日前电价", "M": "上网电量", "N": "实时电价"}
 
@@ -101,9 +113,9 @@ def load_auth_module():
 
 
 def station_from_filename(path: Path) -> str:
-    stations = [key for key in ("归湖", "鮀莲") if key in path.stem]
+    stations = [key for key in ("归湖", "鮀莲", "海风") if key in path.stem]
     if len(stations) != 1:
-        raise ValueError(f"文件名必须包含且仅包含归湖或鮀莲中的一个名称：{path.name}")
+        raise ValueError(f"文件名必须包含且仅包含归湖、鮀莲或海风中的一个名称：{path.name}")
     return stations[0]
 
 
@@ -173,6 +185,11 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
     if path.suffix.lower() != ".xlsx":
         raise ValueError(f"只支持 .xlsx：{path}")
     station = station_from_filename(path)
+    if station == "海风" and start_date is None:
+        raise ValueError("海风覆盖更新必须指定开始日期，避免覆盖未选定的历史数据。")
+    layout = column_layout(station)
+    headers = HAIFENG_HEADERS if station == "海风" else HEADERS
+    target_columns = tuple(openpyxl.utils.column_index_from_string(col) for col in layout)
     before = fingerprint(path)
     mode = os.environ.get("TOOLBOX_BENEFIT_INSPECT_BACKEND", "auto")
     if mode not in {"auto", "full", "stream"}:
@@ -181,9 +198,9 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
     if mode != "full":
         try:
             workbook, cached = load_inspection_pair(
-                path, columns=(1, 2, 3, 10, 11, 12, 13, 14),
-                target_columns=(3, 10, 11, 12, 13, 14),
-                sheet_filter=lambda name: re.fullmatch(r"(\d{1,2})月", name),
+                path, columns=(1, 2, *target_columns),
+                target_columns=target_columns,
+                sheet_filter=lambda name: re.fullmatch(r"(\d{1,2})月(?:份)?", name),
             )
         except (UnsupportedInspection, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
             if mode == "stream":
@@ -197,14 +214,14 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
         if cached is None:
             cached = load_value_workbook(path, data_only=True, read_only=False)
         for sheet in workbook:
-            month_match = re.fullmatch(r"(\d{1,2})月", sheet.title)
+            month_match = re.fullmatch(r"(\d{1,2})月(?:份)?", sheet.title)
             if not month_match:
                 continue
             header_row = next((r for r in range(1, min(sheet.max_row, 20) + 1)
                                if all(re.sub(r"\s+", "", str(sheet[f"{col}{r}"].value or "")) == label
-                                      for col, label in HEADERS.items())), None)
+                                      for col, label in headers.items())), None)
             if header_row is None:
-                raise ValueError(f"{path.name}/{sheet.title} 六列模板表头不匹配。")
+                raise ValueError(f"{path.name}/{sheet.title} 目标列模板表头不匹配。")
             groups: dict[date, dict[int, int]] = {}
             current: date | None = None
             for row in range(header_row + 1, sheet.max_row + 1):
@@ -225,11 +242,11 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
                     raise ValueError(f"{path.name} {day} 日期重复或不是完整的0–23点。")
                 seen_days.add(day)
                 for hour, row in sorted(hours.items()):
-                    for column in FIELDS:
+                    for column, field in layout.items():
                         cell = sheet[f"{column}{row}"]
-                        if cell.value in (None, ""):
+                        if station == "海风" or cell.value in (None, ""):
                             cells.append(CellTarget(sheet.title, cell.coordinate, day, hour,
-                                                    column, cell.number_format, cell.style_id))
+                                                    field, cell.number_format, cell.style_id))
         if not seen_days:
             raise ValueError(f"{path.name} 模板内未找到指定日期范围的完整小时块。")
     finally:
@@ -367,7 +384,7 @@ def collect_data(plans: tuple[WorkbookPlan, ...], *, headed: bool = False,
                                     series[day]["M"] = values
                         missing = needed - series[day].keys()
                         if missing:
-                            log(f"待发布/不完整，保留空白：{plan.station} {day} {'、'.join(FIELDS[f] for f in FIELDS if f in missing)}")
+                            log(f"待发布/不完整，保留{'原值' if plan.station == '海风' else '空白'}：{plan.station} {day} {'、'.join(FIELDS[f] for f in FIELDS if f in missing)}")
                     collected[plan.station] = series
                 auth.save_auth_state(context)
             finally:
@@ -375,9 +392,34 @@ def collect_data(plans: tuple[WorkbookPlan, ...], *, headed: bool = False,
     return collected
 
 
+def expand_replaced_shared_formulas(text: str, changes: dict[str, float]) -> str:
+    """覆盖共享公式主单元格前，将同组公式独立化，保留未发布字段的引用。"""
+    cells = re.compile(r'<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:/>|>.*?</c>)', re.S)
+    masters = {}
+    for cell in cells.finditer(text):
+        formula = re.search(r'<f\b([^>]*)(?<!/)>((?:(?!</f>).)*)</f>', cell[0], re.S)
+        if formula and cell[1] in changes and re.search(r'\bt="shared"', formula[1]):
+            shared_id = re.search(r'\bsi="(\d+)"', formula[1])
+            if shared_id:
+                masters[shared_id[1]] = (cell[1], "=" + unescape(formula[2]))
+    if not masters:
+        return text
+    def expand(cell):
+        formula = re.search(r'<f\b[^>]*?(?:/>|>.*?</f>)', cell[0], re.S)
+        if not formula or not re.search(r'\bt="shared"', formula[0]):
+            return cell[0]
+        shared_id = re.search(r'\bsi="(\d+)"', formula[0])
+        if shared_id is None or shared_id[1] not in masters:
+            return cell[0]
+        origin, expression = masters[shared_id[1]]
+        translated = Translator(expression, origin=origin).translate_formula(cell[1])[1:]
+        return cell[0][:formula.start()] + "<f>" + escape(translated, quote=False) + "</f>" + cell[0][formula.end():]
+    return cells.sub(expand, text)
+
+
 def patch_sparse_sheet(data: bytes, changes: dict[str, float]) -> bytes:
     spot = shared_spot()
-    text = data.decode("utf-8")
+    text = expand_replaced_shared_formulas(data.decode("utf-8"), changes)
     original_text = text
     # 自闭合空单元格必须优先匹配，不能吞入后面的单元格或公式。
     cell_pattern = re.compile(r'<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:/>|>.*?</c>)', re.S)
@@ -434,9 +476,10 @@ def verify_workbook(path: Path, prepared: PreparedWorkbook) -> None:
             requests = {}
             for cell, _ in prepared.expectations:
                 requests.setdefault(cell.sheet, set()).add(openpyxl.utils.cell.coordinate_to_tuple(cell.coordinate))
+            columns = tuple(sorted({column for cells in requests.values() for _, column in cells})) or (3, 10, 11, 12, 13, 14)
             workbook, _ = load_inspection_pair(
-                path, columns=(3, 10, 11, 12, 13, 14), target_columns=(3, 10, 11, 12, 13, 14),
-                sheet_filter=lambda name: re.fullmatch(r"(\d{1,2})月", name),
+                path, columns=columns, target_columns=columns,
+                sheet_filter=lambda name: re.fullmatch(r"(\d{1,2})月(?:份)?", name),
                 requests=requests, capture_cache=False,
             )
         except (UnsupportedInspection, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
@@ -523,7 +566,8 @@ def run_update(paths: tuple[Path, ...], *, end_date: date, start_date: date | No
                 raise RuntimeError(f"提交前工作簿被修改，停止写入：{plan.path}")
         backups = commit_workbooks(tuple(prepared), verify_workbook, create_backup=create_backup)
         for item in prepared:
-            counts = {column: sum(cell.field == column for cell, _ in item.expectations) for column in FIELDS}
+            counts = {column: sum(re.match(r"[A-Z]+", cell.coordinate)[0] == column for cell, _ in item.expectations)
+                      for column in column_layout(station_from_filename(item.original))}
             log(f"完成并回读：{item.original.name}，写入{len(item.expectations)}格；" +
                 "，".join(f"{column} {count}" for column, count in counts.items()))
             if backups[item.original]:
@@ -536,8 +580,8 @@ def run_update(paths: tuple[Path, ...], *, end_date: date, start_date: date | No
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workbook", action="append", type=Path, help="可重复传入；按文件名识别归湖/鮀莲")
-    parser.add_argument("--start-date", type=parse_date_input, help="留空则检查模板全部历史空白")
+    parser.add_argument("--workbook", action="append", type=Path, help="可重复传入；按文件名识别归湖/鮀莲/海风")
+    parser.add_argument("--start-date", type=parse_date_input, help="海风覆盖必填；其他场站留空检查历史空白")
     parser.add_argument("--end-date", type=parse_date_input, default=date.today(), help="截止日期 D（含），默认今天")
     parser.add_argument("--no-backup", action="store_true")
     parser.add_argument("--headed", action="store_true")
