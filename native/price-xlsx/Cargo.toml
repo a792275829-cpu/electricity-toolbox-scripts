@@ -1,0 +1,18 @@
+[package]
+name = "toolbox-price-xlsx"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+calamine = "0.36.1"
+rust_xlsxwriter = "0.100.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+quick-xml = "0.41.0"
+base64 = "0.22"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

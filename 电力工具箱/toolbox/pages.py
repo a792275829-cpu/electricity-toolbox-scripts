@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from . import commands, file_rules
+from .upload_service import copy_file_with_finder_fallback, run_group_upload_with_staging
+
 import queue
 import shutil
 import subprocess
@@ -51,59 +54,8 @@ def _file_dialog_state(paths: ToolPaths) -> FileDialogState:
     return FileDialogState(settings_path)
 
 
-def copy_file_with_finder_fallback(source: Path, destination_dir: Path) -> Path:
-    """Copy a selected file even when macOS TCC blocks Python from Desktop/Documents."""
-    source = Path(source)
-    destination_dir = Path(destination_dir)
-    destination = destination_dir / source.name
-    try:
-        shutil.copy2(source, destination)
-        return destination
-    except PermissionError:
-        if sys.platform != "darwin":
-            raise
-
-    script = (
-        "on run argv\n"
-        "set sourceFile to POSIX file (item 1 of argv) as alias\n"
-        "set destinationFolder to POSIX file (item 2 of argv) as alias\n"
-        'tell application "Finder" to duplicate sourceFile to destinationFolder with replacing\n'
-        "end run"
-    )
-    result = subprocess.run(
-        ["/usr/bin/osascript", "-e", script, str(source), str(destination_dir)],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if result.returncode != 0 or not destination.is_file():
-        detail = (result.stderr or result.stdout or "Finder 未返回详细信息").strip()
-        raise PermissionError(f"无法通过 Finder 复制文件：{source.name}。{detail[:300]}")
-    return destination
 
 
-def run_group_upload_with_staging(module, paths: list[Path], *, force: bool, on_log) -> None:
-    target_date, original_uploads = module.prepare_upload_files(paths)
-    original_province = next(item for item in original_uploads if item.kind == "省内")
-
-    with tempfile.TemporaryDirectory(prefix="electricity-group-upload-") as directory:
-        staging_dir = Path(directory)
-        on_log("正在通过 Finder 暂存所选 Excel，以获得 macOS 文件访问权限...")
-        staged_paths = [
-            copy_file_with_finder_fallback(path, staging_dir)
-            for path in paths
-        ]
-        _, staged_uploads = module.prepare_upload_files(staged_paths)
-        staged_province = next(item for item in staged_uploads if item.kind == "省内")
-        staged_output = module.province_output_path(staged_province.path, target_date)
-
-        module.run_api_upload(staged_paths, force=force)
-
-        copied_output = copy_file_with_finder_fallback(
-            staged_output,
-            original_province.path.parent,
-        )
-        on_log(f"已将更新后的省内数据复制回原目录：{copied_output}")
 
 
 class OnlineEnergyPage(ToolPage):
@@ -145,7 +97,7 @@ class OnlineEnergyPage(ToolPage):
         self.append_log("请选择日期后开始导出。")
 
     def build_export_command(self, run_date: str) -> list[str]:
-        return [python_executable(), str(self.paths.online_energy), run_date]
+        return commands.dated_script(self.paths.online_energy, run_date)
 
     def start_export(self) -> None:
         run_date = self.run_date.get().strip()
@@ -240,20 +192,7 @@ class TradeAnalysisPage(ToolPage):
         today: date,
         downloads_dir: Path | None = None,
     ) -> list[Path]:
-        downloads = downloads_dir or (Path.home() / "Downloads")
-        wanted_dates = [today, today - timedelta(days=2)]
-        matches: list[Path] = []
-        for wanted in wanted_dates:
-            candidates = [
-                path
-                for path in downloads.glob("*.xlsx")
-                if not path.name.startswith("~$")
-                and "出清情况" in path.name
-                and clearing_file_date(path) == wanted
-            ]
-            if candidates:
-                matches.append(max(candidates, key=lambda path: path.stat().st_mtime))
-        return matches
+        return file_rules.find_clearing_files_for_dates(today, downloads_dir)
 
     def set_files(self, paths: list[Path]) -> None:
         self.files = list(paths)
@@ -443,33 +382,11 @@ class ReportPage(ToolPage):
         daily: Path,
         template: Path | None,
     ) -> list[str]:
-        command = [
-            python_executable(),
-            str(self.paths.report_scripts_dir / "generate_red_marked_report.py"),
-            report_date,
-            "--online-workbook",
-            str(online),
-            "--day-ahead-workbook",
-            str(day_ahead),
-            "--daily-clearing-workbook",
-            str(daily),
-        ]
-        if template is not None:
-            command.extend(["--template", str(template)])
-        return command
+        return commands.word_report(self.paths, report_date, online, day_ahead, daily, template)
 
     @staticmethod
     def find_workbook_for_day(target_day: date) -> Path | None:
-        downloads = Path.home() / "Downloads"
-        date_token = f"{target_day.year}.{target_day.month}.{target_day.day}"
-        candidates = [
-            path
-            for path in downloads.glob("*.xlsx")
-            if not path.name.startswith("~$")
-            and "出清情况" in path.name
-            and date_token in path.name
-        ]
-        return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
+        return file_rules.find_workbook_for_day(target_day)
 
     def auto_fill(self) -> None:
         try:
@@ -664,17 +581,7 @@ class GroupUploadPage(ToolPage):
         today: date,
         upload_dir: Path,
     ) -> Path | None:
-        target_day = today - timedelta(days=2)
-        candidates = [
-            path
-            for path in upload_dir.glob("*.xls*")
-            if not path.name.startswith("~$")
-            and "能销" in path.name
-            and clearing_file_date(path) == target_day
-        ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda path: path.stat().st_mtime)
+        return file_rules.find_latest_energy_file_for_date(today, upload_dir)
 
     def apply_selected_paths(self, paths: list[Path]) -> None:
         try:
@@ -876,14 +783,7 @@ class MarketTableUpdatePage(ToolPage):
         self.append_log("请选择日期和市场 Excel 后开始更新。")
 
     def build_update_command(self, run_date: date, workbook: Path) -> list[str]:
-        return [
-            python_executable(),
-            str(self.paths.market_table_update),
-            "--date",
-            run_date.isoformat(),
-            "--workbook",
-            str(workbook),
-        ]
+        return commands.market_table(self.paths, run_date, workbook)
 
     def choose_workbook(self) -> None:
         selected = filedialog.askopenfilename(
@@ -1086,23 +986,8 @@ class GuangdongPricePage(ToolPage):
         forecast_days: int,
         training_months: int | None = None,
     ) -> list[str]:
-        if forecast_days != 1:
-            raise ValueError("本模块只输出 D+1 日前电价，预测天数必须为 1")
         months = training_months if training_months is not None else self.training_months.get()
-        return [
-            python_executable(),
-            str(self.paths.guangdong_price_forecast),
-            "--input",
-            str(input_path),
-            "--output-dir",
-            str(output_dir),
-            "--as-of",
-            normalize_date_input(self.run_date.get()),
-            "--forecast-days",
-            str(forecast_days),
-            "--training-months",
-            str(months),
-        ]
+        return commands.prediction(self.paths, input_path, output_dir, forecast_days, months, normalize_date_input(self.run_date.get()))
 
     def start_update(self) -> None:
         try:

@@ -29,6 +29,7 @@ from toolbox_auth_loader import load_login_module
 from toolbox_dates import parse_date_input
 from toolbox_credentials import apply_credentials
 from toolbox_excel_read import read_cell_snapshots
+from toolbox_native_excel import load_value_workbook
 from toolbox_workbook_commit import commit_workbooks
 
 BASE_URL = "https://xhxt.chng.com.cn"
@@ -346,7 +347,7 @@ def inspect_workbook_tail(path: Path) -> WorkbookTail:
         raise FileNotFoundError(f"Excel 文件不存在：{path}")
     if path.suffix.lower() != ".xlsx":
         raise ValueError(f"仅支持 .xlsx 工作簿：{path}")
-    workbook = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    workbook = load_value_workbook(path, data_only=True, read_only=True, native_in_auto=False)
     try:
         if SHEET_NAME not in workbook.sheetnames:
             raise RuntimeError(f"工作簿中没有工作表 {SHEET_NAME}。")
@@ -574,7 +575,7 @@ def _values_equal(actual: Any, expected: int | float) -> bool:
 
 
 def verify_workbook(path: Path, prepared: PreparedWorkbook) -> None:
-    workbook = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    workbook = load_value_workbook(path, data_only=True, read_only=True, native_in_auto=False)
     try:
         columns = (3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15)
         snapshots = read_cell_snapshots(workbook, (

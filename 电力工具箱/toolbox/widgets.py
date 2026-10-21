@@ -179,6 +179,8 @@ class ToolPage(ttk.Frame):
     ) -> None:
         if self.busy:
             return
+        if getattr(self.registry, "remote_business", False) is True and not getattr(worker, "_remote_business", False):
+            worker = self.registry.prepare_page_worker(self, status)
         if not self.log_console._initialized or self.log_console.finished:
             self.log_console.begin(status)
         self._current_cancellable = cancellable
@@ -258,6 +260,11 @@ class ToolPage(ttk.Frame):
         cancellable: bool = True,
     ) -> None:
         if self.busy:
+            return
+        if getattr(self.registry, "remote_business", False) is True:
+            worker = self.registry.prepare_page_worker(self, status, command=command, process=True)
+            self.append_log(f"工作目录：{cwd}\n> {shlex.join(command)}")
+            self.run_in_thread(worker, status=status, on_success=on_success, cancellable=cancellable)
             return
         if not self.log_console._initialized or self.log_console.finished:
             self.log_console.begin(status)

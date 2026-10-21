@@ -45,6 +45,10 @@ def install(payload: Path, root: Path, *, data_root: Path | None = None,
     # A content hash also distinguishes two development builds of one version.
     if previous.get("build") == manifest["build"]:
         return
+    for name, expected in manifest.get("default_hashes", {}).items():
+        source = safe(payload / "defaults", name)
+        if not source.is_file() or digest(source) != expected:
+            raise ValueError(f"首次安装资源损坏：{name}")
     conflicts = []
     changes = []
     for name in sorted(set(old) | set(files)):

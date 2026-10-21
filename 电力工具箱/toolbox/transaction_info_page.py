@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from . import commands
+
 import tkinter as tk
 from toolbox_choices import SettingCheckbutton
 
@@ -126,19 +128,7 @@ class TransactionInfoUpdatePage(ToolPage):
         start_date: date | None,
         create_backup: bool,
     ) -> list[str]:
-        command = [
-            python_executable(),
-            str(self.paths.transaction_info_update),
-            "--workbook",
-            str(workbook),
-            "--end-date",
-            end_date.isoformat(),
-        ]
-        if start_date is not None:
-            command.extend(("--start-date", start_date.isoformat()))
-        if not create_backup:
-            command.append("--no-backup")
-        return command
+        return commands.transaction_info(self.paths, workbook, end_date, start_date=start_date, create_backup=create_backup)
 
     def start_update(self) -> None:
         workbook = Path(self.workbook.get().strip()).expanduser()

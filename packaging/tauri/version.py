@@ -19,7 +19,8 @@ def release_changes(version):
         raise ValueError(f"CHANGELOG.md 必须包含唯一的 {version} 版本记录")
     index, match = matches[0]
     datetime.date.fromisoformat(match[2])
-    end = sections[index + 1].start() if index + 1 < len(sections) else len(content)
+    following = re.search(r"^## ", content[match.end():], re.M)
+    end = match.end() + following.start() if following else len(content)
     body = content[match.end():end].strip()
     if not re.search(r"^- \S.+", body, re.M):
         raise ValueError(f"CHANGELOG.md 中 {version} 缺少具体更新内容")

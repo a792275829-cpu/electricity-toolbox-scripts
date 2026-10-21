@@ -4,6 +4,10 @@
 
 - `build_support.py`：Mac 构建共用的源码导出、隐私排除、哈希、下载和解包逻辑。
 - `prepare_payload.py`：干净导出源码，在目标系统构建锁定运行环境及浏览器。
+- 预测总表作为首次安装数据放入 `payload/defaults/广东电价预测/输出/广东电价数据总表.xlsx`，首次启动复制到用户 `data/`；升级不覆盖已有总表或配置。默认从现有预测路径解析器读取本机配置的总表，也可传 `--forecast-workbook /绝对路径/总表.xlsx` 或设置 `FORECAST_MASTER_WORKBOOK`。原表只读，副本校验 SHA-256 和表头，缺失即停止打包；普通输出、实验模型和登录态仍不打包。
+- 总表属于本地业务数据，保持 Git 忽略。GitHub runner 需要仓库 Secret `FORECAST_MASTER_URL` 提供可下载总表，以及仓库 Variable `FORECAST_MASTER_SHA256` 固定其摘要；未配置时构建会明确失败，不能发布缺少总表的安装包。更新种子时同步更新摘要；本地源码迁移 ZIP 同样附带经过校验的总表，需先初始化根目录 `.venv`。
+- Desktop checks 仅用显式生成的合成总表进行资源包 smoke build，不上传安装包；正式发布流程仍要求真实总表。本地正式包使用现有配置解析出的总表并校验，不能将 CI 合成表用于发布。
+- 固定运行资源在 `REQUIRED_RUNTIME_ASSETS` 集中检查：500kV 拓扑／坐标／接线图、中文字体、日报 Word 模板与主体映射、市场日报 Jinja／CSS／JS 模板、PDF 识别脚本、WPS 默认配置和应用图标。
 - `prepare_tk.py`：从校验过的上游源码构建 Mac Tcl/Tk 8.6.18，保持原版控件／字体／交互，动态库最低部署版本 macOS 14。
 - `prepare_workspace.py`：安装／升级 `app/` 中的托管源码；初始配置仅写入 `data/`，更新记录与备份分别放入 `state/`、`backups/`。检测本地修改并在失败时回滚。
 - `workspace_layout.py`：将旧混合工作目录迁移到 v2 结构，保留账号、独立 profile、输出与样例，修正内部绝对路径；开发版使用独立目录。详见 `../../desktop/docs/directory-layout.md`。

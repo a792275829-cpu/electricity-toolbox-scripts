@@ -18,8 +18,8 @@ ACTIVE_STATES = frozenset({TaskState.CREATED, TaskState.RUNNING, TaskState.CANCE
 
 
 class TaskEngine:
-    def __init__(self) -> None:
-        self._events = EventBuffer()
+    def __init__(self, *, event_capacity: int = 0) -> None:
+        self._events = EventBuffer(event_capacity)
         self._snapshots: dict[str, TaskSnapshot] = {}
         self._tokens: dict[str, CancellationToken] = {}
         self._threads: dict[str, threading.Thread] = {}

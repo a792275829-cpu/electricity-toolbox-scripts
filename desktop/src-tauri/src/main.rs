@@ -1,4 +1,3 @@
-mod app_update;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -19,14 +18,14 @@ use tauri::{
 use tauri_plugin_opener::OpenerExt;
 
 struct Backend {
-    input: Mutex<ChildStdin>,
+    input: Arc<Mutex<ChildStdin>>,
     child: Mutex<Child>,
     pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
     next_id: AtomicU64,
 }
 
 impl Backend {
-    fn launch(app: &tauri::AppHandle) -> Result<Arc<Self>, String> {
+    fn launch(app: &tauri::AppHandle, ui: bool, upstream: Option<Arc<Backend>>) -> Result<Arc<Self>, String> {
         let resources = app
             .path()
             .resource_dir()
@@ -69,7 +68,7 @@ impl Backend {
         if !python.is_file() {
             return Err("Python 环境未初始化，请先运行 setup_macos.command。".into());
         }
-        if managed {
+        if managed && !ui {
             let mut setup = Command::new(&python);
             setup
                 .args(["-I", "-B"])
@@ -81,7 +80,7 @@ impl Backend {
             if !output.status.success() {
                 return Err(String::from_utf8_lossy(&output.stderr).to_string());
             }
-        } else if use_data_home {
+        } else if use_data_home && !ui {
             let mut setup = Command::new(&python);
             setup
                 .args(["-B"])
@@ -93,12 +92,14 @@ impl Backend {
             }
         }
         let gui_python = runtime.join("python/电力工具箱.app/Contents/MacOS/电力工具箱");
-        let native_bundle =
-            cfg!(target_os = "macos") && !cfg!(debug_assertions) && gui_python.is_file();
+        let native_bundle = ui && cfg!(target_os = "macos") && gui_python.is_file();
         let mut command = Command::new(if native_bundle { &gui_python } else { &python });
+        let entry = root.join(if ui { "desktop/python/native_bridge.py" } else { "desktop/python/service_bridge.py" });
+        #[cfg(debug_assertions)]
+        let entry = if ui { std::env::var_os("TOOLBOX_UI_TEST_ENTRY").map(PathBuf::from).unwrap_or(entry) } else { entry };
         command
             .args(["-u", "-B"])
-            .arg(root.join("desktop/python/native_bridge.py"))
+            .arg(entry)
             .arg("--workspace")
             .arg(&root)
             .current_dir(&root)
@@ -114,6 +115,7 @@ impl Backend {
                 command.env("TOOLBOX_APP_BUNDLE", bundle);
             }
         }
+        if ui { command.arg("--remote-business"); }
         command
             .env_remove("PYTHONHOME")
             .env_remove("PYTHONPATH")
@@ -124,8 +126,7 @@ impl Backend {
             command.env("TOOLBOX_DATA_ROOT", app_home.join("data"));
         }
         if native_bundle {
-            command
-                .env("PYTHONHOME", runtime.join("python"))
+            command.env("PYTHONHOME", runtime.join("python"))
                 .env("__CFBundleIdentifier", "com.electricity.toolbox.native");
         }
         if runtime.is_dir() {
@@ -146,41 +147,45 @@ impl Backend {
         let mut child = command
             .spawn()
             .map_err(|e| format!("无法启动 Python：{e}"))?;
-        let input = child.stdin.take().ok_or("Python stdin unavailable")?;
+        let input = Arc::new(Mutex::new(child.stdin.take().ok_or("Python stdin unavailable")?));
         let output = child.stdout.take().ok_or("Python stdout unavailable")?;
         let errors = child.stderr.take().ok_or("Python stderr unavailable")?;
         let pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let responses = Arc::clone(&pending);
         let handle = app.clone();
+        let reply_input = input.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(output).lines().map_while(Result::ok) {
                 if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                    if let Some(id) = value.get("id").and_then(Value::as_u64) {
+                    if let (Some(rpc), Some(service)) = (value.get("rpc"), upstream.as_ref()) {
+                        let rpc = rpc.clone();
+                        let service = service.clone();
+                        let input = reply_input.clone();
+                        std::thread::spawn(move || {
+                            let result = service.request(rpc["method"].as_str().unwrap_or(""), rpc["params"].clone());
+                            let reply = match result {
+                                Ok(value) => json!({"rpc_reply": rpc["id"], "result": value}),
+                                Err(error) => json!({"rpc_reply": rpc["id"], "error": error}),
+                            };
+                            let _ = input.lock().unwrap().write_all((reply.to_string() + "\n").as_bytes());
+                        });
+                    } else if let Some(id) = value.get("id").and_then(Value::as_u64) {
                         if let Some(sender) = responses.lock().unwrap().remove(&id) {
                             let _ = sender.send(value);
                         }
                     } else if let Some(event) = value.get("event") {
                         let _ = handle.emit("backend-event", event);
-                        if event["kind"] == "begin_update" || event["kind"] == "cancel_update" {
-                            app_update::event(&handle, event);
-                        }
-                        if event["kind"] == "native-closed" {
-                            if let Some(state) = handle.try_state::<State>() {
-                                state.native_closed.store(true, Ordering::Release);
-                                if !state.update_job.lock().unwrap().installing() { handle.exit(0); }
-                            }
+                        if ui && event["kind"] == "native-closed" {
+                            finish_after_ui(&handle);
                         }
                     }
                 }
             }
             responses.lock().unwrap().clear();
-            if !handle
-                .try_state::<State>()
-                .map(|s| s.native_closed.load(Ordering::Acquire))
-                .unwrap_or(false)
-            {
-                let _ = handle.emit("backend-error", "原版工具箱已意外退出，请重启应用。");
+            if ui { finish_after_ui(&handle); }
+            else if !handle.try_state::<State>().map(|s| s.native_closed.load(Ordering::Acquire)).unwrap_or(false) {
+                let _ = handle.emit("backend-error", "业务后台已退出。请核对输出后重新启动；写入和上传不会自动重试。");
                 show_updater(&handle);
             }
         });
@@ -191,16 +196,11 @@ impl Backend {
             }
         });
         Ok(Arc::new(Self {
-            input: Mutex::new(input),
+            input,
             child: Mutex::new(child),
             pending,
             next_id: AtomicU64::new(1),
         }))
-    }
-
-    fn notify(&self, method: &str, params: Value) -> Result<(), String> {
-        let payload = json!({"method": method, "params": params}).to_string() + "\n";
-        self.input.lock().unwrap().write_all(payload.as_bytes()).map_err(|e| e.to_string())
     }
 
     fn request(&self, method: &str, params: Value) -> Result<Value, String> {
@@ -237,8 +237,8 @@ impl Backend {
 
 struct State {
     backend: Result<Arc<Backend>, String>,
+    ui: Result<Arc<Backend>, String>,
     native_closed: AtomicBool,
-    update_job: Mutex<app_update::UpdateJob>,
 }
 
 fn show_updater(app: &tauri::AppHandle) {
@@ -248,24 +248,36 @@ fn show_updater(app: &tauri::AppHandle) {
     }
 }
 
+fn finish_after_ui(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<State>() else { return; };
+    if state.native_closed.swap(true, Ordering::AcqRel) { return; }
+    let backend = state.backend.clone();
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        if let Ok(backend) = backend {
+            // A crashed UI must not interrupt a business write. The service
+            // refuses shutdown until non-interruptible tasks have completed.
+            loop {
+                if backend.request("shutdown", json!({"cancel": true})).is_ok() { break; }
+                if backend.child.lock().unwrap().try_wait().ok().flatten().is_some() { break; }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        }
+        handle.exit(0);
+    });
+}
+
 fn request_native(app: &tauri::AppHandle, method: &'static str) {
     let handle = app.clone();
     std::thread::spawn(move || {
         if let Some(state) = handle.try_state::<State>() {
-            let result = state
-                .backend
-                .clone()
-                .and_then(|b| b.request(method, json!({})));
+            let result = state.ui.clone().and_then(|ui| ui.request(method, json!({})));
             if let Err(error) = result {
-                if method == "request_close"
-                    && state
-                        .backend
-                        .as_ref()
-                        .map(|b| b.child.lock().unwrap().try_wait().ok().flatten().is_some())
-                        .unwrap_or(true)
-                {
-                    state.native_closed.store(true, Ordering::Release);
-                    handle.exit(0);
+                let ui_stopped = state.ui.as_ref().map(|ui|
+                    ui.child.lock().unwrap().try_wait().ok().flatten().is_some()
+                ).unwrap_or(true);
+                if ui_stopped && (method == "request_close" || method == "installer_close") {
+                    finish_after_ui(&handle);
                     return;
                 }
                 let _ = handle.emit("backend-error", error);
@@ -277,16 +289,10 @@ fn request_native(app: &tauri::AppHandle, method: &'static str) {
 
 #[tauri::command]
 async fn native_activate(app: tauri::AppHandle) -> Result<(), String> {
-    let backend = app.state::<State>().backend.clone()?;
-    let shown =
-        tauri::async_runtime::spawn_blocking(move || backend.request("activate", json!({})))
-            .await
-            .map_err(|e| e.to_string())??;
-    if shown == true {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.hide();
-        }
-    }
+    let ui = app.state::<State>().ui.clone()?;
+    tauri::async_runtime::spawn_blocking(move || ui.request("activate", json!({})))
+        .await.map_err(|e| e.to_string())??;
+    if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); }
     Ok(())
 }
 
@@ -309,7 +315,7 @@ fn open_path(path: String, app: tauri::AppHandle) -> Result<(), String> {
         return Err("文件或目录不存在".into());
     }
     if !path.is_dir()
-        && !["xlsx", "pdf", "png", "docx", "html", "txt", "md", "json"].contains(
+        && !["xlsx", "pdf", "png", "docx", "html", "txt", "md", "json", "dmg"].contains(
             &path
                 .extension()
                 .and_then(|x| x.to_str())
@@ -336,17 +342,19 @@ fn main() {
                 request_native(app, "activate");
             }
         }))
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let backend = Backend::launch(app.handle());
-            let failed = backend.is_err();
+            let backend = Backend::launch(app.handle(), false, None);
+            let ui = match &backend {
+                Ok(service) => Backend::launch(app.handle(), true, Some(service.clone())),
+                Err(error) => Err(error.clone()),
+            };
+            let failed = backend.is_err() || ui.is_err();
             app.manage(State {
                 backend,
+                ui,
                 native_closed: AtomicBool::new(false),
-                update_job: Mutex::new(app_update::UpdateJob::default()),
             });
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -387,9 +395,15 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("无法启动电力工具箱")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(&event, tauri::RunEvent::Ready) {
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
             if let Some(state) = app.try_state::<State>() {
                 if let Ok(backend) = &state.backend {
                     match event {
+                        #[cfg(target_os = "macos")]
+                        tauri::RunEvent::Reopen { .. } => request_native(app, "activate"),
                         tauri::RunEvent::ExitRequested { api, .. } => {
                             if !state.native_closed.load(Ordering::Acquire) {
                                 api.prevent_exit();
@@ -397,7 +411,9 @@ fn main() {
                             }
                         }
                         tauri::RunEvent::Exit => {
-                            let _ = backend.child.lock().unwrap().kill();
+                            // Normal shutdown is acknowledged by the business
+                            // layer before the host exits. Do not kill writes.
+                            let _ = backend.child.lock().unwrap().try_wait();
                         }
                         _ => {}
                     }
@@ -407,4 +423,4 @@ fn main() {
 }
 
 #[cfg(test)]
-mod signed_update_tests;
+mod service_tests;

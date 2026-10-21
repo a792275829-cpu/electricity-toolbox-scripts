@@ -11,6 +11,46 @@ import numpy as np
 import pdfplumber
 import pypdfium2 as pdfium
 from PIL import Image
+import sys
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from toolbox_native_compute import unmix as native_unmix, with_native_session
+
+_pdf_inputs = ContextVar("pdf_inputs", default=None)
+
+
+@contextmanager
+def _open_pdf(path):
+    cache = _pdf_inputs.get()
+    if cache is None:
+        with pdfplumber.open(str(path)) as pdf:
+            yield pdf
+    else:
+        key = Path(path).resolve()
+        if key not in cache:
+            cache[key] = pdfplumber.open(str(path))
+        yield cache[key]
+
+
+def _reuse_pdf(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        if _pdf_inputs.get() is not None:
+            return function(*args, **kwargs)
+        cache = {}
+        token = _pdf_inputs.set(cache)
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _pdf_inputs.reset(token)
+            for pdf in cache.values():
+                pdf.close()
+    return wrapped
 
 
 class ParseError(RuntimeError):
@@ -81,6 +121,7 @@ def price_intervals(category_count: int) -> list[str]:
     return intervals
 
 
+@_reuse_pdf
 def analyze_pdf(pdf_path: str | Path) -> PdfAnalysis:
     path = Path(pdf_path).expanduser().resolve()
     if not path.is_file():
@@ -89,7 +130,7 @@ def analyze_pdf(pdf_path: str | Path) -> PdfAnalysis:
     baseline = (
         declaration_info.zero_or_below.total
         if declaration_info.zero_or_below
-        else extract_baseline_capacity(path)
+        else extract_baseline_capacity(path, declaration_info)
     )
     chart, image_source = extract_quote_chart_image(path)
     return PdfAnalysis(
@@ -136,7 +177,7 @@ def extract_report_date(pdf_path: Path) -> str:
         return f"{year_match.group(1)}{md_match.group(1)}{md_match.group(2)}"
 
     try:
-        with pdfplumber.open(str(pdf_path)) as pdf:
+        with _open_pdf(pdf_path) as pdf:
             text = "\n".join(page.extract_text() or "" for page in pdf.pages[:3])
     except Exception:
         text = ""
@@ -153,7 +194,7 @@ def extract_declaration_info(pdf_path: Path) -> DeclarationInfo:
     zero_or_below: DeclarationRow | None = None
     above_600: DeclarationRow | None = None
     try:
-        with pdfplumber.open(str(pdf_path)) as pdf:
+        with _open_pdf(pdf_path) as pdf:
             for page in pdf.pages[: min(3, len(pdf.pages))]:
                 parsed = _read_declaration_tables(page.extract_tables() or [])
                 zero_or_below = parsed.zero_or_below or zero_or_below
@@ -203,12 +244,12 @@ def _read_declaration_tables(
     return DeclarationInfo(zero_or_below, above_600)
 
 
-def extract_baseline_capacity(pdf_path: Path) -> float | None:
-    declaration = extract_declaration_info(pdf_path)
+def extract_baseline_capacity(pdf_path: Path, declaration: DeclarationInfo | None = None) -> float | None:
+    declaration = declaration if declaration is not None else extract_declaration_info(pdf_path)
     if declaration.zero_or_below:
         return declaration.zero_or_below.total
     try:
-        with pdfplumber.open(str(pdf_path)) as pdf:
+        with _open_pdf(pdf_path) as pdf:
             texts = [
                 page.extract_text(x_tolerance=1, y_tolerance=3) or ""
                 for page in pdf.pages[: min(3, len(pdf.pages))]
@@ -281,7 +322,7 @@ def extract_quote_chart_image(pdf_path: Path) -> tuple[Image.Image, str]:
     """提取第 3 页报价分布图，兼容内嵌整图和页面拼接图。"""
     candidates: list[tuple[Image.Image, str]] = []
     try:
-        with pdfplumber.open(str(pdf_path)) as pdf:
+        with _open_pdf(pdf_path) as pdf:
             if len(pdf.pages) >= 3:
                 page = pdf.pages[2]
                 images = sorted(
@@ -373,6 +414,7 @@ def image_to_png_bytes(image: Image.Image, max_width: int | None = None) -> byte
     return output.getvalue()
 
 
+@with_native_session
 def analyze_chart_image(
     image: Image.Image,
     baseline_capacity: float,
@@ -990,7 +1032,7 @@ def _measure_pixel_counts(
         if x0 >= x1:
             rows.append((0.0, 0.0, 0.0))
             continue
-        coverage = _unmix_bar_colors(array[y0:y1, x0:x1], background, palette)
+        coverage = _unmix_profile(array[y0:y1, x0:x1], background, palette)
         profile = np.median(coverage, axis=1)
         # Only bridge short grid occlusions surrounded by observed bar ink.
         # Never extrapolate an invisible bar or add a fixed offset to all bars.
@@ -1026,7 +1068,34 @@ def _measure_pixel_counts(
     return rows
 
 
+def _unmix_profile(pixels, background, palette, *, filter_sources=True):
+    result = native_unmix(pixels, background, palette, profile=True)
+    if result is None:
+        coverage = _unmix_bar_colors_python(pixels, background, palette, filter_sources=filter_sources)
+        return np.median(coverage, axis=1, keepdims=True)
+    if filter_sources:
+        supported = _supported_bar_sources(pixels, background, palette, result)
+        if any(color is not None and not supported[i] for i,color in enumerate(palette)):
+            restricted = [color if supported[i] else None for i,color in enumerate(palette)]
+            return _unmix_profile(pixels, background, restricted, filter_sources=False)
+    return result
+
+
 def _unmix_bar_colors(
+    pixels: np.ndarray, background: np.ndarray, palette: list[np.ndarray | None], *, filter_sources: bool = True,
+) -> np.ndarray:
+    result = native_unmix(pixels, background, palette)
+    if result is None:
+        return _unmix_bar_colors_python(pixels, background, palette, filter_sources=filter_sources)
+    if filter_sources:
+        supported = _supported_bar_sources(pixels, background, palette, result)
+        if any(color is not None and not supported[i] for i,color in enumerate(palette)):
+            restricted = [color if supported[i] else None for i,color in enumerate(palette)]
+            return _unmix_bar_colors(pixels, background, restricted, filter_sources=False)
+    return result
+
+
+def _unmix_bar_colors_python(
     pixels: np.ndarray,
     background: np.ndarray,
     palette: list[np.ndarray | None],

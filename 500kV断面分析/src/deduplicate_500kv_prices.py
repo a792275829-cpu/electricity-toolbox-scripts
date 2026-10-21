@@ -7,12 +7,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 
-from openpyxl import Workbook, load_workbook
-
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.analyze_500kv_section_gaps import normalize_price_node_name, parse_topology_edges
+from src.price_xlsx_backend import open_price_workbooks
 
 
 TIME_HEADER_RE = re.compile(r"^\d{2}:\d{2}$")
@@ -79,6 +78,22 @@ def process_many(
     return results
 
 
+def _indexed_topology_matcher(nodes):
+    """Normalize each topology node once, preserving exact/longest priority."""
+    ordered = sorted(nodes, key=lambda node: (-len(node), node))
+    exact = {}
+    for node in ordered:
+        exact.setdefault(normalize_price_node_name(node), node)
+    cache = {}
+    def match(name):
+        raw = "" if name is None else str(name).strip()
+        if raw not in cache:
+            normalized = normalize_price_node_name(name)
+            cache[raw] = exact.get(normalized) or next((node for node in ordered if node in raw), None)
+        return cache[raw]
+    return match
+
+
 def process_workbook(
     input_path: Path,
     output_path: Path | None = None,
@@ -87,114 +102,117 @@ def process_workbook(
     input_path = Path(input_path)
     output_path = Path(output_path) if output_path is not None else default_output_path(input_path)
     topology_nodes = load_topology_nodes(topology_path) if topology_path is not None else None
+    match_node = _indexed_topology_matcher(topology_nodes) if topology_nodes is not None else None
 
-    source = load_workbook(input_path, read_only=True, data_only=True)
-    output = Workbook()
-    output.remove(output.active)
+    source, output = open_price_workbooks(input_path)
 
-    kept_rows = 0
-    removed_rows = 0
-    processed_sheets = 0
-    seen: set[tuple[object, ...]] = set()
-    topology_groups: dict[tuple[str, object], dict[str, object]] = {}
-    topology_sheet_title: str | None = None
-    topology_time_headers: list[str] | None = None
+    try:
+        kept_rows = 0
+        removed_rows = 0
+        processed_sheets = 0
+        seen: set[tuple[object, ...]] = set()
+        topology_groups: dict[tuple[str, object], dict[str, object]] = {}
+        topology_sheet_title: str | None = None
+        topology_time_headers: list[str] | None = None
 
-    for sheet in source.worksheets:
-        rows = sheet.iter_rows(values_only=True)
-        try:
-            header = next(rows)
-        except StopIteration:
-            continue
-
-        column_map = _column_map(header)
-        if column_map is None:
-            continue
-
-        processed_sheets += 1
-        output_rows = []
-        for row in rows:
-            if _is_empty_row(row):
+        for sheet in source.worksheets:
+            rows = sheet.iter_rows(values_only=True)
+            try:
+                header = next(rows)
+            except StopIteration:
                 continue
 
-            node_name = _cell(row, column_map["node"])
-            data_item = _cell(row, column_map["data_item"])
-            price_values = tuple(_cell(row, index) for index in column_map["time_columns"])
+            column_map = _column_map(header)
+            if column_map is None:
+                continue
 
-            topology_node = (
-                match_topology_node(node_name, topology_nodes)
-                if topology_nodes is not None
-                else None
-            )
-            if topology_nodes is not None:
-                if topology_node is None:
+            processed_sheets += 1
+            output_rows = []
+            for row in rows:
+                if _is_empty_row(row):
+                    continue
+
+                node_name = _cell(row, column_map["node"])
+                data_item = _cell(row, column_map["data_item"])
+                price_values = tuple(_cell(row, index) for index in column_map["time_columns"])
+
+                topology_node = (
+                    match_node(node_name)
+                    if topology_nodes is not None
+                    else None
+                )
+                if topology_nodes is not None:
+                    if topology_node is None:
+                        removed_rows += 1
+                        continue
+
+                    current_time_headers = list(column_map["time_headers"])
+                    if topology_time_headers is None:
+                        topology_time_headers = current_time_headers
+                        topology_sheet_title = sheet.title
+                    elif topology_time_headers != current_time_headers:
+                        raise ValueError("包含拓扑节点的工作表分时时间列不一致，无法合并")
+
+                    group_key = (topology_node, _normalize_key_value(data_item))
+                    group = topology_groups.get(group_key)
+                    if group is None:
+                        topology_groups[group_key] = {
+                            "node": topology_node,
+                            "data_item": data_item,
+                            "price_rows": [price_values],
+                        }
+                        kept_rows += 1
+                    else:
+                        group["price_rows"].append(price_values)
+                        removed_rows += 1
+                    continue
+
+                if not _is_500kv_node(node_name):
                     removed_rows += 1
                     continue
 
-                current_time_headers = list(column_map["time_headers"])
-                if topology_time_headers is None:
-                    topology_time_headers = current_time_headers
-                    topology_sheet_title = sheet.title
-                elif topology_time_headers != current_time_headers:
-                    raise ValueError("包含拓扑节点的工作表分时时间列不一致，无法合并")
-
-                group_key = (topology_node, _normalize_key_value(data_item))
-                group = topology_groups.get(group_key)
-                if group is None:
-                    topology_groups[group_key] = {
-                        "node": topology_node,
-                        "data_item": data_item,
-                        "price_rows": [price_values],
-                    }
-                    kept_rows += 1
-                else:
-                    group["price_rows"].append(price_values)
+                normalized_name = normalize_node_name(node_name)
+                dedupe_key = (
+                    _normalize_key_value(data_item),
+                    *(_normalize_key_value(value) for value in price_values),
+                )
+                if dedupe_key in seen:
                     removed_rows += 1
-                continue
+                    continue
 
-            if not _is_500kv_node(node_name):
-                removed_rows += 1
-                continue
+                seen.add(dedupe_key)
+                output_rows.append([normalized_name, data_item, *price_values])
+                kept_rows += 1
 
-            normalized_name = normalize_node_name(node_name)
-            dedupe_key = (
-                _normalize_key_value(data_item),
-                *(_normalize_key_value(value) for value in price_values),
+            if output_rows:
+                output_sheet = output.create_sheet(_safe_sheet_title(sheet.title, output.sheetnames))
+                output_sheet.append(["节点名称", "数据项", *column_map["time_headers"]])
+                for output_row in output_rows:
+                    output_sheet.append(output_row)
+
+        if topology_groups:
+            output_sheet = output.create_sheet(
+                _safe_sheet_title(topology_sheet_title or "500kV节点电价", output.sheetnames)
             )
-            if dedupe_key in seen:
-                removed_rows += 1
-                continue
+            output_sheet.append(["节点名称", "数据项", *(topology_time_headers or [])])
+            for group in topology_groups.values():
+                output_sheet.append(
+                    [
+                        group["node"],
+                        group["data_item"],
+                        *_average_price_rows(group["price_rows"]),
+                    ]
+                )
 
-            seen.add(dedupe_key)
-            output_rows.append([normalized_name, data_item, *price_values])
-            kept_rows += 1
+        if kept_rows == 0:
+            raise ValueError(f"没有找到可输出的500kV节点行: {input_path}")
 
-        if output_rows:
-            output_sheet = output.create_sheet(_safe_sheet_title(sheet.title, output.sheetnames))
-            output_sheet.append(["节点名称", "数据项", *column_map["time_headers"]])
-            for output_row in output_rows:
-                output_sheet.append(output_row)
-
-    if topology_groups:
-        output_sheet = output.create_sheet(
-            _safe_sheet_title(topology_sheet_title or "500kV节点电价", output.sheetnames)
-        )
-        output_sheet.append(["节点名称", "数据项", *(topology_time_headers or [])])
-        for group in topology_groups.values():
-            output_sheet.append(
-                [
-                    group["node"],
-                    group["data_item"],
-                    *_average_price_rows(group["price_rows"]),
-                ]
-            )
-
-    if kept_rows == 0:
-        raise ValueError(f"没有找到可输出的500kV节点行: {input_path}")
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output.save(output_path)
-    return ProcessResult(input_path, output_path, kept_rows, removed_rows, processed_sheets)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output.save(output_path)
+        return ProcessResult(input_path, output_path, kept_rows, removed_rows, processed_sheets)
+    finally:
+        source.close()
+        output.close()
 
 
 def _column_map(header: tuple[object, ...]) -> dict[str, object] | None:

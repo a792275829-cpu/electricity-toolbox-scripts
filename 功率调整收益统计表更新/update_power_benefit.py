@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import math
+import os
+import warnings
 import re
 import stat
 import sys
@@ -28,6 +30,8 @@ from toolbox_auth_loader import load_login_module
 from toolbox_credentials import read_login_config
 from toolbox_dates import parse_date_input
 from toolbox_excel_read import read_cell_snapshots
+from toolbox_native_excel import load_value_workbook
+from toolbox_workbook_inspection import load_inspection_pair, UnsupportedInspection
 from toolbox_workbook_commit import commit_workbooks
 
 BASE_URL = "https://xhxt.chng.com.cn"
@@ -170,11 +174,28 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
         raise ValueError(f"只支持 .xlsx：{path}")
     station = station_from_filename(path)
     before = fingerprint(path)
-    workbook = openpyxl.load_workbook(path)
-    cached = openpyxl.load_workbook(path, data_only=True)
+    mode = os.environ.get("TOOLBOX_BENEFIT_INSPECT_BACKEND", "auto")
+    if mode not in {"auto", "full", "stream"}:
+        raise ValueError(f"未知收益检查后端：{mode}")
+    workbook = cached = None
+    if mode != "full":
+        try:
+            workbook, cached = load_inspection_pair(
+                path, columns=(1, 2, 3, 10, 11, 12, 13, 14),
+                target_columns=(3, 10, 11, 12, 13, 14),
+                sheet_filter=lambda name: re.fullmatch(r"(\d{1,2})月", name),
+            )
+        except (UnsupportedInspection, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+            if mode == "stream":
+                raise
+            warnings.warn(f"局部收益检查不可用，使用完整工作簿：{exc}", RuntimeWarning)
+    if workbook is None:
+        workbook = openpyxl.load_workbook(path)
     cells: list[CellTarget] = []
     seen_days: set[date] = set()
     try:
+        if cached is None:
+            cached = load_value_workbook(path, data_only=True, read_only=False)
         for sheet in workbook:
             month_match = re.fullmatch(r"(\d{1,2})月", sheet.title)
             if not month_match:
@@ -213,7 +234,8 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
             raise ValueError(f"{path.name} 模板内未找到指定日期范围的完整小时块。")
     finally:
         workbook.close()
-        cached.close()
+        if cached is not None:
+            cached.close()
     if fingerprint(path) != before:
         raise RuntimeError(f"检查时工作簿发生变化，请关闭 Excel/WPS 后重试：{path}")
     return WorkbookPlan(path, station, tuple(cells), before)
@@ -403,7 +425,26 @@ def request_recalculation(data: bytes) -> bytes:
 
 
 def verify_workbook(path: Path, prepared: PreparedWorkbook) -> None:
-    workbook = openpyxl.load_workbook(path)
+    mode = os.environ.get("TOOLBOX_BENEFIT_VERIFY_BACKEND", "auto")
+    if mode not in {"auto", "full", "stream"}:
+        raise ValueError(f"未知收益回读后端：{mode}")
+    workbook = None
+    if mode != "full":
+        try:
+            requests = {}
+            for cell, _ in prepared.expectations:
+                requests.setdefault(cell.sheet, set()).add(openpyxl.utils.cell.coordinate_to_tuple(cell.coordinate))
+            workbook, _ = load_inspection_pair(
+                path, columns=(3, 10, 11, 12, 13, 14), target_columns=(3, 10, 11, 12, 13, 14),
+                sheet_filter=lambda name: re.fullmatch(r"(\d{1,2})月", name),
+                requests=requests, capture_cache=False,
+            )
+        except (UnsupportedInspection, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+            if mode == "stream":
+                raise
+            warnings.warn(f"局部收益回读不可用，使用完整工作簿：{exc}", RuntimeWarning)
+    if workbook is None:
+        workbook = openpyxl.load_workbook(path)
     try:
         snapshots = read_cell_snapshots(workbook, ((cell.sheet, cell.coordinate) for cell, _ in prepared.expectations))
         for cell, expected in prepared.expectations:

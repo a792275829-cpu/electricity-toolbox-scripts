@@ -1,8 +1,10 @@
 # Tauri 桌面版
 
-Tauri 2 负责单实例和系统托盘；主窗口和更新窗口直接使用原来的 Tk 界面，React 仅保留启动故障提示。当前仅维护 Apple 芯片 Mac（macOS 14+），不包含 Intel Mac。
+桌面版分为三层：原版 Tk 界面、Rust/Tauri 应用管理、独立 Python 业务服务。Tauri 负责单实例、系统托盘、进程生命周期和请求转发；原界面通过服务执行任务，React 仅保留启动故障提示。当前仅维护 Apple 芯片 Mac（macOS 14+），不包含 Intel Mac。
 
 主界面没有另一套网页实现：原来的布局、控件、字体主题、日期选择、文件对话框、快捷键、任务取消、账号保存、日志、WPS 配置表格和弹窗，都由原版代码执行。Mac 发行包固定携带 Tcl/Tk 8.6.18，与本机原版一致，避免 Tk 9 的字体／缩放差异。启动和重新打开时后台检查 GitHub 正式版，发现新版在“电力工作台”下显示红色 `new`。点击可查看更新说明、下载 DMG、查看进度、取消或重试；下载通过 SHA-256 校验后打开镜像，退出工具箱后运行镜像中的安装命令覆盖更新。右下角更新入口已移除，Mac 菜单栏图标仍保留手动检查。侧栏仅展示业务模块，启动默认进入“导出上网电量”。现有 Tk 启动器保留。
+
+三层的接口、生命周期和验证说明见 [架构说明](docs/architecture.md)。外壳通过 `LSUIElement` 和后台激活策略保持隐藏，只有原生界面显示工具箱 Dock 图标。分层不等于单进程：空闲时有应用管理、界面和业务服务三个进程，耗时业务按需启动工作进程。
 
 ## 日常维护
 
@@ -10,7 +12,7 @@ Tauri 2 负责单实例和系统托盘；主窗口和更新窗口直接使用原
 
 首次开发需要 Node 22.23.3、Rust stable、项目根目录 `.venv`。需要 Xcode Command Line Tools；Python 依赖由根目录 `setup_macos.command` 初始化。前端首次执行 `cd desktop && npm ci`。
 
-开发启动器运行 `npm run dev`，自动编译必要的 Rust 改动。日常业务和界面仍维护原 Python 文件，修改已加载的界面代码后关闭并重新启动即可，无需制作安装包；脚本任务在下一次运行时读取脚本源码。React/CSS 只影响启动故障提示。修改 `desktop/python/native_bridge.py` 或依赖后重启应用。
+开发启动器运行 `npm run dev`，自动编译必要的 Rust 改动。界面仍维护原 Python 页面；任务适配在 `toolbox/ui_tasks.py`，业务服务和工作流在 `toolbox/service.py`、`toolbox/workflows.py`。修改已加载的界面或服务后重启应用；脚本任务在下一次运行时读取业务脚本源码。React/CSS 只影响启动故障提示。`00_启动/电力工具箱.command` 保留不依赖 Node/Rust 的原版源码启动方式。
 
 接收电脑安装发行包即可使用，内置 Python 3.11.15、Node 22.23.3、Playwright 1.55.0 和 Chromium。浏览器登录和网站取数仍需要网络。
 

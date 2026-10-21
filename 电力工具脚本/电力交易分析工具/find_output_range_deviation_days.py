@@ -15,7 +15,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from generate_electricity_report import ReportBuilder, THERMAL_COMPANIES, fmt
+from generate_electricity_report import ReportBuilder, THERMAL_COMPANIES, fmt, load_value_workbook
 
 
 DEFAULT_INPUT_DIR = Path.home() / "Downloads" / "haimen shouxian"
@@ -141,7 +141,8 @@ def output_range_distance(normal_range: NormalOutputRange, plant_output: float) 
 
 def load_report_builder(path: Path) -> ReportBuilder:
     builder = ReportBuilder(path)
-    builder.wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    builder.wb = load_value_workbook(path, data_only=True, read_only=True,
+                                     selected=("运行补偿", *THERMAL_COMPANIES))
     try:
         builder.offer_cards = builder._parse_offer_cards()
         for company in THERMAL_COMPANIES:

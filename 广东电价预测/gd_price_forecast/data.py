@@ -1,6 +1,12 @@
 from pathlib import Path
+import sys
 
 import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from toolbox_native_excel import read_model_frame
 
 TARGET = "全省日前平均电价"
 
@@ -32,11 +38,7 @@ def _normalize(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_model_data(path: Path | str) -> pd.DataFrame:
-    with pd.ExcelFile(path) as workbook:
-        sheet = (
-            "整合数据" if "整合数据" in workbook.sheet_names else workbook.sheet_names[0]
-        )
-        source = pd.read_excel(workbook, sheet_name=sheet)
+    source = read_model_frame(path)
     frame = _normalize(drop_unavailable_model_columns(source))
     validate_quarter_hour_grain(frame)
     return frame

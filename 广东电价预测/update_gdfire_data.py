@@ -7,6 +7,7 @@ from datetime import date
 import hashlib
 import http.cookiejar
 import json
+import os
 from pathlib import Path
 import ssl
 import subprocess
@@ -16,7 +17,7 @@ import urllib.parse
 import urllib.request
 
 import pandas as pd
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.cell import WriteOnlyCell
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.utils import get_column_letter
@@ -29,6 +30,8 @@ if str(SCRIPT_DIR.parent) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR.parent))
 from toolbox_credentials import read_login_config
 from toolbox_dates import normalize_date_input
+from toolbox_native_excel import read_model_frame
+from toolbox_native_write import apply_table_style, read_table_layout, save_frame
 
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -277,11 +280,7 @@ def build_increment(
 
 
 def read_data_workbook(path: Path) -> pd.DataFrame:
-    with pd.ExcelFile(path) as workbook:
-        sheet = (
-            "整合数据" if "整合数据" in workbook.sheet_names else workbook.sheet_names[0]
-        )
-        return pd.read_excel(workbook, sheet_name=sheet)
+    return read_model_frame(path)
 
 
 def duplicate_data_columns(frame: pd.DataFrame) -> list[tuple[str, str]]:
@@ -318,6 +317,29 @@ def merge_with_base(base_path: Path, increment: pd.DataFrame) -> pd.DataFrame:
     return merge_data_frames(read_data_workbook(base_path), increment)
 
 
+def _merge_changed_rows(base, increment, value_columns):
+    """Group only keys touched by an increment when historical keys are unique."""
+    from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype
+    keys = ["日期", "时刻"]
+    if base[keys].isna().any().any() or increment[keys].isna().any().any():
+        return None
+    if base.duplicated(keys).any():
+        return None
+    if any(not (is_numeric_dtype(dtype) or is_datetime64_any_dtype(dtype) or isinstance(dtype, pd.StringDtype))
+           for dtype in base.dtypes):
+        return None
+    existing_keys = pd.MultiIndex.from_frame(base[keys])
+    changed_keys = pd.MultiIndex.from_frame(increment[keys])
+    touched = existing_keys.isin(changed_keys)
+    changed = pd.concat([base.loc[touched], increment], ignore_index=True)
+    changed = changed.sort_values(keys)
+    grouped = changed.groupby(keys, as_index=False, sort=True)[value_columns].last()
+    if not grouped.dtypes.reindex(base.columns).equals(base.dtypes):
+        return None
+    result = pd.concat([base.loc[~touched], grouped], ignore_index=True)
+    return result.reindex(columns=keys + value_columns).sort_values(keys).reset_index(drop=True)
+
+
 def merge_data_frames(base: pd.DataFrame, increment: pd.DataFrame) -> pd.DataFrame:
     """Merge existing data without serializing it through a temporary workbook."""
     base = base.copy()
@@ -331,14 +353,19 @@ def merge_data_frames(base: pd.DataFrame, increment: pd.DataFrame) -> pd.DataFra
     all_columns = list(base.columns)
     base = base.reindex(columns=all_columns)
     increment = increment.reindex(columns=all_columns)
-    combined = pd.concat([base, increment], ignore_index=True)
-    combined = combined.sort_values(["日期", "时刻"])
     value_columns = [column for column in all_columns if column not in ["日期", "时刻"]]
-    merged = (
-        combined.groupby(["日期", "时刻"], as_index=False, sort=True)[value_columns]
-        .last()
-        .sort_values(["日期", "时刻"])
-    )
+    mode = os.environ.get("TOOLBOX_FORECAST_MERGE", "incremental")
+    if mode not in {"full", "incremental"}:
+        raise ValueError(f"未知总表合并方式：{mode}")
+    merged = _merge_changed_rows(base, increment, value_columns) if mode == "incremental" else None
+    if merged is None:
+        combined = pd.concat([base, increment], ignore_index=True)
+        combined = combined.sort_values(["日期", "时刻"])
+        merged = (
+            combined.groupby(["日期", "时刻"], as_index=False, sort=True)[value_columns]
+            .last()
+            .sort_values(["日期", "时刻"])
+        )
     merged, _ = deduplicate_columns(merged)
     if merged.duplicated(["日期", "时刻"]).any():
         raise RuntimeError("合并后仍存在重复的日期+时刻记录")
@@ -367,20 +394,7 @@ def missing_dates(frame: pd.DataFrame, end_date: str) -> list[date]:
 
 def workbook_layout(path: Path, sheet_name: str = "整合数据") -> dict[str, dict[str, object]]:
     """Read widths and representative styles keyed by header name."""
-    workbook = load_workbook(path, read_only=False, data_only=False)
-    sheet = workbook[sheet_name if sheet_name in workbook.sheetnames else workbook.sheetnames[0]]
-    layout: dict[str, dict[str, object]] = {}
-    for index, cell in enumerate(sheet[1], start=1):
-        if cell.value is None:
-            continue
-        data_cell = sheet.cell(2, index)
-        layout[str(cell.value)] = {
-            "width": sheet.column_dimensions[get_column_letter(index)].width,
-            "header_style": copy(cell._style),
-            "data_style": copy(data_cell._style),
-        }
-    workbook.close()
-    return layout
+    return read_table_layout(path, sheet_name)
 
 
 def write_large_xlsx(
@@ -394,15 +408,26 @@ def write_large_xlsx(
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_suffix(path.suffix + ".tmp")
     layout = workbook_layout(format_source) if format_source and format_source.is_file() else {}
+    if save_frame(frame, temporary_path, sheet_name, layout):
+        temporary_path.replace(path)
+        return
     workbook = Workbook(write_only=True)
     sheet = workbook.create_sheet(title=sheet_name)
     sheet.freeze_panes = "A2"
+    style_arrays = {}
+    for column, column_layout in layout.items():
+        arrays = []
+        for key in ("header_style", "data_style"):
+            sample = WriteOnlyCell(sheet)
+            apply_table_style(sample, column_layout[key])
+            arrays.append(copy(sample._style))
+        style_arrays[column] = arrays
     header_cells = []
     for index, column in enumerate(frame.columns, start=1):
         cell = WriteOnlyCell(sheet, value=column)
         column_layout = layout.get(str(column))
         if column_layout:
-            cell._style = copy(column_layout["header_style"])
+            cell._style = copy(style_arrays[str(column)][0])
             sheet.column_dimensions[get_column_letter(index)].width = column_layout["width"]
         header_cells.append(cell)
     sheet.append(header_cells)
@@ -420,7 +445,7 @@ def write_large_xlsx(
             cell = WriteOnlyCell(sheet, value=output)
             column_layout = layout.get(str(column))
             if column_layout:
-                cell._style = copy(column_layout["data_style"])
+                cell._style = copy(style_arrays[str(column)][1])
             cleaned.append(cell)
         sheet.append(cleaned)
     workbook.save(temporary_path)

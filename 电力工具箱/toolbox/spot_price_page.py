@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from . import commands
+
 import tkinter as tk
 from toolbox_choices import OptionCheckbutton, SettingCheckbutton
 
@@ -167,30 +169,9 @@ class SpotPriceUpdatePage(ToolPage):
         selected = selected_stations if selected_stations is not None else tuple(
             label for label, variable in self.selected_stations.items() if variable.get()
         )
-        if not selected:
-            raise ValueError("请至少选择一个更新场站。")
-        workbooks = {
-            "归湖": ("--guihu-workbook", guihu_workbook),
-            "鮀莲": ("--tuolian-workbook", tuolian_workbook),
-            "海风": ("--haifeng-workbook", haifeng_workbook),
-        }
-        command = [
-            python_executable(),
-            str(self.paths.spot_price_update),
-            "--start-date",
-            start_date.isoformat(),
-            "--end-date",
-            end_date.isoformat(),
-        ]
-        for label in selected:
-            option, workbook = workbooks[label]
-            command.extend((option, str(workbook)))
-        command.extend(("--stations", *selected))
-        if not overwrite:
-            command.append("--skip-existing")
-        if not create_backup:
-            command.append("--no-backup")
-        return command
+        return commands.spot_price(self.paths, start_date, end_date,
+            {"归湖": guihu_workbook, "鮀莲": tuolian_workbook, "海风": haifeng_workbook},
+            overwrite=overwrite, create_backup=create_backup, selected=selected)
 
     def selected_workbooks(self) -> dict[str, Path]:
         workbooks: dict[str, Path] = {}

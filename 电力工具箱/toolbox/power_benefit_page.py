@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from . import commands
+
 import tkinter as tk
 from toolbox_choices import OptionCheckbutton, SettingCheckbutton
 
@@ -73,15 +75,7 @@ class PowerBenefitUpdatePage(ToolPage):
 
     def build_update_command(self, workbooks: list[Path], end_date: date, *,
                              start_date: date | None, create_backup: bool) -> list[str]:
-        command = [python_executable(), str(self.paths.power_benefit_update),
-                   "--end-date", end_date.isoformat()]
-        for path in workbooks:
-            command.extend(("--workbook", str(path)))
-        if start_date is not None:
-            command.extend(("--start-date", start_date.isoformat()))
-        if not create_backup:
-            command.append("--no-backup")
-        return command
+        return commands.power_benefit(self.paths, workbooks, end_date, start_date=start_date, create_backup=create_backup)
 
     def start_update(self) -> None:
         workbooks = [Path(value.get().strip()).expanduser()

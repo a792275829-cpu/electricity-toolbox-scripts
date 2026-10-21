@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tkinter as tk
 from collections.abc import Callable, Mapping
@@ -40,6 +41,17 @@ def default_workspace() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def application_version() -> str:
+    version = os.environ.get("TOOLBOX_APP_VERSION", "").strip()
+    if not version:
+        try:
+            package = default_workspace() / "desktop/package.json"
+            version = json.loads(package.read_text(encoding="utf-8"))["version"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return "版本未知"
+    return f"版本 v{version}"
+
+
 class ToolboxApp(tk.Tk):
     def __init__(
         self,
@@ -49,6 +61,7 @@ class ToolboxApp(tk.Tk):
         lazy_pages: bool | None = None,
         render_prototype: bool = False,
         check_updates: Callable[[], None] | None = None,
+        registry: TaskRegistry | None = None,
     ) -> None:
         super().__init__()
         self.title("电力工作工具箱")
@@ -59,7 +72,7 @@ class ToolboxApp(tk.Tk):
         if icon.is_file():
             self._application_icon = tk.PhotoImage(master=self, file=str(icon))
             self.iconphoto(True, self._application_icon)
-        self.registry = TaskRegistry()
+        self.registry = registry if registry is not None else TaskRegistry()
         self.pages: dict[str, tk.Frame] = {}
         self.nav_buttons: dict[str, ttk.Button] = {}
         self.current_page = ""
@@ -170,6 +183,8 @@ class ToolboxApp(tk.Tk):
         self.status_bar.grid(row=0, column=0, sticky="ew")
         self.rail_toggle = ttk.Button(status, text="收起辅助面板", command=self.toggle_right_rail, style="Quiet.TButton")
         self.rail_toggle.grid(row=0, column=1, sticky="e")
+        self.version_label = ttk.Label(status, text=application_version(), anchor="e", style="Status.TLabel")
+        self.version_label.grid(row=0, column=2, sticky="e", padx=(14, 0))
         self.show_page(default_catalog()[0].name if self._lazy_pages else PAGE_NAMES[0])
 
     def set_update_available(self, available: bool) -> None:

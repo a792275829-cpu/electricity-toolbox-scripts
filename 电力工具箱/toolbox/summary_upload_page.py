@@ -277,8 +277,9 @@ class SummaryUploadPage(ToolPage):
             if path is not None:
                 self.output_file.set(str(path))
             detail = f"\n汇总文件：\n{path}" if path is not None else ""
-            if missing:
-                detail += "\n缺少单元数据：" + "、".join(missing)
+            completed_missing = getattr(self, "_remote_missing", missing)
+            if completed_missing:
+                detail += "\n缺少单元数据：" + "、".join(completed_missing)
             messagebox.showinfo("完成", f"{self.MODE_LABELS[mode]}已完成。{detail}", parent=self)
 
         self.run_in_thread(

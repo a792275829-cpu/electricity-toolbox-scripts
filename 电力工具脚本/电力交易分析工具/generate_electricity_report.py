@@ -12,7 +12,11 @@ from collections import deque
 from itertools import islice
 from tkinter import filedialog, messagebox, ttk
 
-import openpyxl
+
+WORKSPACE = pathlib.Path(__file__).resolve().parents[2]
+if str(WORKSPACE) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE))
+from toolbox_native_excel import load_value_workbook, excel_session
 
 
 THERMAL_COMPANIES = ["汕头", "海门", "东莞"]
@@ -142,7 +146,8 @@ class ReportBuilder:
         }
 
     def build(self):
-        self.wb = openpyxl.load_workbook(self.xlsx_path, data_only=True, read_only=True)
+        self.wb = load_value_workbook(self.xlsx_path, data_only=True, read_only=True,
+                                      selected=("日前", "新", "快报", "运行补偿", *THERMAL_COMPANIES, *RENEWABLE_UNITS))
         try:
             self._parse_summary()
             self.offer_cards = self._parse_offer_cards()
@@ -977,10 +982,13 @@ def generate_batch(xlsx_paths, output_dir):
     output_dir = pathlib.Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     results = []
-    for xlsx_path in xlsx_paths:
-        xlsx_path = pathlib.Path(xlsx_path)
-        out_path = output_dir / f"{xlsx_path.stem}_分析报告.html"
-        results.append(generate_report(xlsx_path, out_path=out_path))
+    xlsx_paths = [pathlib.Path(path) for path in xlsx_paths]
+    repeated = len({path.resolve() for path in xlsx_paths}) < len(xlsx_paths)
+    with excel_session(cache=repeated, enabled=repeated):
+        for xlsx_path in xlsx_paths:
+            xlsx_path = pathlib.Path(xlsx_path)
+            out_path = output_dir / f"{xlsx_path.stem}_分析报告.html"
+            results.append(generate_report(xlsx_path, out_path=out_path))
     return results
 
 

@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
-from gd_power_report.workbook_reader import load_workbook, reuse_workbook_inputs
+from gd_power_report.workbook_reader import load_value_workbook as load_workbook, reuse_workbook_inputs
 
 
 EXPECTED_UNITS = {

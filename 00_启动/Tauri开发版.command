@@ -5,7 +5,7 @@ root_dir=${launcher_dir:h}
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if [[ "${TOOLBOX_SMOKE:-}" == "1" ]]; then
   print -r -- "TAURI_PROJECT=$root_dir/desktop"
-  print -r -- "PYTHON_SERVICE=$root_dir/desktop/python/native_bridge.py"
+  print -r -- "PYTHON_SERVICE=$root_dir/desktop/python/service_bridge.py"
   exit 0
 fi
 if [[ "$(uname -m)" != "arm64" ]]; then

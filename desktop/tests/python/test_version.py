@@ -62,6 +62,17 @@ class VersionTests(unittest.TestCase):
             version.set_version("0.1.3", ["不应覆盖"], "2026-10-19")
         self.assertEqual((self.root / "CHANGELOG.md").read_text(), self.history)
 
+    def test_release_does_not_include_unreleased_history(self):
+        (self.root / "CHANGELOG.md").write_text(
+            "# 更新日志\n\n## [0.1.4] - 2026-10-19\n\n- 正式发布内容。\n\n"
+            "## 未发布\n\n- 尚未发布的验证记录。\n\n" + self.history.split("\n\n", 1)[1]
+        )
+        notes = version.release_changes("0.1.4")
+        self.assertIn("正式发布内容", notes)
+        self.assertNotIn("尚未发布", notes)
+        self.assertNotIn("未发布", notes)
+        self.assertNotIn("保留原版本", notes)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -43,6 +43,7 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR.parent) not in sys.path:
     sys.path.insert(0, str(BASE_DIR.parent))
 from toolbox_storage import data_path
+from toolbox_wps_config import (_document_config_from_dict, _region_config_from_dict, _string_list, build_config_export, load_config_export, normalize_runtime_config, runtime_config_from_export_payload, save_config_export)
 from toolbox_log_console import LogConsole, explain_error, redact
 from toolbox_choices import SegmentedGroup
 
@@ -63,6 +64,7 @@ WPS_LOGIN_STATUS_URL = "https://account.kdocs.cn/api/v3/islogin"
 LOGIN_STATUS_POLL_MS = 15000
 CONFIG_EXPORT_SCHEMA = "wps_excel_to_kdocs_config_export"
 CONFIG_EXPORT_VERSION = 1
+_REMOTE_BUSINESS = None
 
 
 def center_window(window: tk.Toplevel | tk.Tk, width: int | None = None, height: int | None = None) -> None:
@@ -281,92 +283,20 @@ def save_config(data: dict[str, Any]) -> None:
     CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
-def _region_config_from_dict(row: dict[str, Any]) -> dict[str, str]:
-    return {
-        "source_sheet": str(row.get("source_sheet", "")),
-        "source_start": str(row.get("source_start", "")),
-        "source_end": str(row.get("source_end", "")),
-        "target_sheet": str(row.get("target_sheet", "")),
-        "target_start": str(row.get("target_start", "")),
-        "target_end": str(row.get("target_end", "")),
-    }
 
 
-def _document_config_from_dict(row: dict[str, Any]) -> dict[str, Any]:
-    regions = [
-        _region_config_from_dict(region)
-        for region in row.get("regions", [])
-        if isinstance(region, dict)
-    ]
-    name = str(row.get("name", "")).strip() or Path(str(row.get("local_file", ""))).stem or "未命名配置"
-    source_type = str(row.get("source_type", "excel")).strip() or "excel"
-    if source_type not in {"excel", "kdocs"}:
-        source_type = "excel"
-    return {
-        "name": name,
-        "source_type": source_type,
-        "source_url": str(row.get("source_url", "")),
-        "kdocs_url": str(row.get("kdocs_url", "")),
-        "local_file": str(row.get("local_file", "")),
-        "regions": regions,
-    }
 
 
-def normalize_runtime_config(data: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "recent_urls": _string_list(data.get("recent_urls", [])),
-        "browser_mode": str(data.get("browser_mode", "persistent") or "persistent"),
-        "cdp_url": str(data.get("cdp_url", "http://127.0.0.1:9222") or "http://127.0.0.1:9222"),
-        "configs": [
-            _document_config_from_dict(row)
-            for row in data.get("configs", [])
-            if isinstance(row, dict)
-        ],
-    }
 
 
-def build_config_export(runtime_config: dict[str, Any], exported_at: str | None = None) -> dict[str, Any]:
-    export_time = exported_at or datetime.now().replace(microsecond=0).isoformat()
-    return {
-        "schema": CONFIG_EXPORT_SCHEMA,
-        "version": CONFIG_EXPORT_VERSION,
-        "exported_at": export_time,
-        **normalize_runtime_config(runtime_config),
-    }
 
 
-def runtime_config_from_export_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    if payload.get("schema") != CONFIG_EXPORT_SCHEMA:
-        raise ValueError("无法识别此配置文件，请选择由本工具导出的配置。")
-    if payload.get("version") != CONFIG_EXPORT_VERSION:
-        raise ValueError(f"暂不支持此配置文件版本：{payload.get('version')!r}")
-    runtime_config = normalize_runtime_config(payload)
-    if not runtime_config["configs"]:
-        raise ValueError("配置文件中没有可导入的写入配置。")
-    return runtime_config
 
 
-def load_config_export(path: Path) -> dict[str, Any]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"配置文件格式有误，无法读取：{exc}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("配置文件结构有误，请重新导出后再导入。")
-    return runtime_config_from_export_payload(payload)
 
 
-def save_config_export(path: Path, runtime_config: dict[str, Any]) -> None:
-    path.write_text(
-        json.dumps(build_config_export(runtime_config), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
 
 def update_recent_urls(urls: list[str], url: str) -> list[str]:
@@ -1452,6 +1382,8 @@ def write_to_wps(
 
 
 def read_online_document_info(url: str, browser_mode: str, cdp_url: str, log) -> dict[str, Any]:
+    if _REMOTE_BUSINESS is not None:
+        return _REMOTE_BUSINESS.wps_read('read_online_document_info', {'url': url, 'browser_mode': browser_mode, 'cdp_url': cdp_url}, log)
     if sync_playwright is None:
         raise RuntimeError("缺少浏览器自动化组件，请运行工具箱目录中的 setup_macos.command 完成初始化。")
 
@@ -1515,6 +1447,8 @@ def read_online_ranges(
     cdp_url: str,
     log,
 ) -> list[list[list[Any]]]:
+    if _REMOTE_BUSINESS is not None:
+        return _REMOTE_BUSINESS.wps_read('read_online_ranges', {'requests': requests, 'browser_mode': browser_mode, 'cdp_url': cdp_url}, log)
     """Read source regions in order using one connection and browser context."""
     if not requests:
         return []
@@ -2261,6 +2195,9 @@ class WpsWriterFrame(ttk.Frame):
     def __init__(self, parent: tk.Misc, task_registry: Any | None = None) -> None:
         super().__init__(parent)
         self.task_registry = task_registry
+        global _REMOTE_BUSINESS
+        _REMOTE_BUSINESS = task_registry if getattr(task_registry, "remote_business", False) is True else None
+        self._remote_messages = queue.Queue()
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.browser_event_queue: queue.Queue[tuple[bool, str, bool]] = queue.Queue()
         self.login_event_queue: queue.Queue[tuple[str, str, WpsLoginStatus]] = queue.Queue()
@@ -2664,9 +2601,16 @@ class WpsWriterFrame(ttk.Frame):
             self.login_status.set("正在检查…")
         cdp_url = self.cdp_url.get().strip()
         browser_mode = self.browser_mode.get()
+        remote_config = self.current_runtime_config() if getattr(getattr(self, "task_registry", None), "remote_business", False) is True else None
 
         def worker() -> None:
             try:
+                if remote_config is not None:
+                    result = self.task_registry.wps_action("login" if start else "status", remote_config, [],
+                        (lambda _message: None) if quiet else self.log, operation={"initial_url": initial_url})
+                    self.login_event_queue.put((browser_mode, cdp_url, WpsLoginStatus(result["state"], result["message"])))
+                    self.browser_event_queue.put((True, "专用浏览器已启动" if start else "登录状态检查完成", quiet))
+                    return
                 if start:
                     result = ensure_wps_dedicated_chrome(
                         cdp_url,
@@ -2747,6 +2691,12 @@ class WpsWriterFrame(ttk.Frame):
             )
 
     def drain_logs(self) -> None:
+        while True:
+            try:
+                title, error = self._remote_messages.get_nowait()
+            except queue.Empty:
+                break
+            messagebox.showerror(title, error, parent=self)
         while True:
             try:
                 browser_mode, cdp_url, login = self.login_event_queue.get_nowait()
@@ -3034,6 +2984,9 @@ class WpsWriterFrame(ttk.Frame):
         )
 
     def preview(self) -> None:
+        if getattr(getattr(self, "task_registry", None), "remote_business", False) is True:
+            self._remote_write(preview=True)
+            return
         if self.worker and self.worker.is_alive():
             messagebox.showinfo("正在写入", "写入任务正在进行，请等待完成。", parent=self)
             return
@@ -3053,6 +3006,9 @@ class WpsWriterFrame(ttk.Frame):
         self.log(f"预览通过：共 {len(prepared)} 个写入区域，涉及 {urls} 份目标表格。")
 
     def write(self) -> None:
+        if getattr(getattr(self, "task_registry", None), "remote_business", False) is True:
+            self._remote_write(preview=False)
+            return
         if self.worker and self.worker.is_alive():
             messagebox.showinfo("正在写入", "写入任务正在进行，请等待完成。", parent=self)
             return
@@ -3076,6 +3032,30 @@ class WpsWriterFrame(ttk.Frame):
             args=(prepared, self.browser_mode.get(), self.cdp_url.get().strip()),
             name="wps-write",
         )
+
+    def _remote_write(self, *, preview: bool) -> None:
+        if self.worker and self.worker.is_alive():
+            messagebox.showinfo("正在写入", "写入任务正在进行，请等待完成。", parent=self)
+            return
+        indexes = self.selected_config_indexes()
+        if not indexes:
+            messagebox.showerror("预览失败" if preview else "暂时无法写入", "请先选择至少一项配置，再预览或写入。", parent=self)
+            return
+        config = self.current_runtime_config()
+        self.clear_log()
+        self.log_console.status.set("正在预览…" if preview else "正在检查写入配置…")
+        if not preview:
+            self.save_current_config()
+        def worker():
+            try:
+                result = self.task_registry.wps_action("preview" if preview else "run", config, indexes, self.log)
+                self.log(("预览通过：" if preview else "写入完成：") + result.get("message", "已完成"))
+            except Exception as exc:
+                self.log(("预览失败：" if preview else "操作失败：") + str(exc))
+                self.detail_log(traceback.format_exc())
+                if preview:
+                    self._remote_messages.put(("预览失败", str(exc)))
+        self.worker = self._start_tracked_thread(worker, name="wps-preview" if preview else "wps-write")
 
     def write_worker(self, prepared: list[PreparedMapping], browser_mode: str, cdp_url: str) -> None:
         try:

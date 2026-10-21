@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from . import commands
+from .file_rules import default_output_for_pdf
+
 import re
 import tkinter as tk
 from toolbox_choices import SegmentedGroup
@@ -13,15 +16,6 @@ from .runtime import TaskRegistry, ToolPaths, python_executable
 from .widgets import ToolPage
 
 
-def default_output_for_pdf(pdf_path: str | Path) -> Path:
-    source = Path(pdf_path).expanduser()
-    year = re.search(r"(20\d{2})", source.name)
-    month_day = re.search(r"[\(（](\d{2})\.(\d{2})[\)）]", source.name)
-    if year and month_day:
-        suffix = f"{year.group(1)}{month_day.group(1)}{month_day.group(2)}"
-    else:
-        suffix = source.stem
-    return source.parent / f"现货运行日报报价容量区间{suffix}.xlsx"
 
 
 class DailyPdfParserPage(ToolPage):
@@ -127,16 +121,7 @@ class DailyPdfParserPage(ToolPage):
         pdf_path: Path,
         output_path: Path,
     ) -> list[str]:
-        command = [
-            python_executable(),
-            str(self.paths.daily_pdf_parser),
-            str(pdf_path),
-            "--output",
-            str(output_path),
-            "--mode",
-            self.mode.get(),
-        ]
-        return command
+        return commands.daily_pdf(self.paths, pdf_path, output_path, self.mode.get())
 
     def start_parse(self) -> None:
         source = Path(self.pdf_path.get().strip()).expanduser()

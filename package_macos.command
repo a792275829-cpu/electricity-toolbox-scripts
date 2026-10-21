@@ -38,6 +38,17 @@ git ls-files -co --exclude-standard -z |
   done |
   rsync -a --from0 --files-from=- ./ "$staging_project/"
 
+# The forecast master is ignored business data, but is required on a new Mac.
+# Reuse desktop seed validation without exporting any other output or local config.
+"$workspace_root/.venv/bin/python" -B -c '
+import sys
+from pathlib import Path
+sys.path.insert(0, "packaging/tauri")
+from prepare_payload import prepare_forecast_seed, validate_runtime_assets
+validate_runtime_assets(Path(sys.argv[1]))
+prepare_forecast_seed(Path(sys.argv[1]))
+' "$staging_project"
+
 chmod +x \
   "$staging_project/setup_macos.command" \
   "$staging_project/00_启动/电力工具箱.command" \
@@ -70,6 +81,7 @@ Git 基准版本：${commit_id}
 
 说明：
 - 本包不含旧电脑的 .venv、缓存、输出文件、真实配置、Cookie 或浏览器登录态。
+- 例外：电价预测的广东电价数据总表作为首次运行数据随包附带，保留原文件内容。
 - WPS 写入工具自带随包默认配置，首次使用即可看到写入项目和区域；请在新电脑重新选择来源表格文件并登录 WPS。
 - 首次安装需要网络连接，以及 Python 3.11 或更新版本。
 - 私有数据上传功能另需 Node.js 18 或更新版本；其他 Python 工具不依赖 Node.js。

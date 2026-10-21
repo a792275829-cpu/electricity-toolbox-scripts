@@ -1,7 +1,8 @@
 """Host the original Tk application, without translating any of its widgets.
 
-Only lifecycle and updater requests cross the Tauri boundary. Tk owns every
-business page, dialog, binding, task and account editor, on its main thread.
+Tk owns every page, dialog, binding and account editor on its main thread.
+In desktop mode, immutable form requests travel through the Rust broker to the
+independent business service; source-mode launch retains the original fallback.
 """
 
 from __future__ import annotations
@@ -121,7 +122,7 @@ class NativeService:
         raise ValueError("原版界面仅接受启动、退出和更新请求")
 
 
-def serve(root: Path = ROOT):
+def serve(root: Path = ROOT, *, remote_business: bool = False):
     protocol = sys.stdout
     # Existing modules may print; keep the transport exclusively JSON-lines.
     sys.stdout = sys.stderr
@@ -132,10 +133,20 @@ def serve(root: Path = ROOT):
             protocol.write(json.dumps(value, ensure_ascii=False, default=str) + "\n")
             protocol.flush()
 
-    app = ToolboxApp(workspace=root, check_updates=lambda: service.updater.show())
+    client = None
+    registry = None
+    if remote_business:
+        from toolbox.ui_tasks import BusinessClient, RemoteTaskRegistry
+        client = BusinessClient(send)
+        registry = RemoteTaskRegistry(client)
+    app = ToolboxApp(workspace=root, registry=registry, check_updates=lambda: service.updater.show())
     service = NativeService(app, emit=send)
     from update_ui import UpdateController
-    service.updater = UpdateController(app, service)
+    updater = None
+    if client is not None:
+        from remote_updater import RemoteUpdater
+        updater = RemoteUpdater(client)
+    service.updater = UpdateController(app, service, updater=updater)
     close = lambda: service.call("request_close", {})
     app.protocol("WM_DELETE_WINDOW", close)
     if sys.platform == "darwin":
@@ -144,7 +155,17 @@ def serve(root: Path = ROOT):
 
     def read():
         for line in sys.stdin:
+            if client is not None:
+                try:
+                    response = json.loads(line)
+                    if "rpc_reply" in response:
+                        client.accept(response)
+                        continue
+                except (ValueError, TypeError):
+                    pass
             requests.put(line)
+        if client is not None:
+            client.disconnected()
         requests.put(None)
 
     def poll():
@@ -176,6 +197,9 @@ def serve(root: Path = ROOT):
         app.after(40, poll)
 
     threading.Thread(target=read, daemon=True).start()
+    if client is not None and client.call("ping").get("protocol") != 3:
+        app.destroy()
+        raise RuntimeError("界面与业务后台版本不匹配，请重新安装完整发行版。")
     app.after(40, poll)
     send({"event": {"kind": "native-ready"}})
     app.mainloop()
@@ -185,4 +209,6 @@ def serve(root: Path = ROOT):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", type=Path, default=ROOT)
-    serve(parser.parse_args().workspace)
+    parser.add_argument("--remote-business", action="store_true")
+    args = parser.parse_args()
+    serve(args.workspace, remote_business=args.remote_business)

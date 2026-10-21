@@ -73,6 +73,28 @@
 
 如需重新从OCR记录生成候选位置，将数据放到 `local_data/ocr-records.json`，或通过环境变量 `SPOTMAP_OCR_DATA` 指定，并确保当前环境已安装可选依赖 `opencv-python`。
 
+## Rust Excel 加速
+
+节点电价清洗的 XLSX 批量读取和新工作簿写出支持 Rust 后端。节点匹配、跨表去重和 Decimal 均值算法继续复用原 Python 实现。界面、命令行和输出文件名不变。
+
+源码环境可选构建（需要 Rust/Cargo，仅构建时需要）：
+
+```bash
+.venv/bin/python native/price-xlsx/build.py
+```
+
+编译后的程序位于 `500kV断面分析/bin/`，不加入 Git。桌面资源打包时从本次源码重新构建，并纳入文件摘要和升级清单；运行电脑无需安装 Rust。
+
+环境变量 `TOOLBOX_500KV_BACKEND` 支持 `auto`（默认）、`python`、`rust`。默认优先 Rust；缺少原生程序时直接使用 Python，遇到日期／错误单元格或原生调用失败时发出警告并使用 Python 兼容逻辑。严格 `rust` 模式用于验收，不允许回退。Rust 写出使用同目录临时文件，成功后原子替换。
+
+批量传输使用 JSON，内存占用可能高于 Python 流式读取；超大工作簿可指定 `python`。目前加速节点清洗阶段，后续断面计算和网页生成继续使用原代码。
+
+可复现性能比较（所有结果写入临时目录，核对工作簿值／类型／格式、计数及最终 HTML）：
+
+```bash
+.venv/bin/python native/price-xlsx/benchmark.py /path/to/节点电价.xlsx --repeats 3
+```
+
 ## 测试
 
 ```bash

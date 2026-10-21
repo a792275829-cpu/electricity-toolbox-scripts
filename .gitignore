@@ -22,6 +22,8 @@
 /.venv/
 /dist/
 /desktop/src-tauri/target/
+/native/price-xlsx/target/
+/500kV断面分析/bin/
 /desktop/src-tauri/gen/
 /desktop/src-tauri/payload/
 /desktop/frontend-dist/

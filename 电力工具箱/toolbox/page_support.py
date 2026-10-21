@@ -12,6 +12,7 @@ from tkinter import ttk
 WORKSPACE = Path(__file__).resolve().parents[2]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
+from .file_rules import clearing_file_date
 from toolbox_dates import DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
 from toolbox_date_input import DateInput
 
@@ -42,16 +43,6 @@ def default_review_folder_for_date(today: date, review_root: Path | None = None)
     return preferred
 
 
-def clearing_file_date(path: Path) -> date | None:
-    patterns = [r"(20\d{2})[.\-_/年](\d{1,2})[.\-_/月](\d{1,2})", r"(20\d{2})(\d{2})(\d{2})"]
-    for pattern in patterns:
-        match = re.search(pattern, path.name)
-        if match:
-            try:
-                return date(*(int(value) for value in match.groups()))
-            except ValueError:
-                return None
-    return None
 
 
 def add_path_row(parent: ttk.Frame, *, row: int, label: str, variable: tk.StringVar, command, button_text: str = "浏览") -> ttk.Button:

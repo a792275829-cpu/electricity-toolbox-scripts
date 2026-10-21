@@ -45,8 +45,43 @@ jobs:
         working-directory: desktop
       - run: npm run web:build
         working-directory: desktop
+      - run: python native/price-xlsx/build.py
+      - run: TOOLBOX_XLSX_BACKEND=rust PYTHONPATH=.. python -m unittest discover -s tests -p test_native_excel.py -v
+        working-directory: 电力工具箱
+      - run: TOOLBOX_XLSX_BACKEND=rust PYTHONPATH=.. python -m unittest discover -s tests -p test_summary_station_folder.py -v
+        working-directory: 电力工具箱
+      - run: TOOLBOX_XLSX_BACKEND=rust TOOLBOX_COMPUTE_BACKEND=rust PYTHONPATH=.. python -m unittest discover -s tests -p test_remaining_native.py -v
+        working-directory: 电力工具箱
+      - run: TOOLBOX_XLSX_BACKEND=rust PYTHONPATH=.. python -m unittest discover -s tests -p test_native_updates.py -v
+        working-directory: 电力工具箱
+      - run: TOOLBOX_XLSX_BACKEND=rust PYTHONPATH=.. python -m unittest discover -s tests -p test_all_trial_optimizations.py -v
+        working-directory: 电力工具箱
+      - run: PYTHONPATH=.. python -m unittest discover -s tests -p test_workbook_inspection.py -v
+        working-directory: 电力工具箱
+      - run: TOOLBOX_XLSX_BACKEND=rust PYTHONPATH=.. python -m unittest discover -s tests -p test_power_benefit_update.py -v
+        working-directory: 电力工具箱
+      - run: TOOLBOX_XLSX_BACKEND=rust PYTHONPATH=.. python -m unittest discover -s tests -p test_transaction_info_update.py -v
+        working-directory: 电力工具箱
+      - run: TOOLBOX_COMPUTE_BACKEND=rust PYTHONPATH=.. python -m unittest discover -s tests -p test_daily_pdf_parser.py -v
+        working-directory: 电力工具箱
+      - run: TOOLBOX_500KV_BACKEND=rust python -m unittest discover -s tests -v
+        working-directory: 500kV断面分析
       - run: python -m unittest discover -s desktop/tests/python -v
-      - run: python packaging/tauri/prepare_payload.py --target ${{ matrix.target }}
+      - name: Create synthetic forecast workbook for CI smoke build
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from openpyxl import Workbook
+          Path("dist").mkdir(exist_ok=True)
+          book = Workbook()
+          sheet = book.active
+          sheet.title = "整合数据"
+          sheet.append(["日期", "时刻", "全省日前平均电价"])
+          sheet.append(["2026-01-01", "00:00", 0.0])
+          book.save("dist/ci-forecast.xlsx")
+          book.close()
+          PY
+      - run: python packaging/tauri/prepare_payload.py --target ${{ matrix.target }} --forecast-workbook dist/ci-forecast.xlsx
       - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
       - run: npm run tauri build -- --no-bundle --target ${{ matrix.target }}
         working-directory: desktop

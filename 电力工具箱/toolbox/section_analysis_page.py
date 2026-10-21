@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from . import commands
+
 import os
 import subprocess
 import sys
@@ -207,18 +209,7 @@ class SectionAnalysisPage(ToolPage):
         topology_path: Path,
         threshold: float,
     ) -> list[str]:
-        command = [
-            python_executable(),
-            str(self.paths.section_analysis_runner),
-            "--output-root",
-            str(output_root),
-            "--topology",
-            str(topology_path),
-            "--threshold",
-            str(threshold),
-        ]
-        command.extend(str(path) for path in files)
-        return command
+        return commands.section_analysis(self.paths, files, output_root, topology_path, threshold)
 
     def start_analysis(self) -> None:
         if not self.files:

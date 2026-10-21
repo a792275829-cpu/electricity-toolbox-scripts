@@ -26,6 +26,11 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+WORKSPACE = Path(__file__).resolve().parents[2]
+if str(WORKSPACE) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE))
+from toolbox_native_excel import load_value_workbook, prefetch_workbooks
+from toolbox_native_write import save_workbook as save_native_workbook
 
 FILE_TYPE_PATTERNS = {
     "realtime": "实时交易结果查询",
@@ -55,6 +60,10 @@ THIN = Side(style="thin", color="000000")
 HEADER_FILL = PatternFill("solid", fgColor="D9E2F3")
 UNIT_FILL = PatternFill("solid", fgColor="F2F2F2")
 SUMMARY_FILL = PatternFill("solid", fgColor="FFF200")
+_FULL_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+_BODY_FONTS = {False: Font(bold=False), True: Font(bold=True)}
+_CENTER = Alignment(horizontal="center", vertical="center")
+_HEADER_ALIGN = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
 
 @dataclass
@@ -122,8 +131,6 @@ def collect_units(
     input_dir: Path,
     logger: Callable[[str], None],
 ) -> list[UnitData]:
-    units: dict[tuple[str, str], UnitData] = {}
-
     station_dirs = sorted(path for path in input_dir.iterdir() if path.is_dir())
     # Accept a station folder itself as well as the usual date/station layout.
     if any(
@@ -133,6 +140,14 @@ def collect_units(
     ):
         station_dirs.insert(0, input_dir)
 
+    files = [path for station in station_dirs for pattern in FILE_TYPE_PATTERNS.values()
+             for path in sorted(station.glob(f"*{pattern}*.xlsx")) if not path.name.startswith("~$")]
+    with prefetch_workbooks(files):
+        return _collect_station_units(station_dirs, logger)
+
+
+def _collect_station_units(station_dirs, logger):
+    units: dict[tuple[str, str], UnitData] = {}
     for station_dir in station_dirs:
         station_key = station_dir.name
         station_name = STATION_DISPLAY_NAMES.get(station_key, station_key)
@@ -164,7 +179,7 @@ def collect_units(
 
 
 def parse_workbook(file_path: Path) -> list[tuple[str, list[NumericCell], list[NumericCell]]]:
-    workbook = load_workbook(file_path, data_only=True, read_only=True)
+    workbook = load_value_workbook(file_path, data_only=True, read_only=True)
     result: list[tuple[str, list[NumericCell], list[NumericCell]]] = []
     try:
         for worksheet in workbook.worksheets:
@@ -460,15 +475,15 @@ def get_series(unit: UnitData, market: str, kind: str) -> list[NumericCell]:
 
 
 def style_header(cell) -> None:
-    cell.font = Font(bold=True)
-    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell.font = _BODY_FONTS[True]
+    cell.alignment = _HEADER_ALIGN
     cell.fill = HEADER_FILL
     cell.border = full_border()
 
 
 def style_body(cell, bold: bool) -> None:
-    cell.font = Font(bold=bold)
-    cell.alignment = Alignment(horizontal="center", vertical="center")
+    cell.font = _BODY_FONTS[bold]
+    cell.alignment = _CENTER
     cell.border = full_border()
 
 
@@ -478,7 +493,7 @@ def add_border_row(worksheet, row: int, total_cols: int) -> None:
 
 
 def full_border() -> Border:
-    return Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+    return _FULL_BORDER
 
 
 def set_widths(worksheet) -> None:
@@ -523,7 +538,7 @@ def save_workbook_atomically(workbook: Workbook, output_path: Path) -> None:
     )
     try:
         sanitize_workbook_number_formats(workbook)
-        workbook.save(temporary_path)
+        save_native_workbook(workbook, temporary_path)
         verification = load_workbook(temporary_path, read_only=True, data_only=False)
         try:
             if not verification.sheetnames:

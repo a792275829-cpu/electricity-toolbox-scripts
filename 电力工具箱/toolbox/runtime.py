@@ -378,8 +378,8 @@ configure_portable_environment()
 
 
 class TaskRegistry(TaskEngine):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, *, event_capacity: int = 0) -> None:
+        super().__init__(event_capacity=event_capacity)
         self._legacy_processes: set[subprocess.Popen[str]] = set()
         self._legacy_threads: set[threading.Thread] = set()
         self._legacy_lock = threading.Lock()

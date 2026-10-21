@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from . import commands
+
 import tkinter as tk
 from datetime import date, timedelta
 from tkinter import messagebox, ttk
@@ -45,7 +47,7 @@ class WindForecastPage(ToolPage):
         self.append_log("选择运行日期后开始抓取；登录态与其他工具相互独立。")
 
     def build_generate_command(self, run_date: str) -> list[str]:
-        return [python_executable(), str(self.paths.wind_forecast), run_date]
+        return commands.dated_script(self.paths.wind_forecast, run_date)
 
     def append_log(self, text: str) -> None:
         if text.startswith("无数据："):
