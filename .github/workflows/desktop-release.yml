@@ -8,6 +8,11 @@ on:
         description: Existing version tag (for example v0.1.0)
         required: true
         type: string
+      full_only:
+        description: 重大更新仅使用完整包，重设补丁基线
+        required: false
+        default: false
+        type: boolean
 env:
   PYTHONUTF8: "1"
   PYTHONIOENCODING: utf-8
@@ -112,13 +117,24 @@ jobs:
       - name: Build application for DMG
         working-directory: desktop
         run: npm run build -- --target ${{ matrix.target }} --bundles app
-      - name: Build and upload user-install DMG
+      - name: Build and upload full installer and incremental updates
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          FULL_ONLY: ${{ github.event.inputs.full_only || 'false' }}
         run: |
           python packaging/tauri/build_dmg.py desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/电力工具箱.app --output dist
-          gh release upload "$RELEASE_TAG" dist/*.dmg dist/*.dmg.sha256 --clobber
+          update_args=()
+          if [ "$FULL_ONLY" = "true" ]; then update_args+=(--full-only); fi
+          python packaging/tauri/build_updates.py desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/电力工具箱.app --output dist "${update_args[@]}"
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = "true"
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' > release-assets.txt
+          while IFS= read -r asset; do
+            if [[ "$asset" == *.patch.tar.xz && ! -f "dist/updates/$asset" ]]; then
+              gh release delete-asset "$RELEASE_TAG" "$asset" --yes
+            fi
+          done < release-assets.txt
+          gh release upload "$RELEASE_TAG" dist/*.dmg dist/*.dmg.sha256 dist/updates/* --clobber
   publish:
     needs: [prepare, build]
     if: needs.prepare.outputs.should_release == 'true'
@@ -134,7 +150,8 @@ jobs:
         run: |
           release_id="$(gh release view "$RELEASE_TAG" --json databaseId --jq .databaseId)"
           gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" > release.json
-          python packaging/tauri/validate_installer.py release.json
+          gh release download "$RELEASE_TAG" --pattern update-manifest.json
+          python packaging/tauri/validate_installer.py release.json --index update-manifest.json
       - name: Publish only after the macOS build succeeded
         env:
           GH_TOKEN: ${{ github.token }}

@@ -104,7 +104,7 @@ def prepare_forecast_seed(defaults: Path, workbook: Path | None = None) -> Path:
 def runtime_source(relative: Path) -> bool:
     if not build_support.exportable(relative):
         return False
-    if relative.as_posix() in {"desktop/python/native_bridge.py", "desktop/python/service_bridge.py", "desktop/python/task_worker.py", "desktop/python/remote_updater.py", "desktop/python/github_update.py", "desktop/python/update_ui.py", "desktop/assets/app-icon-256.png"}:
+    if relative.as_posix() in {"desktop/python/native_bridge.py", "desktop/python/service_bridge.py", "desktop/python/task_worker.py", "desktop/python/remote_updater.py", "desktop/python/github_update.py", "desktop/python/delta_update.py", "desktop/python/installer_image.py", "desktop/python/update_ui.py", "desktop/assets/app-icon-256.png"}:
         return True
     if len(relative.parts) == 1:
         return relative.name.startswith("toolbox_") and relative.suffix == ".py"

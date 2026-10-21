@@ -119,7 +119,7 @@ class UpdateWindow(tk.Toplevel):
         notes.configure(state="disabled")
         self.progress = ttk.Progressbar(body, maximum=100)
         self.progress.grid(sticky="ew", pady=(12, 8))
-        self.status = tk.StringVar(self, "下载并校验 DMG 后打开；请先退出工具箱，再运行镜像中的安装命令。配置和数据会保留。")
+        self.status = tk.StringVar(self, "优先下载增量补丁，无法使用时下载完整 DMG；准备完成后打开镜像。请退出工具箱再运行安装命令，配置和数据保留。")
         ttk.Label(body, textvariable=self.status, wraplength=490).grid(sticky="w", pady=(0, 16))
         actions = ttk.Frame(body)
         actions.grid(sticky="ew")
@@ -127,7 +127,7 @@ class UpdateWindow(tk.Toplevel):
         ttk.Button(actions, text="发布页面", command=lambda: webbrowser.open(release.page)).grid(row=0, column=0)
         self.cancel_button = ttk.Button(actions, text="稍后", command=self.dismiss)
         self.cancel_button.grid(row=0, column=2, padx=(8, 8))
-        self.primary = ttk.Button(actions, text="下载 DMG", command=self.perform, style="Primary.TButton")
+        self.primary = ttk.Button(actions, text="下载更新", command=self.perform, style="Primary.TButton")
         self.primary.grid(row=0, column=3)
         if not release.asset:
             self.primary.state(["disabled"])
@@ -163,7 +163,7 @@ class UpdateWindow(tk.Toplevel):
     def download_progress(self, fraction, error):
         if self.winfo_exists():
             self.progress["value"] = fraction * 100
-            self.status.set(f"正在下载并校验 DMG · {fraction:.0%}")
+            self.status.set(f"正在下载并准备更新 · {fraction:.0%}")
 
     def download_finished(self, path, error):
         if not self.winfo_exists():

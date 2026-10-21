@@ -17,7 +17,11 @@
 - `release_index.py`：历史索引格式参考；命令行发布已停用，不再生成或上传 `latest.json`。
 - `build_dmg.py`、`install_user_app.py`：生成用户安装 DMG；首次复制到 `~/Applications`，保留数据、校验签名、替换失败回滚，不请求管理员权限。
 - `build_pkg.py`、`pkg-scripts/`：历史 PKG 兼容代码，不再用于当前发行流程。
-- `validate_installer.py`：发布前核对 DMG 附件、校验文件、大小与 GitHub SHA-256 digest。
+- `validate_installer.py`：发布前核对 DMG、补丁、索引、校验文件、大小与 GitHub SHA-256 digest；核对索引与实际附件一致。
+- `build_updates.py`：为最近三个同主／次版本正式版生成文件增量包，每个补丁必须实际还原并验签；继承已校验的历史索引，保留跨多个维护版本的升级路径。每次都保留完整 DMG。
+- `desktop/python/delta_update.py`：版本绑定、文件／权限／链接校验和最小下载路径。客户端仅操作临时应用副本，借助共享 `installer_image.py` 生成本地安装镜像，继续复用原安装器。
+- 跨主／次版本默认全量；同系列重大更新用 `build_updates.py --full-only` 或手动发布的 `full_only`，清空本次补丁路径以重设基线。历史发行附件不清理。
+- 本地验证：先构建当前 DMG，再运行 `build_updates.py <当前.app> --base-app <只读旧版.app> --no-fetch-history --output dist`；不要用已改动的安装目录代替正式旧包。
 - `requirements-macos.lock`：锁定 Mac 发行包的 Python 依赖与校验哈希。
 
 流程参考 [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev) 的 Tauri/GitHub Releases 分发方式，并按 [Tauri 官方发布文档](https://v2.tauri.app/distribute/pipelines/github/) 实现；没有复制其界面。

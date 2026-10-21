@@ -47,7 +47,7 @@ class UpdateUiTests(unittest.TestCase):
         self.updater.check.return_value = self.release
         self.controller.check(manual=True)
         self.pump(lambda: self.controller.window is not None)
-        self.assertEqual(self.controller.window.primary.cget("text"), "下载 DMG")
+        self.assertEqual(self.controller.window.primary.cget("text"), "下载更新")
         self.assertIs(self.controller.window.controller.app, self.app)
 
     def test_automatic_errors_are_silent_but_manual_errors_are_visible(self):

@@ -1,8 +1,9 @@
-"""GitHub release discovery and digest-verified DMG downloads; no business data."""
+"""GitHub updates: verified deltas with a full DMG fallback; no business data."""
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import ssl
@@ -45,6 +46,7 @@ class Release:
     notes: str
     page: str
     asset: dict | None
+    update_asset: dict | None = None
 
 
 def parse_release(data: dict, current: str, repository: str = REPOSITORY) -> Release | None:
@@ -57,16 +59,18 @@ def parse_release(data: dict, current: str, repository: str = REPOSITORY) -> Rel
             return None
         name = f"ElectricityToolbox-{tag.removeprefix('v')}-apple-silicon.dmg"
         assets = [a for a in data["assets"] if a["name"] == name]
-        if len(assets) > 1:
+        indices = [a for a in data["assets"] if a["name"] == "update-manifest.json"]
+        if len(assets) > 1 or len(indices) > 1:
             raise UpdateError("版本安装包重复")
         return Release(tag, str(data.get("body") or "此版本没有提供更新说明。")[:100_000],
-                       data["html_url"], assets[0] if assets else None)
+                       data["html_url"], assets[0] if assets else None,
+                       indices[0] if indices else None)
     except (KeyError, TypeError, AttributeError) as exc:
         raise UpdateError("GitHub 版本信息无效") from exc
 
 
 class GitHubUpdater:
-    def __init__(self, current: str, repository: str = REPOSITORY, opener=None):
+    def __init__(self, current: str, repository: str = REPOSITORY, opener=None, app_bundle=None):
         self.current = current
         self.repository = repository
         if not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", repository):
@@ -77,6 +81,9 @@ class GitHubUpdater:
                 context = ssl.create_default_context(cafile=str(system_ca) if system_ca.is_file() else None)
                 return urllib.request.urlopen(request, timeout=timeout, context=context)
         self.open = opener
+        bundle = app_bundle or os.environ.get("TOOLBOX_APP_BUNDLE")
+        self.app_bundle = Path(bundle) if bundle else None
+        self.fallback_reason = None
 
     def check(self) -> Release | None:
         request = urllib.request.Request(
@@ -98,6 +105,20 @@ class GitHubUpdater:
             raise UpdateError("GitHub 版本信息无效") from exc
 
     def download(self, release: Release, cancel: threading.Event, progress) -> Path:
+        self.fallback_reason = None
+        if release.update_asset and release.asset and self.app_bundle:
+            try:
+                result = self.download_delta(release, cancel, progress)
+                if result is not None:
+                    return result
+            except Cancelled:
+                raise
+            except Exception as exc:
+                # Preserve the first meaningful error for diagnostics; full DMG is the fallback.
+                self.fallback_reason = str(exc)
+        return self.download_full(release, cancel, progress)
+
+    def download_full(self, release, cancel, progress):
         asset = release.asset
         if asset is None:
             raise UpdateError("此版本尚未提供 Apple 芯片安装包，请查看发布页面")
@@ -111,6 +132,22 @@ class GitHubUpdater:
             raise UpdateError("安装包链接、摘要或大小无效")
         directory = Path(tempfile.mkdtemp(prefix="ElectricityToolboxUpdate-"))
         path = directory / f"ElectricityToolbox-{release.version.removeprefix('v')}-apple-silicon.dmg"
+        try:
+            return self.download_asset(asset, path, cancel, progress)
+        except BaseException:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+
+    def download_asset(self, asset, path, cancel, progress):
+        try:
+            digest, size, url = asset["digest"], asset["size"], asset["browser_download_url"]
+            if (not isinstance(digest, str) or not re.fullmatch(r"sha256:[a-fA-F0-9]{64}", digest)
+                    or type(size) is not int or size <= 0 or not trusted_url(url, self.repository)):
+                raise UpdateError("更新文件链接、摘要或大小无效")
+        except (KeyError, TypeError) as exc:
+            raise UpdateError("更新文件元数据无效") from exc
+        if cancel.is_set():
+            raise Cancelled("已取消下载")
         try:
             count = 0
             checksum = hashlib.sha256()
@@ -139,5 +176,56 @@ class GitHubUpdater:
                 raise UpdateError("安装包校验失败，请重新下载")
             return path
         except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+
+    def download_delta(self, release, cancel, progress):
+        from delta_update import apply_patch, app_version, cancelled, select_route, INDEX_NAME
+        from installer_image import build
+        target = release.version.removeprefix("v")
+        if app_version(self.app_bundle) != self.current.removeprefix("v"):
+            raise UpdateError("当前安装版本不匹配")
+        directory = Path(tempfile.mkdtemp(prefix="ElectricityToolboxDelta-"))
+        try:
+            index_asset = release.update_asset
+            if type(index_asset.get("size")) is not int or not 0 < index_asset["size"] <= 2 * 1024 * 1024:
+                raise UpdateError("更新索引大小无效")
+            index_file = self.download_asset(index_asset, directory / INDEX_NAME, cancel, lambda _: None)
+            index = json.loads(index_file.read_text(encoding="utf-8"))
+            route = select_route(index, self.current.removeprefix("v"), target,
+                                 release.asset["size"] - index_asset["size"], self.repository)
+            if not route:
+                return None
+            # Only the temporary clone is modified. The running app and all user data stay untouched.
+            import subprocess
+            staged = directory / "staging"
+            staged.mkdir()
+            app = staged / "电力工具箱.app"
+            cancelled(cancel)
+            subprocess.run(["/usr/bin/ditto", "--norsrc", "--noextattr", "--noqtn", "--noacl",
+                            str(self.app_bundle), str(app)], check=True, capture_output=True)
+            installer = directory / "installer.py"
+            total, downloaded = sum(edge["size"] for edge in route), 0
+            for edge in route:
+                cancelled(cancel)
+                patch = self.download_asset(edge, directory / edge["name"], cancel,
+                    lambda fraction: progress(.85 * (downloaded + fraction * edge["size"]) / total))
+                apply_patch(app, patch, installer, edge["base"], edge["target"], cancel)
+                downloaded += edge["size"]
+                patch.unlink()
+            cancelled(cancel)
+            progress(.9)
+            result = build(app, directory, installer)
+            cancelled(cancel)
+            progress(1)
+            # Retain just the verified image and checksum for installation/re-opening.
+            shutil.rmtree(staged)
+            installer.unlink()
+            index_file.unlink()
+            return result
+        except BaseException:
             shutil.rmtree(directory, ignore_errors=True)
             raise
+        finally:
+            if directory.exists() and not list(directory.glob("*.dmg")):
+                shutil.rmtree(directory, ignore_errors=True)

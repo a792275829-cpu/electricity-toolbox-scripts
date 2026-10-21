@@ -63,8 +63,8 @@ class DesktopService(ToolboxService):
                             return token.cancelled
                     path = self.updater.download(release, CancelEvent(),
                         lambda fraction: emit(TaskEvent("", TaskEventKind.PROGRESS, progress=fraction)))
-                    return dict(message="DMG 已下载并校验。请退出工具箱后运行镜像中的安装命令。", outputs=[str(path)])
-                self.update_task = self.registry.start_callable("下载更新 DMG", download)
+                    return dict(message="更新镜像已准备并校验。请退出工具箱后运行镜像中的安装命令。", outputs=[str(path)])
+                self.update_task = self.registry.start_callable("下载并准备更新", download)
                 return self.update_task
         return super().call(method, params)
 
