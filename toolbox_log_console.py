@@ -43,6 +43,9 @@ def explain_error(text: str) -> tuple[str, str] | None:
 
 
 class LogConsole(ttk.Frame):
+    DISPLAY_CHAR_LIMIT = 250_000
+    DISPLAY_LINE_LIMIT = 4_000
+
     def __init__(self, parent, *, module: str, directory: Path | None = None):
         super().__init__(parent)
         self.module = module
@@ -78,7 +81,7 @@ class LogConsole(ttk.Frame):
         self.summary_label.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
         self.summary_label.grid_remove()
         self.summary.trace_add("write", lambda *_: self._show_if_nonempty(self.summary_label, self.summary))
-        self.bind("<Configure>", lambda event: self.summary_label.configure(wraplength=max(180, event.width - 24)))
+        self.bind("<Configure>", self._resize_summary)
         self.text = tk.Text(self.body, height=6, wrap="word", font="TkFixedFont", borderwidth=0, state="disabled")
         self.text.grid(row=1, column=0, sticky="nsew")
         scroll = ttk.Scrollbar(self.body, orient="vertical", command=self.text.yview)
@@ -99,6 +102,11 @@ class LogConsole(ttk.Frame):
             widget.grid()
         else:
             widget.grid_remove()
+
+    def _resize_summary(self, event):
+        width = max(180, event.width - 24)
+        if int(self.summary_label.cget("wraplength")) != width:
+            self.summary_label.configure(wraplength=width)
 
     def _select_all(self, _event):
         self.text.tag_add("sel", "1.0", "end-1c")
@@ -154,10 +162,19 @@ class LogConsole(ttk.Frame):
         top = self.text.index("@0,0")
         self.text.configure(state="normal")
         tag = "error" if any(x in content.lower() for x in ("error", "失败", "超时", "traceback", "不一致")) else ""
-        self.text.insert("end", content, tag)
+        # Trim before inserting: a single large traceback/JSON line can make
+        # Tk word wrapping expensive even when the line count stays below 5000.
+        lines = content[-self.DISPLAY_CHAR_LIMIT:].splitlines(keepends=True)[-5000:]
+        visible = "".join(line if len(line) <= self.DISPLAY_LINE_LIMIT else
+                          "…" + line[-self.DISPLAY_LINE_LIMIT:] for line in lines)
+        self.text.insert("end", visible, tag)
         excess = max(0, int(self.text.index("end-1c").split(".")[0]) - 1 - 5000)
         if excess:
             self.text.delete("1.0", f"{excess + 1}.0")
+        cutoff = self.text.index(f"end-1c-{self.DISPLAY_CHAR_LIMIT}c")
+        if self.text.compare(cutoff, ">", "1.0"):
+            excess += int(cutoff.split(".")[0]) - 1
+            self.text.delete("1.0", cutoff)
         if follow:
             self.text.see("end")
         else:

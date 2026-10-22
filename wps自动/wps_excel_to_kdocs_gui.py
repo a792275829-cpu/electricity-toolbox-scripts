@@ -2691,6 +2691,9 @@ class WpsWriterFrame(ttk.Frame):
             )
 
     def drain_logs(self) -> None:
+        if self._drain_after_id is not None:
+            self.after_cancel(self._drain_after_id)
+        self._drain_after_id = None
         while True:
             try:
                 title, error = self._remote_messages.get_nowait()
@@ -2720,12 +2723,22 @@ class WpsWriterFrame(ttk.Frame):
             self.browser_status.set(status if success else "检查失败，请重试")
             if not quiet:
                 self.log(status if success else "检查失败：" + status)
-        while True:
+        chunks = []
+        size = 0
+        for _ in range(200):
             try:
                 message = self.log_queue.get_nowait()
             except queue.Empty:
                 break
-            self.log_console.append(message)
+            chunks.append(message.rstrip("\n") + "\n")
+            size += len(message)
+            terminal = any(marker in message for marker in (
+                "操作失败：", "预览失败：", "暂时无法写入：", "检查失败：", "回读数据与来源不一致",
+                "Traceback (most recent call last)", "写入完成：", "预览通过：",
+            ))
+            if terminal:
+                self.log_console.append("".join(chunks))
+                chunks.clear()
             if any(marker in message for marker in ("操作失败：", "预览失败：", "暂时无法写入：", "检查失败：", "回读数据与来源不一致")):
                 diagnosis = explain_error(message) or (message, "点击“复制错误”提供完整日志；重试前核对是否已有部分写入。")
                 self.log_console.finish("执行失败", *diagnosis)
@@ -2735,6 +2748,10 @@ class WpsWriterFrame(ttk.Frame):
                     self.log_console.finish("执行失败", *diagnosis)
             elif "写入完成：" in message or "预览通过：" in message:
                 self.log_console.finish("已完成")
+            if size >= 64_000:
+                break
+        if chunks:
+            self.log_console.append("".join(chunks))
         self.schedule_drain_logs()
 
     def schedule_drain_logs(self) -> None:
@@ -2760,11 +2777,14 @@ class WpsWriterFrame(ttk.Frame):
 
     def clear_log(self) -> None:
         # Finish persisting pending messages before starting a separate run.
+        chunks = []
         while True:
             try:
-                self.log_console.append(self.log_queue.get_nowait())
+                chunks.append(self.log_queue.get_nowait().rstrip("\n") + "\n")
             except queue.Empty:
                 break
+        if chunks:
+            self.log_console.append("".join(chunks))
         self.log_console.begin()
 
     def save_log(self) -> None:

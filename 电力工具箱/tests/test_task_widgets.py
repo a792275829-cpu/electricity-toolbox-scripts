@@ -61,6 +61,60 @@ class ToolPageTaskTests(unittest.TestCase):
         self.assertIn("hello", self.page.log_text.get("1.0", "end"))
         self.assertEqual("已完成", self.page.status_var.get())
 
+    def test_log_backlog_yields_and_completion_waits_for_remaining_output(self) -> None:
+        from toolbox.tasks import TaskSnapshot, TaskState
+
+        for index in range(1000):
+            self.page._log_queue.put(f"line-{index}\n")
+        completed = []
+        self.page._completion_queue.put((
+            TaskSnapshot("done", "测试", TaskState.SUCCEEDED),
+            lambda _result: completed.append(True),
+        ))
+        self.page._poll_queues()
+        self.assertEqual(800, self.page._log_queue.qsize())
+        self.assertEqual([], completed)
+        navigated = []
+        self.root.after(0, lambda: navigated.append(True))
+        self.root.update()
+        self.assertEqual([True], navigated)
+        while not completed:
+            self.page._poll_queues()
+        contents = self.page.log_console.contents()
+        self.assertLess(contents.index("line-999"), contents.index("已完成"))
+        self.assertEqual(1, len(completed))
+
+    def test_large_messages_also_limit_each_poll(self) -> None:
+        for _ in range(20):
+            self.page._log_queue.put("x" * 32_000 + "\n")
+        self.page._poll_queues()
+        self.assertEqual(18, self.page._log_queue.qsize())
+
+    def test_hidden_busy_page_pauses_animation_and_resumes_without_losing_state(self) -> None:
+        def animation_timers():
+            scripts = [tuple(map(str, self.root.tk.splitlist(self.root.tk.call("after", "info", item)[0])))
+                       for item in self.root.tk.call("after", "info")]
+            return [script for script in scripts
+                    if script[:2] == ("ttk::progressbar::Autoincrement", str(self.page.progress))]
+
+        self.page.set_busy(True, "后台运行")
+        self.assertEqual([], animation_timers())
+        self.page.pack()
+        self.root.deiconify()
+        self.root.update_idletasks()
+        self.assertEqual(1, len(animation_timers()))
+        self.assertEqual("80", animation_timers()[0][2])
+        self.page.pack_forget()
+        self.root.update_idletasks()
+        self.assertTrue(self.page.busy)
+        self.assertEqual("后台运行", self.page.status_var.get())
+        self.assertEqual([], animation_timers())
+        self.page.pack()
+        self.root.update_idletasks()
+        self.assertEqual(1, len(animation_timers()))
+        self.page.set_busy(False)
+        self.assertEqual([], animation_timers())
+
     def test_cancel_button_cancels_owned_process(self) -> None:
         self.page.run_process(
             [sys.executable, "-c", "import time; time.sleep(30)"],

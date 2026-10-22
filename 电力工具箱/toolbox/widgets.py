@@ -73,6 +73,8 @@ class ToolPage(ttk.Frame):
         self.footer.grid(row=3, column=0, sticky="ew", pady=(12, 0))
         self.footer.columnconfigure(0, weight=1)
         self.progress = ttk.Progressbar(self.footer, mode="indeterminate")
+        self.progress.bind("<Map>", self._sync_progress_animation)
+        self.progress.bind("<Unmap>", self._sync_progress_animation)
         self.progress.grid(row=0, column=0, sticky="ew")
         self.progress.grid_remove()
         self.cancel_button = ttk.Button(
@@ -122,7 +124,7 @@ class ToolPage(ttk.Frame):
                 pass
         if busy:
             self.progress.grid()
-            self.progress.start(10)
+            self._sync_progress_animation()
         else:
             self.progress.stop()
             self.progress.grid_remove()
@@ -134,6 +136,14 @@ class ToolPage(ttk.Frame):
                 self.log_console.finish(status)
         self.cancel_button.configure(state="normal" if busy and self._current_cancellable else "disabled")
 
+    def _sync_progress_animation(self, _event=None) -> None:
+        # A 10 ms timer can redraw faster than macOS can paint the page, keeping
+        # the shared event loop busy. Hidden tasks need no animation at all.
+        if self.busy and self.progress.winfo_ismapped():
+            self.progress.start(80)
+        else:
+            self.progress.stop()
+
     def append_log(self, text: str) -> None:
         self._log_queue.put(f"[{datetime.now():%H:%M:%S}] " + text.rstrip("\n") + "\n")
         if threading.current_thread() is threading.main_thread():
@@ -144,9 +154,12 @@ class ToolPage(ttk.Frame):
             self._poll_after_id = self.after(50, self._poll_queues)
 
     def _poll_queues(self) -> None:
+        if self._poll_after_id is not None:
+            self.after_cancel(self._poll_after_id)
         self._poll_after_id = None
-        self._drain_log_queue()
-        while True:
+        # Yield to navigation between batches, including logs from hidden pages.
+        self._drain_log_queue(limit=200)
+        while self._log_queue.empty():
             try:
                 snapshot, callback = self._completion_queue.get_nowait()
             except queue.Empty:
@@ -154,11 +167,14 @@ class ToolPage(ttk.Frame):
             self._finish_snapshot(snapshot, callback)
         self._schedule_poll()
 
-    def _drain_log_queue(self) -> None:
+    def _drain_log_queue(self, *, limit: int | None = None) -> None:
         chunks: list[str] = []
-        while True:
+        size = 0
+        while limit is None or (len(chunks) < limit and size < 64_000):
             try:
-                chunks.append(self._log_queue.get_nowait())
+                chunk = self._log_queue.get_nowait()
+                chunks.append(chunk)
+                size += len(chunk)
             except queue.Empty:
                 break
         if not chunks:
@@ -283,6 +299,7 @@ class ToolPage(ttk.Frame):
         )
 
     def destroy(self) -> None:
+        self.progress.stop()
         if self._poll_after_id is not None:
             try:
                 self.after_cancel(self._poll_after_id)

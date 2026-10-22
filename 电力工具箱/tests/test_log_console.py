@@ -138,6 +138,45 @@ class LogConsoleTests(unittest.TestCase):
         self.assertIn("original exception", self.console.contents())
         self.assertIn("未能保存", self.console.notice.get())
 
+    def test_long_lines_have_bounded_display_but_complete_persisted_contents(self):
+        self.console.begin()
+        content = "first-cause\n" + "x" * 300_000 + "\nlast-line"
+        self.console.append(content)
+        self.console.append("y" * 100_000)
+        visible = self.console.text.get("1.0", "end-1c")
+        self.assertLessEqual(len(visible), self.console.DISPLAY_CHAR_LIMIT)
+        self.assertTrue(visible.endswith("y" * (self.console.DISPLAY_LINE_LIMIT - 1) + "\n"))
+        self.assertLessEqual(max(map(len, visible.splitlines())), self.console.DISPLAY_LINE_LIMIT + 1)
+        self.assertIn(content, self.console.contents())
+        self.assertEqual(self.console.contents(), self.console.path.read_text())
+
+    def test_wps_backlog_is_batched_and_does_not_duplicate_poll_timers(self):
+        from toolbox.runtime import load_module
+        source = Path(__file__).resolve().parents[2] / "wps自动/wps_excel_to_kdocs_gui.py"
+        module = load_module("wps_log_console_test", source)
+        with patch.object(module.WpsWriterFrame, "load_initial_config"), patch.object(module, "LOG_DIR", Path(self.temp.name)):
+            frame = module.WpsWriterFrame(self.root)
+            try:
+                for index in range(1000):
+                    frame.log_queue.put(f"line-{index}")
+                frame.log_queue.put("写入完成：测试")
+                old_timer = frame._drain_after_id
+                with patch.object(frame.log_console, "append", wraps=frame.log_console.append) as append:
+                    frame.drain_logs()
+                self.assertEqual(801, frame.log_queue.qsize())
+                self.assertLessEqual(append.call_count, 2)  # Includes initial header.
+                self.assertNotIn(old_timer, self.root.tk.call("after", "info"))
+                self.assertFalse(frame.log_console.finished)
+                while not frame.log_queue.empty():
+                    frame.drain_logs()
+                self.assertTrue(frame.log_console.finished)
+                contents = frame.log_console.contents()
+                for index in range(1000):
+                    self.assertEqual(1, contents.count(f"line-{index}\n"))
+                self.assertLess(contents.index("line-999"), contents.index("写入完成："))
+            finally:
+                frame.destroy()
+
     def test_wps_error_includes_detailed_traceback_in_shared_console(self):
         from toolbox.runtime import load_module
         source = Path(__file__).resolve().parents[2] / "wps自动/wps_excel_to_kdocs_gui.py"
