@@ -2217,6 +2217,7 @@ class WpsWriterFrame(ttk.Frame):
         self.load_initial_config()
         self.schedule_drain_logs()
         self.bind("<Map>", self._schedule_login_check, add="+")
+        self.bind("<Unmap>", self._pause_hidden_page, add="+")
         self.browser_mode.trace_add("write", self._invalidate_login_status)
         self.cdp_url.trace_add("write", self._invalidate_login_status)
 
@@ -2270,10 +2271,17 @@ class WpsWriterFrame(ttk.Frame):
             style="Muted.TLabel", wraplength=600,
         )
         login_hint.grid(row=4, column=0, columnspan=2, padx=8, pady=(0, 8), sticky="w")
-        file_frame.bind("<Configure>", lambda event: (
-            self.login_status_label.configure(wraplength=max(160, event.width - 150)),
-            login_hint.configure(wraplength=max(240, event.width - 24)),
-        ))
+        browser_width = None
+
+        def resize_browser_labels(event) -> None:
+            nonlocal browser_width
+            if event.width == browser_width:
+                return
+            browser_width = event.width
+            self.login_status_label.configure(wraplength=max(160, event.width - 150))
+            login_hint.configure(wraplength=max(240, event.width - 24))
+
+        file_frame.bind("<Configure>", resize_browser_labels)
         file_frame.columnconfigure(1, weight=1)
 
         mapping_frame = ttk.LabelFrame(root, text="写入配置")
@@ -2342,10 +2350,16 @@ class WpsWriterFrame(ttk.Frame):
             self.tree.heading(column, anchor="center")
             self.tree.column(column, width=width // 2, anchor="center", stretch=False)
 
+        configured_width = None
+
         def resize_config_columns(event) -> None:
+            nonlocal configured_width
             # Keep all six columns visible at normal sizes, with horizontal
             # scrolling available when the window is too narrow.
             available = max(840, event.width - 2)
+            if available == configured_width:
+                return
+            configured_width = available
             remaining = available
             for index, (column, width) in enumerate(zip(columns, column_widths)):
                 actual_width = (
@@ -2575,10 +2589,32 @@ class WpsWriterFrame(ttk.Frame):
         self.login_status_label.configure(foreground="#666666")
 
     def _schedule_login_check(self, event) -> None:
-        if event.widget is self and self._login_poll_after_id is None:
+        if event.widget is not self:
+            return
+        self.schedule_drain_logs()
+        if self._login_poll_after_id is None:
             # The toolbox also constructs this page during hidden warmup.
             # Check only once it is visible, without delaying page creation.
             self._login_poll_after_id = self.after(750, self._poll_login_status)
+
+    def _has_pending_work(self) -> bool:
+        return any(thread is not None and thread.is_alive()
+                   for thread in (self.worker, self.browser_worker)) or any(
+            not pending.empty() for pending in (
+                self.log_queue, self.login_event_queue,
+                self.browser_event_queue, self._remote_messages,
+            )
+        )
+
+    def _pause_hidden_page(self, event) -> None:
+        if event.widget is not self:
+            return
+        if self._login_poll_after_id is not None:
+            self.after_cancel(self._login_poll_after_id)
+            self._login_poll_after_id = None
+        if not self._has_pending_work() and self._drain_after_id is not None:
+            self.after_cancel(self._drain_after_id)
+            self._drain_after_id = None
 
     def _poll_login_status(self) -> None:
         self._login_poll_after_id = None
@@ -2663,6 +2699,7 @@ class WpsWriterFrame(ttk.Frame):
             if self.task_registry is not None:
                 self.task_registry.unregister_thread(thread)
             raise
+        self.schedule_drain_logs()
         return thread
 
     def detail_log(self, message: str) -> None:
@@ -2752,9 +2789,12 @@ class WpsWriterFrame(ttk.Frame):
                 break
         if chunks:
             self.log_console.append("".join(chunks))
-        self.schedule_drain_logs()
+        if self.winfo_ismapped() or self._has_pending_work():
+            self.schedule_drain_logs()
 
     def schedule_drain_logs(self) -> None:
+        if self._drain_after_id is not None:
+            return
         try:
             self._drain_after_id = self.after(100, self.drain_logs)
         except tk.TclError:

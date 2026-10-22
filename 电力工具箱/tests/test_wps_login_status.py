@@ -199,6 +199,41 @@ class WpsLoginStatusUiTests(unittest.TestCase):
             self.root.tk.call("after", "info", callback)
         del self.frame
 
+    def test_switching_away_stops_idle_callbacks_and_remapping_resumes(self):
+        self.frame._schedule_login_check(SimpleNamespace(widget=self.frame))
+        callbacks = (self.frame._drain_after_id, self.frame._login_poll_after_id)
+        self.frame._pause_hidden_page(SimpleNamespace(widget=self.frame))
+        self.assertIsNone(self.frame._drain_after_id)
+        self.assertIsNone(self.frame._login_poll_after_id)
+        for callback in callbacks:
+            with self.assertRaises(tk.TclError):
+                self.root.tk.call("after", "info", callback)
+        self.frame._schedule_login_check(SimpleNamespace(widget=self.frame))
+        resumed = (self.frame._drain_after_id, self.frame._login_poll_after_id)
+        self.assertTrue(all(resumed))
+        self.frame._schedule_login_check(SimpleNamespace(widget=self.frame))
+        self.assertEqual(resumed, (self.frame._drain_after_id, self.frame._login_poll_after_id))
+
+    def test_hidden_background_task_drains_result_then_stops(self):
+        import threading
+        release = threading.Event()
+        thread = self.frame._start_tracked_thread(
+            lambda: release.wait(2), name="test-hidden-wps"
+        )
+        self.frame.worker = thread
+        try:
+            self.frame._pause_hidden_page(SimpleNamespace(widget=self.frame))
+            self.frame.drain_logs()
+            self.assertIsNotNone(self.frame._drain_after_id)
+        finally:
+            release.set()
+            thread.join(2)
+        self.frame.log_queue.put("写入完成：后台任务")
+        self.frame.drain_logs()
+        self.assertTrue(self.frame.log_console.finished)
+        self.assertIn("写入完成：后台任务", self.frame.log_console.contents())
+        self.assertIsNone(self.frame._drain_after_id)
+
 
 if __name__ == "__main__":
     unittest.main()
