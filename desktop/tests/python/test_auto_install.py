@@ -94,9 +94,24 @@ class RealAutomaticInstallTests(unittest.TestCase):
         (contents / 'Resources').mkdir()
         (contents / 'Info.plist').write_bytes(plistlib.dumps(dict(
             CFBundleIdentifier='com.electricity.toolbox', CFBundleShortVersionString=version,
+            CFBundleVersion=version, CFBundleName='ToolboxAutoInstallTest', LSUIElement=True,
             CFBundleExecutable='electricity-toolbox', CFBundlePackageType='APPL')))
         executable = contents / 'MacOS/electricity-toolbox'
-        shutil.copyfile('/usr/bin/true', executable)
+        # LaunchServices needs a native application fixture, rather than a copied
+        # system command. Record execution outside the signed application bundle.
+        marker = app.parent / f'{version}.launched'
+        source = '''#import <AppKit/AppKit.h>
+#include <stdio.h>
+int main(void) { @autoreleasepool {
+    [NSApplication sharedApplication];
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    FILE *file = fopen(MARKER, "w");
+    if (!file) return 1;
+    fputs(VERSION, file); fclose(file);
+} return 0; }
+'''.replace('MARKER', json.dumps(str(marker), ensure_ascii=False)).replace('VERSION', json.dumps(version))
+        subprocess.run(['/usr/bin/clang', '-x', 'objective-c', '-framework', 'AppKit',
+                        '-o', str(executable), '-'], input=source, text=True, check=True, capture_output=True)
         executable.chmod(0o755)
         python = contents / 'Resources/payload/runtime/python/bin/python3'
         python.parent.mkdir(parents=True)
@@ -115,7 +130,10 @@ class RealAutomaticInstallTests(unittest.TestCase):
             self.bundle(image / '电力工具箱.app', '0.2.0')
             # Only ignore unrelated real apps in this temporary installer fixture.
             installer = (ROOT / 'packaging/tauri/install_user_app.py').read_text()
-            (image / '安装到用户应用程序.py').write_text(installer + '\nensure_stopped = lambda: None\n')
+            installer += ('\nensure_stopped = lambda: None\n_original_install = install\n'
+                          'def install(source):\n'
+                          f'    return _original_install(source, Path({str(target)!r}))\n')
+            (image / '安装到用户应用程序.py').write_text(installer)
             dmg = root / 'update.dmg'
             subprocess.run(['/usr/bin/hdiutil', 'create', '-ov', '-volname', 'ToolboxAutoUpdateTest',
                 '-srcfolder', str(image), '-format', 'UDZO', str(dmg)], check=True, capture_output=True)
@@ -127,7 +145,9 @@ class RealAutomaticInstallTests(unittest.TestCase):
             old_process = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
             manager = AutoInstall(target, parent_pids=[old_process.pid])
             try:
-                with patch.dict(os.environ, {'HOME': str(root), 'TOOLBOX_DATA_ROOT': str(data)}):
+                # Keep the real HOME for LaunchServices; only the fixture installer
+                # chooses a temporary destination, never the user's Applications.
+                with patch.dict(os.environ, {'TOOLBOX_DATA_ROOT': str(data)}):
                     self.assertEqual(manager.prepare(dmg, checksum, '0.2.0'), dict(ready=True))
                 self.assertEqual(app_version(target), '0.1.0')
                 manager.commit()
@@ -137,8 +157,13 @@ class RealAutomaticInstallTests(unittest.TestCase):
                 old_process.wait(timeout=5)
                 manager.process.wait(timeout=30)
                 result = json.loads((root / 'state/update-result.json').read_text())
-                self.assertTrue(result['success'], result)
+                self.assertTrue(result['success'], (result, (manager.directory / 'install.log').read_text()))
                 self.assertEqual(app_version(target), '0.2.0')
+                marker = image / '0.2.0.launched'
+                deadline = time.monotonic() + 5
+                while not marker.exists() and time.monotonic() < deadline:
+                    time.sleep(.05)
+                self.assertEqual(marker.read_text(), '0.2.0')
                 self.assertEqual((data / 'config.json').read_text(), 'business sentinel')
                 self.assertEqual(list(target.parent.glob('.toolbox-install-*')), [])
                 self.assertEqual(manager.process.returncode, 0, (manager.directory / 'install.log').read_text())
