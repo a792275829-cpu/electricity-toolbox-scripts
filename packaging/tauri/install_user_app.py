@@ -66,7 +66,7 @@ def install(source: Path, destination: Path | None = None) -> Path:
 if __name__ == "__main__":
     try:
         target = install(Path(sys.argv[1]))
-        print(f"安装完成：{target}\n后续更新请下载新版 DMG，退出工具箱后再次运行安装命令；原配置和数据保留。")
+        print(f"安装完成：{target}\n后续在应用内点击“开始更新”即可自动安装并重启；原配置和数据保留。")
         subprocess.run(["/usr/bin/open", "-n", str(target)], check=True)
     except Exception as error:
         print(f"安装未完成：{error}", file=sys.stderr)

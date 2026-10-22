@@ -26,6 +26,7 @@ class ToolboxService:
         self.paths = ToolPaths(workspace)
         self.registry = TaskRegistry(event_capacity=2000)
         self.closed = threading.Event()
+        self.maintenance = False
         self._lock = threading.RLock()
         self._sequence = 0
         self._journal = deque(maxlen=2000)
@@ -56,6 +57,8 @@ class ToolboxService:
         with self._lock:
             if self.closed.is_set():
                 raise ValueError("工具箱正在退出")
+            if self.maintenance:
+                raise ValueError("工具箱正在更新，请等待更新完成")
             tool_id, action = params.get("tool_id"), params.get("action", "run")
             request_id = params.get("request_id")
             if not isinstance(request_id, str) or not 1 <= len(request_id) <= 100:
@@ -217,8 +220,13 @@ class ToolboxService:
             report = diagnose_environment(self.paths)
             return dict(ok=report.ok, summary=report.summary())
         if method in {"activate", "prepare_update", "abort_update"}:
-            if method == "prepare_update" and self.registry.has_running_tasks():
-                raise ValueError("请等待正在运行的任务完成后更新")
+            with self._lock:
+                if method == "prepare_update":
+                    if self.registry.has_running_tasks():
+                        raise ValueError("请等待正在运行的任务完成后更新")
+                    self.maintenance = True
+                elif method == "abort_update":
+                    self.maintenance = False
             return True
         if method in {"request_close", "shutdown", "installer_close", "finish_update"}:
             with self._lock:

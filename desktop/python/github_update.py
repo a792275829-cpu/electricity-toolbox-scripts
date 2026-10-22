@@ -84,6 +84,36 @@ class GitHubUpdater:
         bundle = app_bundle or os.environ.get("TOOLBOX_APP_BUNDLE")
         self.app_bundle = Path(bundle) if bundle else None
         self.fallback_reason = None
+        self.downloaded = None
+        self.installer = None
+
+    def prepare_update(self):
+        if self.app_bundle is None:
+            raise UpdateError("请使用安装后的桌面版执行自动更新")
+
+    def prepare_install(self, release, path):
+        if self.downloaded is None or self.downloaded[:2] != (release.version, Path(path)):
+            raise UpdateError("安装包未经过本次更新校验，请重新下载")
+        self.prepare_update()
+        from auto_install import AutoInstall
+        self.installer = AutoInstall(self.app_bundle)
+        return self.installer.prepare(path, self.downloaded[2], release.version.removeprefix('v'))
+
+    def commit_install(self):
+        if self.installer is None:
+            raise UpdateError("自动安装尚未准备完成")
+        return self.installer.commit()
+
+    def abort_update(self):
+        if self.installer is not None:
+            self.installer.abort()
+            self.installer = None
+
+    def remember_download(self, release, path):
+        with path.open('rb') as stream:
+            checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
+        self.downloaded = (release.version, path, checksum)
+        return path
 
     def check(self) -> Release | None:
         request = urllib.request.Request(
@@ -110,13 +140,13 @@ class GitHubUpdater:
             try:
                 result = self.download_delta(release, cancel, progress)
                 if result is not None:
-                    return result
+                    return self.remember_download(release, result)
             except Cancelled:
                 raise
             except Exception as exc:
                 # Preserve the first meaningful error for diagnostics; full DMG is the fallback.
                 self.fallback_reason = str(exc)
-        return self.download_full(release, cancel, progress)
+        return self.remember_download(release, self.download_full(release, cancel, progress))
 
     def download_full(self, release, cancel, progress):
         asset = release.asset

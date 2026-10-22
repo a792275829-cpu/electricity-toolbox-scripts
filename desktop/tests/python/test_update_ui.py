@@ -47,7 +47,7 @@ class UpdateUiTests(unittest.TestCase):
         self.updater.check.return_value = self.release
         self.controller.check(manual=True)
         self.pump(lambda: self.controller.window is not None)
-        self.assertEqual(self.controller.window.primary.cget("text"), "下载更新")
+        self.assertEqual(self.controller.window.primary.cget("text"), "开始更新")
         self.assertIs(self.controller.window.controller.app, self.app)
 
     def test_automatic_errors_are_silent_but_manual_errors_are_visible(self):
@@ -94,32 +94,85 @@ class UpdateUiTests(unittest.TestCase):
         self.assertEqual(window.status.get(), "签名校验失败")
         self.assertEqual(window.primary.cget("text"), "重试更新")
 
-    def test_verified_dmg_opens_without_installing_or_locking_tasks(self):
+    def test_verified_dmg_automatically_prepares_commits_and_exits(self):
         self.controller.release = self.release
         self.controller.show()
         window = self.controller.window
         self.updater.download.return_value = Path(self.temp.name) / "test.dmg"
-        with patch("update_ui.subprocess.run") as run:
+        calls = []
+        original = self.service.call
+        def call(method, params):
+            calls.append(method)
+            return True if method == 'finish_update' else original(method, params)
+        with patch.object(self.service, 'call', side_effect=call):
             window.perform()
-            self.pump(lambda: window.downloaded_path is not None)
-            run.assert_called_once_with(["/usr/bin/open", str(self.updater.download.return_value)], check=True)
+            self.pump(lambda: 'finish_update' in calls)
+        self.updater.prepare_update.assert_called_once()
+        self.updater.prepare_install.assert_called_once_with(self.release, self.updater.download.return_value)
+        self.updater.commit_install.assert_called_once()
         self.service.emit.assert_not_called()
         self.assertFalse(window.downloading)
-        self.assertFalse(self.service.maintenance)
-        self.assertIn("请先退出工具箱", window.status.get())
-        self.assertEqual(window.primary.cget("text"), "打开 DMG")
+        self.assertTrue(window.installing)
+        self.assertTrue(self.service.maintenance)
+        self.assertIn('自动安装', window.status.get())
+        self.assertEqual(calls, ['prepare_update', 'finish_update'])
 
     def test_failed_download_can_be_retried_without_opening(self):
         self.controller.release = self.release
         self.controller.show()
         window = self.controller.window
         self.updater.download.side_effect = ValueError("安装包校验失败")
-        with patch("update_ui.subprocess.run") as run:
-            window.perform()
-            self.pump(lambda: not window.downloading)
-            run.assert_not_called()
+        window.perform()
+        self.pump(lambda: not window.downloading)
+        self.updater.prepare_install.assert_not_called()
+        self.updater.abort_update.assert_called_once()
+        self.assertFalse(self.service.maintenance)
         self.assertIn("校验失败", window.status.get())
         self.assertEqual(window.primary.cget("text"), "重试下载")
+
+    def test_prepare_failure_keeps_application_open_and_unlocks_inputs(self):
+        self.controller.release = self.release
+        self.controller.show()
+        window = self.controller.window
+        self.updater.download.return_value = Path(self.temp.name) / 'test.dmg'
+        self.updater.prepare_install.side_effect = ValueError('镜像签名错误')
+        window.perform()
+        self.pump(lambda: '镜像签名错误' in window.status.get())
+        self.updater.commit_install.assert_not_called()
+        self.assertFalse(self.service.maintenance)
+        self.assertFalse(window.installing)
+        self.assertTrue(self.app.winfo_exists())
+
+    def test_running_task_prevents_update_before_any_download(self):
+        self.controller.release = self.release
+        self.controller.show()
+        with patch.object(self.app.registry, 'has_running_tasks', return_value=True):
+            self.controller.window.perform()
+        self.updater.download.assert_not_called()
+        self.assertFalse(self.service.maintenance)
+        self.assertIn('等待', self.controller.window.status.get())
+
+    def test_cancel_after_download_completed_does_not_start_install(self):
+        self.controller.release = self.release
+        self.controller.show()
+        window = self.controller.window
+        with patch.object(self.controller, 'worker') as worker:
+            window.perform()
+            window.dismiss()
+            window.download_finished(Path(self.temp.name) / 'verified.dmg', None)
+            worker.call_args.args[1](True, None)
+        self.updater.prepare_install.assert_not_called()
+        self.assertFalse(self.service.maintenance)
+        self.assertFalse(window.winfo_exists())
+
+    def test_update_controls_stay_interactive_while_business_inputs_are_locked(self):
+        self.controller.release = self.release
+        self.controller.show()
+        window = self.controller.window
+        with patch.object(self.controller, 'worker'):
+            window.perform()
+        self.assertTrue(self.service.maintenance)
+        self.assertFalse(any('ToolboxUpdateLock' in tag for tag in window.cancel_button.bindtags()))
 
 
 if __name__ == "__main__":

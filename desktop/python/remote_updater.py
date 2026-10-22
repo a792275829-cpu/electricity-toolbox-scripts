@@ -22,18 +22,35 @@ class RemoteUpdater:
 
     def download(self, release, cancel, progress):
         task_id = self.client.call("updates.download", dict(version=release.version))
+        result = self.wait_task(task_id, cancel, progress)
+        return Path(result["outputs"][0])
+
+    def prepare_update(self):
+        return self.client.call('updates.reserve')
+
+    def abort_update(self):
+        return self.client.call('updates.abort')
+
+    def prepare_install(self, release, path):
+        task_id = self.client.call('updates.prepare_install', dict(version=release.version, path=str(path)))
+        return self.wait_task(task_id)
+
+    def commit_install(self):
+        return self.client.call('updates.commit_install')
+
+    def wait_task(self, task_id, cancel=None, progress=None):
         cursor = 0
         while True:
-            if cancel.is_set():
+            if cancel is not None and cancel.is_set():
                 self.client.call("cancel", dict(task_id=task_id))
             batch = self.client.call("events", dict(after=cursor))
             cursor = batch["cursor"]
             for event in batch["events"]:
-                if event["task_id"] == task_id and event["kind"] == "progress":
+                if progress is not None and event["task_id"] == task_id and event["kind"] == "progress":
                     progress(event["progress"])
             task = next(t for t in self.client.call("tasks") if t["id"] == task_id)
             if task["state"] == "succeeded":
-                return Path(task["result"]["outputs"][0])
+                return task["result"]
             if task["state"] == "cancelled":
                 raise Cancelled("已取消下载")
             if task["state"] == "failed":

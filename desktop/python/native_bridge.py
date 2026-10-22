@@ -14,6 +14,7 @@ import sys
 import threading
 from pathlib import Path
 from tkinter import messagebox
+import tkinter as tk
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT), str(ROOT / "电力工具箱")]
@@ -37,6 +38,8 @@ class NativeService:
             pending = [self.app]
             while pending:
                 widget = pending.pop()
+                if widget is not self.app and isinstance(widget, tk.Toplevel):
+                    continue  # Update/cancellation controls remain usable.
                 pending.extend(widget.winfo_children())
                 self._locked_widgets[widget] = widget.bindtags()
                 widget.bindtags((tag, *widget.bindtags()))

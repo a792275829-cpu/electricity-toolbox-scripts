@@ -25,8 +25,36 @@ class DesktopService(ToolboxService):
         self.update_task = None
         self.update_checking = False
         self.update_error = None
+        self.install_task = None
 
     def call(self, method, params):
+        if method == "updates.reserve":
+            self.updater.prepare_update()
+            return super().call('prepare_update', {})
+        if method == "updates.abort":
+            self.updater.abort_update()
+            self.install_task = None
+            return super().call('abort_update', {})
+        if method == "updates.commit_install":
+            if not self.maintenance:
+                raise ValueError("工具箱尚未进入更新状态")
+            return self.updater.commit_install()
+        if method == "updates.prepare_install":
+            with self._lock:
+                if not self.maintenance or self.updater.downloaded is None:
+                    raise ValueError("请先下载并校验更新")
+                version, path, _ = self.updater.downloaded
+                if params.get('version') != version or str(path) != params.get('path'):
+                    raise ValueError("安装包与已下载版本不一致")
+                if self.install_task and self.registry.snapshot(self.install_task).state.value != 'failed':
+                    return self.install_task
+                if self.registry.has_running_tasks():
+                    raise ValueError("请等待正在运行的任务完成后安装")
+                from github_update import Release
+                self.install_task = self.registry.start_callable('准备自动安装',
+                    lambda token, emit: self.updater.prepare_install(Release(version, '', '', None), path),
+                    cancellable=False)
+                return self.install_task
         if method in {"check_updates", "updates.check"}:
             if self.update_checking:
                 return True
@@ -63,7 +91,7 @@ class DesktopService(ToolboxService):
                             return token.cancelled
                     path = self.updater.download(release, CancelEvent(),
                         lambda fraction: emit(TaskEvent("", TaskEventKind.PROGRESS, progress=fraction)))
-                    return dict(message="更新镜像已准备并校验。请退出工具箱后运行镜像中的安装命令。", outputs=[str(path)])
+                    return dict(message="更新镜像已准备并校验，即将自动安装。", outputs=[str(path)])
                 self.update_task = self.registry.start_callable("下载并准备更新", download)
                 return self.update_task
         return super().call(method, params)
