@@ -2773,18 +2773,23 @@ class WpsWriterFrame(ttk.Frame):
             except tk.TclError:
                 pass
             self._drain_after_id = None
+        self._flush_pending_logs()
         super().destroy()
 
+    def _flush_pending_logs(self) -> None:
+        while not self.log_queue.empty():
+            chunks = []
+            for _ in range(200):
+                try:
+                    chunks.append(self.log_queue.get_nowait().rstrip("\n") + "\n")
+                except queue.Empty:
+                    break
+            if chunks:
+                self.log_console.append("".join(chunks), render=False)
+
     def clear_log(self) -> None:
-        # Finish persisting pending messages before starting a separate run.
-        chunks = []
-        while True:
-            try:
-                chunks.append(self.log_queue.get_nowait().rstrip("\n") + "\n")
-            except queue.Empty:
-                break
-        if chunks:
-            self.log_console.append("".join(chunks))
+        # Persist pending messages without drawing a run that is being closed.
+        self._flush_pending_logs()
         self.log_console.begin()
 
     def save_log(self) -> None:

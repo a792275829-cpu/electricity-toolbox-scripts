@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import threading
 import time
 import tkinter as tk
 import unittest
 import gc
 from pathlib import Path
+from unittest.mock import patch
 
 
 class ToolPageTaskTests(unittest.TestCase):
@@ -89,6 +91,22 @@ class ToolPageTaskTests(unittest.TestCase):
             self.page._log_queue.put("x" * 32_000 + "\n")
         self.page._poll_queues()
         self.assertEqual(18, self.page._log_queue.qsize())
+
+    def test_destroy_persists_backlog_without_rendering(self) -> None:
+        from toolbox.widgets import ToolPage
+        page = ToolPage(self.root, registry=self.registry)
+        with tempfile.TemporaryDirectory() as folder:
+            page.log_console.directory = Path(folder)
+            for index in range(1000):
+                page._log_queue.put(f"record-{index}\n")
+            page._poll_queues()
+            path = page.log_console.path
+            self.assertEqual(800, page._log_queue.qsize())
+            with patch.object(page.log_console.text, "insert", side_effect=AssertionError("Shutdown rendered logs")):
+                page.destroy()
+            saved = path.read_text()
+            self.assertEqual(1000, saved.count("record-"))
+            self.assertIn("record-999\n", saved)
 
     def test_hidden_busy_page_pauses_animation_and_resumes_without_losing_state(self) -> None:
         def animation_timers():

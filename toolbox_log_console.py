@@ -5,6 +5,7 @@ import json
 import re
 import time
 import uuid
+from bisect import bisect_right
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
@@ -13,6 +14,47 @@ from tkinter import ttk
 from toolbox_storage import data_path
 from toolbox_redaction import redact
 
+
+class _LogBuffer:
+    """Index complete log chunks without joining the entire run for each page."""
+    def __init__(self):
+        self.chunks = []
+        self.ends = []
+        self.length = 0
+
+    def append(self, content):
+        if content:
+            self.chunks.append(content)
+            self.length += len(content)
+            self.ends.append(self.length)
+
+    def slice(self, start, end):
+        index = bisect_right(self.ends, start)
+        parts = []
+        while index < len(self.chunks) and start < end:
+            offset = self.ends[index - 1] if index else 0
+            part = self.chunks[index][start - offset:end - offset]
+            parts.append(part)
+            start += len(part)
+            index += 1
+        return "".join(parts)
+
+    def find(self, query, start=0, *, ignore_case=False):
+        index = bisect_right(self.ends, start)
+        carry = ""
+        pattern = re.compile(re.escape(query), re.IGNORECASE) if ignore_case else None
+        while index < len(self.chunks):
+            offset = self.ends[index - 1] if index else 0
+            offset = max(start, offset)
+            part = self.chunks[index][offset - (self.ends[index - 1] if index else 0):]
+            block = carry + part
+            match = pattern.search(block) if pattern is not None else None
+            found = (match.start() if match else -1) if pattern is not None else block.find(query)
+            if found >= 0:
+                return offset - len(carry) + found
+            carry = block[-(len(query) - 1):] if len(query) > 1 else ""
+            index += 1
+        return -1
 
 
 
@@ -45,6 +87,7 @@ def explain_error(text: str) -> tuple[str, str] | None:
 class LogConsole(ttk.Frame):
     DISPLAY_CHAR_LIMIT = 250_000
     DISPLAY_LINE_LIMIT = 4_000
+    EXPANDED_PAGE_SIZE = 16_000
 
     def __init__(self, parent, *, module: str, directory: Path | None = None):
         super().__init__(parent)
@@ -56,9 +99,12 @@ class LogConsole(ttk.Frame):
         self.started = time.monotonic()
         self.failure = ""
         self.storage_error = ""
-        self._fallback: list[str] = []
+        self._log = _LogBuffer()
         self._expanded = None
         self._expanded_text = None
+        self._expanded_source = self._log
+        self._expanded_start = 0
+        self._expanded_follow = True
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
         self.header = ttk.Frame(self)
@@ -112,21 +158,24 @@ class LogConsole(ttk.Frame):
         self.text.tag_add("sel", "1.0", "end-1c")
         return "break"
 
-    def begin(self, name=""):
+    def begin(self, name="", *, render=True):
         self._initialized = True
         self.finished = False
         self.started = time.monotonic()
         self.failure = ""
-        self.summary.set("")
-        self.notice.set("")
-        self.status.set(name)
-        self.text.configure(state="normal")
-        self.text.delete("1.0", "end")
-        self.text.configure(state="disabled")
+        if render:
+            self.summary.set("")
+            self.notice.set("")
+            self.status.set(name)
+            self.text.configure(state="normal")
+            self.text.delete("1.0", "end")
+            self.text.configure(state="disabled")
         self.path = None
-        self._fallback = []
+        self._log = _LogBuffer()
         if self._expanded_text is not None and self._expanded_text.winfo_exists() and getattr(self, "_view_current", True):
-            self._insert_expanded("", replace=True)
+            self._expanded_source = self._log
+            if render:
+                self._refresh_expanded(follow=True)
         self.storage_error = ""
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
@@ -134,7 +183,8 @@ class LogConsole(ttk.Frame):
             self.path.touch(mode=0o600)
         except OSError as exc:
             self.storage_error = f"日志未能保存：{exc}"
-            self.notice.set(self.storage_error)
+            if render:
+                self.notice.set(self.storage_error)
         root = Path(__file__).resolve().parent
         version = "未知"
         for version_path in (root / "desktop/src-tauri/tauri.conf.json", root.parent / "manifest.json"):
@@ -143,21 +193,24 @@ class LogConsole(ttk.Frame):
                 break
             except (OSError, ValueError, KeyError):
                 continue
-        self.append(f"模块：{self.module}  版本：{version}  开始时间：{datetime.now():%Y-%m-%d %H:%M:%S}")
+        self.append(f"模块：{self.module}  版本：{version}  开始时间：{datetime.now():%Y-%m-%d %H:%M:%S}", render=render)
 
-    def append(self, content: str):
+    def append(self, content: str, *, render=True):
         if not self._initialized:
-            self.begin()
+            self.begin(render=render)
         content = redact(content.rstrip("\n")) + "\n"
         # Keep all text even if storage becomes unavailable during a run.
-        self._fallback.append(content)
+        self._log.append(content)
         if self.path is not None:
             try:
                 with self.path.open("a", encoding="utf-8") as handle:
                     handle.write(content)
             except OSError as exc:
                 self.storage_error = f"日志未能保存：{exc}"
-                self.notice.set(self.storage_error)
+                if render:
+                    self.notice.set(self.storage_error)
+        if not render:
+            return
         follow = self.text.yview()[1] >= 0.995
         top = self.text.index("@0,0")
         self.text.configure(state="normal")
@@ -181,21 +234,41 @@ class LogConsole(ttk.Frame):
             self.text.yview(f"{max(1, int(top.split('.')[0]) - excess)}.0")
         self.text.configure(state="disabled")
         if self._expanded_text is not None and self._expanded_text.winfo_exists() and getattr(self, "_view_current", True):
-            self._insert_expanded(content)
+            if self._expanded_follow and self._expanded_text.yview()[1] >= 0.995:
+                self._refresh_expanded(follow=True)
+            else:
+                self._expanded_follow = False
+                self._update_page_controls()
 
-    def _insert_expanded(self, content, *, replace=False):
+    def _refresh_expanded(self, *, follow=False):
         text = self._expanded_text
-        follow = text.yview()[1] >= 0.995
+        source = self._expanded_source
+        last = max(0, (source.length - 1) // self.EXPANDED_PAGE_SIZE) * self.EXPANDED_PAGE_SIZE
+        self._expanded_start = last if follow else min(self._expanded_start, last)
+        self._expanded_follow = follow
         text.configure(state="normal")
-        if replace:
-            text.delete("1.0", "end")
-        text.insert("end", content)
-        if follow or replace:
+        text.delete("1.0", "end")
+        text.insert("end", source.slice(self._expanded_start, self._expanded_start + self.EXPANDED_PAGE_SIZE))
+        if follow:
             text.see("end")
+        else:
+            text.see("1.0")
         text.configure(state="disabled")
+        self._update_page_controls()
+
+    def _update_page_controls(self):
+        pages = max(1, (self._expanded_source.length + self.EXPANDED_PAGE_SIZE - 1) // self.EXPANDED_PAGE_SIZE)
+        page = self._expanded_start // self.EXPANDED_PAGE_SIZE + 1
+        self._page_status.set(f"第 {page} / {pages} 页")
+        self._previous_page.configure(state="normal" if page > 1 else "disabled")
+        self._next_page.configure(state="normal" if page < pages else "disabled")
+
+    def _move_expanded_page(self, direction):
+        self._expanded_start = max(0, self._expanded_start + direction * self.EXPANDED_PAGE_SIZE)
+        self._refresh_expanded()
 
     def contents(self):
-        return "".join(self._fallback)
+        return "".join(self._log.chunks)
 
     def finish(self, state: str, summary="", advice=""):
         if not self._initialized:
@@ -243,12 +316,19 @@ class LogConsole(ttk.Frame):
         selected.current(0)
         selected.pack(side="left")
         self._view_current = True
+        self._expanded_source = self._log
         def choose(_event=None):
             path = records[selected.current()][1]
             self._view_current = path is None
             try:
-                content = self.contents() if path is None else path.read_text(encoding="utf-8")
-                self._insert_expanded(content, replace=True)
+                source = self._log
+                if path is not None:
+                    source = _LogBuffer()
+                    with path.open(encoding="utf-8") as handle:
+                        while chunk := handle.read(self.EXPANDED_PAGE_SIZE):
+                            source.append(chunk)
+                self._expanded_source = source
+                self._refresh_expanded(follow=True)
             except OSError as exc:
                 self.notice.set(f"历史日志读取失败：{exc}")
         selected.bind("<<ComboboxSelected>>", choose)
@@ -257,7 +337,7 @@ class LogConsole(ttk.Frame):
                 self.copy_error()
             else:
                 self.clipboard_clear()
-                self.clipboard_append(redact(text.get("1.0", "end-1c")))
+                self.clipboard_append(redact("".join(self._expanded_source.chunks)))
                 self.notice.set("已复制所选运行日志")
         ttk.Button(bar, text="复制错误", command=copy).pack(side="right")
         search = ttk.Entry(bar, width=18)
@@ -267,22 +347,41 @@ class LogConsole(ttk.Frame):
             text.tag_remove("match", "1.0", "end")
             if not query:
                 return
-            pos = text.search(query, "insert+1c", stopindex="end", nocase=True)
-            if not pos:
-                pos = text.search(query, "1.0", stopindex="end", nocase=True)
-            if pos:
-                text.tag_add("match", pos, f"{pos}+{len(query)}c")
-                text.mark_set("insert", pos)
-                text.see(pos)
+            start = self._expanded_start + len(text.get("1.0", "insert")) + 1
+            source = self._expanded_source
+            pos = source.find(query, start, ignore_case=True)
+            if pos < 0:
+                pos = source.find(query, ignore_case=True)
+            if pos >= 0:
+                self._expanded_start = pos
+                self._refresh_expanded()
+                local = pos - self._expanded_start
+                index = f"1.0+{local}c"
+                text.tag_add("match", index, f"{index}+{len(query)}c")
+                text.mark_set("insert", index)
+                text.see(index)
         ttk.Button(bar, text="查找", command=find).pack(side="left")
         search.bind("<Return>", find)
+        pages = ttk.Frame(window, padding=(8, 0, 8, 8))
+        pages.pack(fill="x")
+        self._previous_page = ttk.Button(pages, text="上一页", command=lambda: self._move_expanded_page(-1))
+        self._previous_page.pack(side="left")
+        self._next_page = ttk.Button(pages, text="下一页", command=lambda: self._move_expanded_page(1))
+        self._next_page.pack(side="left", padx=6)
+        ttk.Button(pages, text="最新日志", command=lambda: self._refresh_expanded(follow=True)).pack(side="left")
+        self._page_status = tk.StringVar(self)
+        ttk.Label(pages, textvariable=self._page_status).pack(side="left", padx=12)
         from tkinter.scrolledtext import ScrolledText
-        text = ScrolledText(window, wrap="word", font="TkFixedFont")
+        # Each page is exact text, including long lines. Horizontal scrolling
+        # avoids expensive word wrapping without truncating the full log.
+        text = ScrolledText(window, wrap="none", font="TkFixedFont")
         self._expanded_text = text
-        text.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        horizontal = ttk.Scrollbar(window, orient="horizontal", command=text.xview)
+        horizontal.pack(side="bottom", fill="x", padx=12, pady=(0, 12))
+        text.configure(xscrollcommand=horizontal.set)
+        text.pack(fill="both", expand=True, padx=12)
         text.tag_configure("match", background="#fef08a")
-        text.insert("1.0", self.contents())
-        text.configure(state="disabled")
+        self._refresh_expanded(follow=True)
         def select_all(_event):
             text.tag_add("sel", "1.0", "end-1c")
             return "break"

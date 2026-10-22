@@ -8,10 +8,23 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from toolbox_log_console import LogConsole, explain_error, redact
+from toolbox_log_console import LogConsole, _LogBuffer, explain_error, redact
 
 
 class DiagnosisTests(unittest.TestCase):
+    def test_log_buffer_pages_and_search_cross_chunk_boundaries(self):
+        buffer = _LogBuffer()
+        chunks = ["甲🙂AB", "cd", "EF尾", "第二段"]
+        for chunk in chunks:
+            buffer.append(chunk)
+        complete = "".join(chunks)
+        for start in range(len(complete) + 1):
+            for end in range(start, len(complete) + 1):
+                self.assertEqual(complete[start:end], buffer.slice(start, end))
+            for query in ("ABcdEF", "🙂AB", "第二", "不存在"):
+                self.assertEqual(complete.find(query, start), buffer.find(query, start))
+        self.assertEqual(2, buffer.find("abcdef", ignore_case=True))
+
     def test_subprocess_reason_comes_from_original_output(self):
         from toolbox.tasks import ProcessExecutionError, classify_error
         for detail, expected in (("TimeoutError: timeout 1000ms exceeded", "超时"),
@@ -176,6 +189,90 @@ class LogConsoleTests(unittest.TestCase):
                 self.assertLess(contents.index("line-999"), contents.index("写入完成："))
             finally:
                 frame.destroy()
+
+    def test_wps_destroy_saves_even_a_never_rendered_run(self):
+        from toolbox.runtime import load_module
+        source = Path(__file__).resolve().parents[2] / "wps自动/wps_excel_to_kdocs_gui.py"
+        module = load_module("wps_log_console_test", source)
+        with patch.object(module.WpsWriterFrame, "load_initial_config"), patch.object(module, "LOG_DIR", Path(self.temp.name)):
+            frame = module.WpsWriterFrame(self.root)
+            console = frame.log_console
+            for index in range(1000):
+                frame.log_queue.put(f"record-{index}")
+            frame.log_queue.put("操作失败：original failure; password=secret123")
+            with patch.object(console.text, "insert", side_effect=AssertionError("Shutdown rendered logs")):
+                frame.destroy()
+            saved = console.path.read_text()
+            self.assertEqual(1000, saved.count("record-"))
+            self.assertIn("original failure", saved)
+            self.assertNotIn("secret123", saved)
+
+    def test_expanded_pages_preserve_long_lines_and_do_not_follow_earlier_pages(self):
+        console = self.console
+        console.begin()
+        console.append("first-cause\n" + "x" * 300_000 + "\nlast-line")
+        console.expand()
+        self.root.update_idletasks()
+        self.assertEqual("none", str(console._expanded_text.cget("wrap")))
+        console._expanded_start = 0
+        parts = []
+        while console._expanded_start < console._log.length:
+            console._refresh_expanded()
+            part = console._expanded_text.get("1.0", "end-1c")
+            self.assertLessEqual(len(part), console.EXPANDED_PAGE_SIZE)
+            parts.append(part)
+            if console._expanded_start + console.EXPANDED_PAGE_SIZE >= console._log.length:
+                break
+            console._move_expanded_page(1)
+        self.assertEqual(console.contents(), "".join(parts))
+        console._expanded_start = 0
+        console._refresh_expanded()
+        before = console._expanded_text.get("1.0", "end-1c")
+        console.append("live-line")
+        self.assertEqual(before, console._expanded_text.get("1.0", "end-1c"))
+        console._refresh_expanded(follow=True)
+        self.assertIn("live-line", console._expanded_text.get("1.0", "end-1c"))
+
+    def test_expanded_history_copy_is_complete_and_search_reaches_other_pages(self):
+        from tkinter import ttk
+        console = self.console
+        console.begin()
+        console.append("early-marker\n" + "x" * 50_000 + "\nlate-marker")
+        previous = console.contents()
+        console.begin()
+        console.append("current-run")
+        console.expand()
+        bar = console._expanded.winfo_children()[0]
+        selected = next(w for w in bar.winfo_children() if isinstance(w, ttk.Combobox))
+        selected.current(1)
+        selected.event_generate("<<ComboboxSelected>>")
+        self.root.update_idletasks()
+        text = console._expanded_text
+        self.assertIn("late-marker", text.get("1.0", "end-1c"))
+        buttons = {str(w.cget("text")): w for w in bar.winfo_children() if isinstance(w, ttk.Button)}
+        with patch.object(console, "clipboard_clear"), patch.object(console, "clipboard_append") as copy:
+            buttons["复制错误"].invoke()
+        self.assertEqual(previous, copy.call_args.args[0])
+        search = next(w for w in bar.winfo_children() if type(w) is ttk.Entry)
+        search.insert(0, "EARLY-MARKER")
+        buttons["查找"].invoke()
+        self.assertIn("early-marker", text.get("1.0", "end-1c"))
+        console.append("new-live-output")
+        self.assertNotIn("new-live-output", text.get("1.0", "end-1c"))
+
+    def test_expanded_search_highlights_unicode_after_supplementary_characters(self):
+        from tkinter import ttk
+        console = self.console
+        console.begin()
+        console.append("🙂🙂目标字符")
+        console.expand()
+        bar = console._expanded.winfo_children()[0]
+        search = next(w for w in bar.winfo_children() if type(w) is ttk.Entry)
+        search.insert(0, "目标字符")
+        button = next(w for w in bar.winfo_children() if isinstance(w, ttk.Button) and str(w.cget("text")) == "查找")
+        button.invoke()
+        ranges = console._expanded_text.tag_ranges("match")
+        self.assertEqual("目标字符", console._expanded_text.get(*ranges))
 
     def test_wps_error_includes_detailed_traceback_in_shared_console(self):
         from toolbox.runtime import load_module

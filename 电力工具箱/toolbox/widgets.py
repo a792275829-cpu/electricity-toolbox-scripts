@@ -167,7 +167,7 @@ class ToolPage(ttk.Frame):
             self._finish_snapshot(snapshot, callback)
         self._schedule_poll()
 
-    def _drain_log_queue(self, *, limit: int | None = None) -> None:
+    def _drain_log_queue(self, *, limit: int | None = None, render: bool = True) -> None:
         chunks: list[str] = []
         size = 0
         while limit is None or (len(chunks) < limit and size < 64_000):
@@ -179,7 +179,7 @@ class ToolPage(ttk.Frame):
                 break
         if not chunks:
             return
-        self.log_console.append("".join(chunks))
+        self.log_console.append("".join(chunks), render=render)
 
     def clear_log(self) -> None:
         self._drain_log_queue()
@@ -299,6 +299,10 @@ class ToolPage(ttk.Frame):
         )
 
     def destroy(self) -> None:
+        # The app has stopped task producers before destroying pages. Persist
+        # their queued tail without rebuilding either log view during shutdown.
+        while not self._log_queue.empty():
+            self._drain_log_queue(limit=200, render=False)
         self.progress.stop()
         if self._poll_after_id is not None:
             try:
