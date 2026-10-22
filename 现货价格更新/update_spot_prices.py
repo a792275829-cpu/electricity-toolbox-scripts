@@ -29,7 +29,9 @@ from toolbox_auth_loader import load_login_module
 from toolbox_dates import parse_date_input
 from toolbox_credentials import apply_credentials
 from toolbox_excel_read import read_cell_snapshots
-from toolbox_workbook_commit import commit_workbooks
+from toolbox_workbook_commit import (
+    FileFingerprint, assert_workbook_unchanged, commit_workbooks, workbook_fingerprint,
+)
 
 BASE_URL = "https://xhxt.chng.com.cn"
 APP_URL = f"{BASE_URL}/gdfire/PrivateDataManageCE/TradeResult"
@@ -97,6 +99,7 @@ class DateExpectation:
 class PreparedWorkbook:
     original: Path
     temporary: Path
+    source_fingerprint: FileFingerprint
     expectations: tuple[CellExpectation, ...]
     updated_dates: tuple[date, ...]
     skipped_dates: tuple[date, ...]
@@ -817,6 +820,7 @@ def prepare_workbook(prices: TargetPrices, *, overwrite: bool) -> PreparedWorkbo
     if path.suffix.lower() != ".xlsx":
         raise ValueError(f"仅支持 .xlsx 工作簿：{path}")
 
+    source_fingerprint = workbook_fingerprint(path)
     temporary = path.with_name(f".{path.stem}.{uuid.uuid4().hex}.tmp.xlsx")
     with warnings.catch_warnings():
         warnings.filterwarnings(
@@ -861,6 +865,7 @@ def prepare_workbook(prices: TargetPrices, *, overwrite: bool) -> PreparedWorkbo
             epoch=epoch,
         )
         verify_workbook(temporary, expectations, date_expectations)
+        assert_workbook_unchanged(path, source_fingerprint)
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
@@ -870,6 +875,7 @@ def prepare_workbook(prices: TargetPrices, *, overwrite: bool) -> PreparedWorkbo
     return PreparedWorkbook(
         original=path,
         temporary=temporary,
+        source_fingerprint=source_fingerprint,
         expectations=expectations,
         updated_dates=tuple(sorted(set(day_updated + real_updated))),
         skipped_dates=tuple(sorted(set(day_skipped + real_skipped))),

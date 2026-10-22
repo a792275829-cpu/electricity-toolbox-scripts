@@ -50,9 +50,9 @@ def load_login_module(
         raise
 
     state_dir = data_path(state_dir)
+    state_dir.mkdir(parents=True, exist_ok=True)
     target_state = state_dir / "auth_state.json"
     if copy_initial_state:
-        state_dir.mkdir(parents=True, exist_ok=True)
         source_state = module.AUTH_STATE_PATH
         if not target_state.exists() and source_state.is_file():
             descriptor, temporary_name = tempfile.mkstemp(prefix=".auth_state.", dir=state_dir)

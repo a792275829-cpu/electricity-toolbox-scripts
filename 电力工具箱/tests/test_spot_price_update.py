@@ -23,6 +23,32 @@ class DummyAuth:
 
 
 class SpotPriceUpdateTests(unittest.TestCase):
+    def test_commit_rejects_external_save_without_overwriting_prices(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "归湖.xlsx"
+            day = date(2026, 8, 30)
+            self._build_fixture(path, day)
+            target = self.module.default_targets(path, Path("鮀莲.xlsx"))[0]
+            prices = self.module.TargetPrices(target, "company", "unit", "name",
+                {day: (300.0,) * 24}, {day: (400.0,) * 24})
+            prepared = self.module.prepare_workbook(prices, overwrite=True)
+            book = openpyxl.load_workbook(path)
+            book[self.module.DAY_AHEAD_SHEET]["B2"] = 999
+            book.save(path)
+            book.close()
+            original = path.read_bytes()
+            with self.assertRaisesRegex(RuntimeError, "工作簿被修改"):
+                self.module.commit_prepared_workbooks((prepared,), create_backup=False)
+            self.assertEqual(path.read_bytes(), original)
+            saved = openpyxl.load_workbook(path)
+            try:
+                self.assertEqual(saved[self.module.DAY_AHEAD_SHEET]["B2"].value, 999)
+                self.assertEqual(saved[self.module.DAY_AHEAD_SHEET]["B2"].number_format, "0.0000")
+                self.assertIsNone(saved[self.module.REAL_TIME_SHEET]["B2"].value)
+            finally:
+                saved.close()
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.paths = ToolPaths(Path(__file__).resolve().parents[2])

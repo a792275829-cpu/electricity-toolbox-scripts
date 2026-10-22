@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+from contextlib import ExitStack
 from dataclasses import asdict
 import json
 import os
@@ -20,6 +21,32 @@ from toolbox.runtime import load_module
 
 
 class CredentialStoreTests(unittest.TestCase):
+    def test_empty_desktop_data_root_has_independent_working_locks(self):
+        from toolbox_auth_loader import load_login_module
+
+        tools = ("市场表更新", "现货价格更新", "交易系统信息更新", "功率调整收益统计表更新",
+                 "风力预测截图", "广东运行日报PDF解析", "每日生产经营情况汇报自动生成工具/scripts")
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {
+            "TOOLBOX_CODE_ROOT": str(ROOT), "TOOLBOX_DATA_ROOT": directory,
+        }):
+            modules = [load_login_module(ROOT, module_name=f"fresh_desktop_auth_{index}",
+                state_dir=ROOT / tool) for index, tool in enumerate(tools)]
+            # Direct users of the two lock implementations must also work on a new Mac.
+            modules.extend(load_module(f"fresh_direct_auth_{index}", ROOT / script) for index, script in enumerate((
+                "上网电量抓取/export_online_energy.py", "集团每日上传/upload_daily_report.py")))
+            paths = [(m.AUTH_STATE_PATH, m.AUTH_LOCK_PATH, m.PROFILE_DIR) for m in modules]
+            self.assertEqual(len(set(paths)), len(modules))
+            with ExitStack() as locks:
+                for module in modules:
+                    locks.enter_context(module.AuthStateLock(timeout_seconds=0))
+                    self.assertTrue(module.AUTH_LOCK_PATH.is_file())
+                    self.assertTrue(module.AUTH_LOCK_PATH.resolve().is_relative_to(Path(directory).resolve()))
+            for module in modules:
+                self.assertFalse(module.AUTH_LOCK_PATH.exists())
+                with module.AuthStateLock(timeout_seconds=0):
+                    self.assertTrue(module.AUTH_LOCK_PATH.exists())
+                self.assertFalse(module.AUTH_LOCK_PATH.exists())
+
     def test_migrate_defaults_and_save_without_changing_legacy_options(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

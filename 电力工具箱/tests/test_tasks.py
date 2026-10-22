@@ -36,6 +36,119 @@ class EventBufferTests(unittest.TestCase):
 
 
 class ProcessRunnerTests(unittest.TestCase):
+    def test_cancel_reaps_orphans_and_children_ignoring_sigterm(self) -> None:
+        import os
+        import signal
+        import subprocess
+        import tempfile
+        from toolbox.tasks import CancellationToken, ProcessRunner, TaskCancelled
+
+        for parent_exits, ignore_term in ((True, False), (True, True), (False, True)):
+            with self.subTest(parent_exits=parent_exits, ignore_term=ignore_term), tempfile.TemporaryDirectory() as directory:
+                pid_file = Path(directory) / "child.pid"
+                child_code = (
+                    "import os,signal,time; from pathlib import Path; "
+                    + ("signal.signal(signal.SIGTERM,signal.SIG_IGN); " if ignore_term else "")
+                    + f"Path({str(pid_file)!r}).write_text(str(os.getpid())); time.sleep(30)"
+                )
+                code = "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c'," + repr(child_code) + "]);"
+                if not parent_exits:
+                    code += "time.sleep(30)"
+                token = CancellationToken()
+                runner = ProcessRunner(terminate_timeout=0.15)
+                errors = []
+                thread = threading.Thread(target=self._run_captured, args=(runner, code, token, errors), daemon=True)
+                unrelated = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True)
+                process = None
+                try:
+                    thread.start()
+                    deadline = time.monotonic() + 3
+                    while (not pid_file.exists() or not pid_file.read_text()) and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertTrue(pid_file.exists())
+                    child_pid = int(pid_file.read_text())
+                    process = runner.active_process
+                    self.assertIsNotNone(process)
+                    if parent_exits:
+                        self.assertEqual(process.wait(timeout=3), 0)
+                        self.assertTrue(thread.is_alive(), "child must still hold the output pipe")
+                    token.cancel()
+                    thread.join(timeout=3)
+                    self.assertFalse(thread.is_alive())
+                    self.assertEqual(len(errors), 1)
+                    self.assertIsInstance(errors[0], TaskCancelled)
+                    self.assertIsNone(runner.active_process)
+                    self.assertFalse(any(t.name == f"toolbox-output-{process.pid}" for t in threading.enumerate()))
+                    self.assertIsNone(unrelated.poll())
+                    deadline = time.monotonic() + 2
+                    while time.monotonic() < deadline:
+                        try:
+                            os.kill(child_pid, 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(.01)
+                    else:
+                        self.fail("owned child survived cancellation")
+                finally:
+                    if process is not None:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    token.cancel()
+                    thread.join(timeout=3)
+                    unrelated.kill()
+                    unrelated.wait(timeout=3)
+
+    def test_cancel_stops_output_reader_when_detached_child_holds_pipe(self):
+        import os
+        import signal
+        import tempfile
+        from toolbox.tasks import CancellationToken, ProcessRunner, TaskCancelled
+
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "detached.pid"
+            code = (
+                "import subprocess,sys; from pathlib import Path; "
+                "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],start_new_session=True); "
+                f"Path({str(pid_file)!r}).write_text(str(p.pid))"
+            )
+            runner, token, errors = ProcessRunner(terminate_timeout=.15), CancellationToken(), []
+            thread = threading.Thread(target=self._run_captured, args=(runner, code, token, errors), daemon=True)
+            thread.start()
+            try:
+                deadline = time.monotonic() + 3
+                while (not pid_file.exists() or not pid_file.read_text()) and time.monotonic() < deadline:
+                    time.sleep(.01)
+                process = runner.active_process
+                self.assertIsNotNone(process)
+                process.wait(timeout=3)
+                token.cancel()
+                thread.join(timeout=3)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(len(errors), 1)
+                self.assertIsInstance(errors[0], TaskCancelled)
+                self.assertFalse(any(t.name == f"toolbox-output-{process.pid}" for t in threading.enumerate()))
+                # A child which creates its own session is outside the owned group.
+                os.kill(int(pid_file.read_text()), 0)
+            finally:
+                if pid_file.exists() and pid_file.read_text():
+                    try:
+                        os.killpg(int(pid_file.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                token.cancel()
+                thread.join(timeout=3)
+
+    def test_output_preserves_split_utf8_newlines_and_final_partial_line(self):
+        from toolbox.tasks import CancellationToken, ProcessRunner
+        payload = "甲\r\n乙\r末".encode("utf-8")
+        code = f"import os,time; data={payload!r}; [(os.write(1,bytes([b])),time.sleep(.002)) for b in data]"
+        output = []
+        ProcessRunner().run([sys.executable, "-c", code], cwd=Path.cwd(), env=None,
+            token=CancellationToken(), on_output=output.append)
+        self.assertEqual(output, ["甲\n", "乙\n", "末"])
+
     def test_parallel_processes_have_isolated_input_and_cancellation(self) -> None:
         from toolbox.tasks import CancellationToken, ProcessRunner, TaskCancelled
 

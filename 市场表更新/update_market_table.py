@@ -27,6 +27,7 @@ if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
 from toolbox_auth_loader import load_login_module
 from toolbox_excel_read import read_cell_snapshots
+from toolbox_workbook_commit import assert_workbook_unchanged, workbook_commit_lock, workbook_fingerprint
 
 ONLINE_SCRIPTS_DIR = WORKSPACE / "上网电量抓取"
 REPORT_SCRIPTS_DIR = WORKSPACE / "每日生产经营情况汇报自动生成工具" / "scripts"
@@ -232,12 +233,15 @@ class WorkbookWriteSession:
     def __init__(self, path: Path | str):
         self.path = Path(path).expanduser().resolve()
         self.workbook = None
+        self.source_fingerprint = None
         self.date_rows: dict[tuple[str, date], int] = {}
         self.expected_cells: dict[tuple[str, str], tuple[Any, str]] = {}
 
     def get_workbook(self):
         if self.workbook is None:
+            self.source_fingerprint = workbook_fingerprint(self.path)
             self.workbook = load_workbook_checked(self.path)
+            assert_workbook_unchanged(self.path, self.source_fingerprint)
         return self.workbook
 
     def record(self, cell) -> None:
@@ -271,7 +275,9 @@ class WorkbookWriteSession:
                         )
             finally:
                 saved.close()
-            os.replace(temporary_path, self.path)
+            with workbook_commit_lock((self.path,)):
+                assert_workbook_unchanged(self.path, self.source_fingerprint)
+                os.replace(temporary_path, self.path)
         except PermissionError as exc:
             raise workbook_permission_error(self.path) from exc
         finally:

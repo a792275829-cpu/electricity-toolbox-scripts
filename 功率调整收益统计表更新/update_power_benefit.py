@@ -34,7 +34,9 @@ from toolbox_dates import parse_date_input
 from toolbox_excel_read import read_cell_snapshots
 from toolbox_native_excel import load_value_workbook
 from toolbox_workbook_inspection import load_inspection_pair, UnsupportedInspection
-from toolbox_workbook_commit import commit_workbooks
+from toolbox_workbook_commit import (
+    FileFingerprint, assert_workbook_unchanged, commit_workbooks, workbook_fingerprint,
+)
 
 BASE_URL = "https://xhxt.chng.com.cn"
 APP_URL = f"{BASE_URL}/gdfire/PrivateDataManageCE/SpotBasicInfoSubmit"
@@ -88,6 +90,7 @@ class PreparedWorkbook:
     original: Path
     temporary: Path
     expectations: tuple[tuple[CellTarget, float], ...]
+    source_fingerprint: FileFingerprint
 
 
 def log(message: str) -> None:
@@ -503,6 +506,7 @@ def verify_workbook(path: Path, prepared: PreparedWorkbook) -> None:
 
 
 def prepare_workbook(plan: WorkbookPlan, series: dict[date, dict[str, tuple[float, ...]]]) -> PreparedWorkbook:
+    source_fingerprint = workbook_fingerprint(plan.path)
     if fingerprint(plan.path) != plan.fingerprint:
         raise RuntimeError(f"抓取期间工作簿被修改，停止写入：{plan.path}")
     expectations = []
@@ -518,7 +522,7 @@ def prepare_workbook(plan: WorkbookPlan, series: dict[date, dict[str, tuple[floa
         expectations.append((cell, value))
         changes.setdefault(cell.sheet, {})[cell.coordinate] = value
     temporary = plan.path.with_name(f".{plan.path.stem}.{uuid.uuid4().hex}.tmp.xlsx")
-    prepared = PreparedWorkbook(plan.path, temporary, tuple(expectations))
+    prepared = PreparedWorkbook(plan.path, temporary, tuple(expectations), source_fingerprint)
     try:
         sheet_paths = shared_spot().xlsx_sheet_paths(plan.path)
         part_changes = {sheet_paths[sheet]: values for sheet, values in changes.items()}
@@ -534,6 +538,7 @@ def prepare_workbook(plan: WorkbookPlan, series: dict[date, dict[str, tuple[floa
         changed_parts = set(part_changes) | ({"xl/workbook.xml"} if expectations else set())
         shared_spot().verify_package_preservation(plan.path, temporary, changed_parts)
         verify_workbook(temporary, prepared)
+        assert_workbook_unchanged(plan.path, source_fingerprint)
         return prepared
     except BaseException:
         temporary.unlink(missing_ok=True)

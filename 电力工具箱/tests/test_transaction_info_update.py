@@ -14,6 +14,33 @@ from toolbox.runtime import ToolPaths, load_module
 
 
 class TransactionInfoUpdateTests(unittest.TestCase):
+    def test_commit_rejects_external_save_and_preserves_other_sheet(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "transaction.xlsx"
+            self._build_fixture(path)
+            day = date(2026, 9, 11)
+            pair = self.module.build_daily_load_pair(day, self._payload(day), self._payload(day - timedelta(days=3)))
+            prepared = self.module.prepare_workbook(path, (pair,))
+            book = openpyxl.load_workbook(path)
+            book["保留工作表"]["A1"] = "外部保存"
+            book["保留工作表"]["B1"] = 0.125
+            book["保留工作表"]["B1"].number_format = "0.00%"
+            book.save(path)
+            book.close()
+            original = path.read_bytes()
+            with self.assertRaisesRegex(RuntimeError, "工作簿被修改"):
+                self.module.commit_prepared_workbook(prepared, create_backup=False)
+            self.assertEqual(path.read_bytes(), original)
+            saved = openpyxl.load_workbook(path)
+            try:
+                self.assertEqual(saved["保留工作表"]["A1"].value, "外部保存")
+                self.assertEqual(saved["保留工作表"]["B1"].value, 0.125)
+                self.assertEqual(saved["保留工作表"]["B1"].number_format, "0.00%")
+                self.assertIsNone(saved["Sheet1"]["C8"].value)
+            finally:
+                saved.close()
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
     def test_tail_streaming_keeps_latest_group_and_rejects_truncated_labels(self) -> None:
         from openpyxl.worksheet._read_only import ReadOnlyWorksheet
         with tempfile.TemporaryDirectory() as directory:

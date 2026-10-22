@@ -126,6 +126,7 @@ class AuthStateLock:
         self.acquired = False
 
     def __enter__(self) -> "AuthStateLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         started = time.time()
         notified = False
         while True:

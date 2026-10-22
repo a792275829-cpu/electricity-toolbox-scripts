@@ -30,7 +30,9 @@ from toolbox_dates import parse_date_input
 from toolbox_credentials import apply_credentials
 from toolbox_excel_read import read_cell_snapshots
 from toolbox_native_excel import load_value_workbook
-from toolbox_workbook_commit import commit_workbooks
+from toolbox_workbook_commit import (
+    FileFingerprint, assert_workbook_unchanged, commit_workbooks, workbook_fingerprint,
+)
 
 BASE_URL = "https://xhxt.chng.com.cn"
 APP_URL = f"{BASE_URL}/gdfire/PublicDataManage/SpotReport"
@@ -88,6 +90,7 @@ class WorkbookTail:
 class PreparedWorkbook:
     original: Path
     temporary: Path
+    source_fingerprint: FileFingerprint
     first_row: int
     last_row: int
     pairs: tuple[DailyLoadPair, ...]
@@ -602,6 +605,7 @@ def prepare_workbook(path: Path, pairs: Iterable[DailyLoadPair]) -> PreparedWork
     pair_tuple = tuple(pairs)
     if not pair_tuple:
         raise ValueError("没有可写入的日期数据。")
+    source_fingerprint = workbook_fingerprint(original)
     tail = inspect_workbook_tail(original)
     expected_start = tail.day_ahead_date + timedelta(days=1)
     if pair_tuple[0].day_ahead_date != expected_start:
@@ -626,11 +630,13 @@ def prepare_workbook(path: Path, pairs: Iterable[DailyLoadPair]) -> PreparedWork
         prepared = PreparedWorkbook(
             original=original,
             temporary=temporary,
+            source_fingerprint=source_fingerprint,
             first_row=first_row,
             last_row=last_row,
             pairs=pair_tuple,
         )
         verify_workbook(temporary, prepared)
+        assert_workbook_unchanged(original, source_fingerprint)
         return prepared
     except Exception:
         temporary.unlink(missing_ok=True)

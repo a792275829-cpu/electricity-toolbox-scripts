@@ -12,6 +12,32 @@ from toolbox.runtime import load_module
 
 
 class MarketTableBatchWriteTests(unittest.TestCase):
+    def test_external_save_during_session_is_preserved(self) -> None:
+        module = load_module("market_table_external_save_test",
+            Path(__file__).resolve().parents[2] / "市场表更新/update_market_table.py")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "market.xlsx"
+            book = Workbook()
+            book.active["A1"] = "原值"
+            book.save(path)
+            book.close()
+            session = module.WorkbookWriteSession(path)
+            updated = session.get_workbook()
+            updated.active["B1"] = 42
+            session.record(updated.active["B1"])
+            external = load_workbook(path)
+            external.active["A1"] = "外部保存"
+            external.save(path)
+            external.close()
+            original = path.read_bytes()
+            try:
+                with self.assertRaisesRegex(RuntimeError, "工作簿被修改"):
+                    session.commit()
+            finally:
+                updated.close()
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
     def test_readback_format_mismatch_preserves_original(self) -> None:
         module = load_module(
             "market_table_stream_verification_test",

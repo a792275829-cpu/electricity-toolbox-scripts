@@ -4,6 +4,10 @@ import subprocess
 import threading
 import os
 import signal
+import codecs
+import io
+import select
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
@@ -51,24 +55,51 @@ class ProcessRunner:
             start_new_session=True,
             close_fds=True, bufsize=1,
         )
+        # start_new_session makes this PID the process-group ID. Remember it
+        # while the leader exists, so cancellation can also reap orphaned children.
+        process._toolbox_process_group = process.pid
         with self._lock:
             self._active_process = process
 
+        stop_reader = threading.Event()
+
         def read_stdout() -> None:
             assert process.stdout is not None
+            descriptor = process.stdout.fileno()
+            os.set_blocking(descriptor, False)
+            decoder = io.IncrementalNewlineDecoder(
+                codecs.getincrementaldecoder("utf-8")(errors="replace"), translate=True,
+            )
+            pending = ""
             try:
-                for line in process.stdout:
-                    lines.put(line)
+                while not stop_reader.is_set():
+                    if not select.select([descriptor], [], [], 0.05)[0]:
+                        continue
+                    try:
+                        chunk = os.read(descriptor, 64 * 1024)
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        break
+                    pending += decoder.decode(chunk)
+                    parts = pending.split("\n")
+                    pending = parts.pop()
+                    for line in parts:
+                        lines.put(line + "\n")
             finally:
+                pending += decoder.decode(b"", final=True)
+                if pending:
+                    lines.put(pending)
                 lines.put(None)
 
-        reader = threading.Thread(target=read_stdout, daemon=True)
+        reader = threading.Thread(target=read_stdout, name=f"toolbox-output-{process.pid}", daemon=True)
         reader.start()
         stream_closed = False
         try:
             while process.poll() is None or not stream_closed:
-                if token.cancelled and process.poll() is None:
+                if token.cancelled:
                     self.terminate(process)
+                    raise TaskCancelled("任务已取消")
                 try:
                     line = lines.get(timeout=0.05)
                 except Empty:
@@ -86,17 +117,32 @@ class ProcessRunner:
         finally:
             if process.poll() is None:
                 self.terminate(process)
+            stop_reader.set()
+            reader.join(timeout=1)
             if process.stdout is not None:
                 process.stdout.close()
-            reader.join(timeout=1)
             with self._lock:
                 self._active_process = None
 
     def terminate(self, process: subprocess.Popen[str]) -> None:
+        deadline = time.monotonic() + self.terminate_timeout
         try:
             self._signal_owned_process(process, signal.SIGTERM)
-            process.wait(timeout=self.terminate_timeout)
+            process.wait(timeout=max(0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
+            pass
+        except OSError:
+            pass
+        group = getattr(process, "_toolbox_process_group", None)
+        if group is not None:
+            while time.monotonic() < deadline:
+                try:
+                    os.killpg(group, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.01)
+        try:
+            # The leader may already be gone while a child ignored SIGTERM.
             self._signal_owned_process(process, signal.SIGKILL)
             process.wait(timeout=self.terminate_timeout)
         except OSError:
@@ -105,6 +151,13 @@ class ProcessRunner:
     @staticmethod
     def _signal_owned_process(process: subprocess.Popen[str], sig: signal.Signals) -> None:
         """Signal only the session created for this child, never the caller's terminal group."""
+        owned_group = getattr(process, "_toolbox_process_group", None)
+        if owned_group is not None:
+            try:
+                os.killpg(owned_group, sig)
+            except ProcessLookupError:
+                pass
+            return
         try:
             process_group = os.getpgid(process.pid)
         except ProcessLookupError:

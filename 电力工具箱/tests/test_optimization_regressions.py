@@ -48,9 +48,10 @@ class OptimizationRegressionTests(unittest.TestCase):
         self.assertEqual(energy[2].value, 0)
 
     def test_commit_restores_all_files_when_post_replace_verification_fails(self):
-        commit_workbooks = load_module(
+        commit_module = load_module(
             "workbook_commit_regression", ROOT / "toolbox_workbook_commit.py"
-        ).commit_workbooks
+        )
+        commit_workbooks = commit_module.commit_workbooks
         with tempfile.TemporaryDirectory() as directory:
             prepared = []
             for index in range(2):
@@ -58,7 +59,8 @@ class OptimizationRegressionTests(unittest.TestCase):
                 temporary = Path(directory) / f"{index}.tmp.xlsx"
                 original.write_bytes(b"original")
                 temporary.write_bytes(b"updated")
-                prepared.append(SimpleNamespace(original=original, temporary=temporary))
+                prepared.append(SimpleNamespace(original=original, temporary=temporary,
+                    source_fingerprint=commit_module.workbook_fingerprint(original)))
 
             def verify(path, item):
                 if item is prepared[1]:
