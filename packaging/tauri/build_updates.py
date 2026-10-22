@@ -33,9 +33,14 @@ def fetch_asset(release, asset, directory):
     name = asset['name']
     if Path(name).name != name:
         raise UpdateError('发布附件名称无效')
-    subprocess.run(['gh', 'release', 'download', release['tag_name'], '--repo', REPOSITORY,
-                    '--pattern', name, '--dir', str(directory)], check=True)
     path = directory / name
+    cached = ROOT / 'dist' / name
+    if (cached.is_file() and cached.stat().st_size == asset['size']
+            and 'sha256:' + digest(cached) == asset.get('digest')):
+        shutil.copy2(cached, path)
+    else:
+        subprocess.run(['gh', 'release', 'download', release['tag_name'], '--repo', REPOSITORY,
+                        '--pattern', name, '--dir', str(directory)], check=True)
     if path.stat().st_size != asset['size'] or 'sha256:' + digest(path) != asset.get('digest'):
         raise UpdateError(f'历史发布附件校验失败：{name}')
     return path

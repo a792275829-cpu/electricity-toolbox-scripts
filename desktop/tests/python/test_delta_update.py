@@ -269,5 +269,30 @@ class DeltaTests(unittest.TestCase):
         index_file.write_text('{}')
         with self.assertRaises(ValueError):validate(data,index_file)
 
+    def test_history_cache_requires_exact_remote_size_and_digest(self):
+        from build_updates import fetch_asset
+        cache = self.root / 'dist'
+        cache.mkdir()
+        row = asset('historical.dmg', b'valid history', '1.0.2')
+        cached = cache / row['name']
+        cached.write_bytes(b'valid history')
+        target = self.root / 'download'
+        target.mkdir()
+        release = dict(tag_name='v1.0.2')
+        with patch('build_updates.ROOT', self.root), patch('build_updates.subprocess.run') as download:
+            result = fetch_asset(release, row, target)
+            self.assertEqual(result.read_bytes(), b'valid history')
+            download.assert_not_called()
+            result.unlink()
+            for invalid in (b'wrong history', b'short'):
+                cached.write_bytes(invalid)
+                def fetch(*args, **kwargs):
+                    (target / row['name']).write_bytes(b'valid history')
+                download.side_effect = fetch
+                result = fetch_asset(release, row, target)
+                self.assertEqual(result.read_bytes(), b'valid history')
+                result.unlink()
+            self.assertEqual(download.call_count, 2)
+
 
 if __name__=='__main__':unittest.main()
