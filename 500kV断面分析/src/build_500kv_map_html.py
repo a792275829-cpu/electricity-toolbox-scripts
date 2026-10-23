@@ -691,7 +691,6 @@ def _render_html(data: dict[str, object]) -> str:
     diagram_mode = data.get("metadata", {}).get("coordinate_mode") == "wiring-diagram"
     artifact_title = "广东电网 500kV 接线拓扑与电价分析" if diagram_mode else "广东省电网 500kV 节点断面地图"
     map_label = "广东500kV接线拓扑与节点电价图" if diagram_mode else "广东500kV节点断面地图"
-    map_layer_title = "接线拓扑" if diagram_mode else "空间分布"
     if diagram_mode:
         substrate = f"""
             <defs>
@@ -740,24 +739,29 @@ def _render_html(data: dict[str, object]) -> str:
     }}
     body[data-theme="light"] {{ background: #f2f5f9; }}
     .app {{
-      min-height: 100vh;
+      min-height: calc(100dvh - 54px);
       display: grid;
       grid-template-columns: minmax(0, 1fr) 380px;
     }}
     .map-pane {{
-      padding: 14px 18px 18px;
+      padding: 12px 14px 14px;
       min-width: 0;
+      height:calc(100dvh - 54px);
+      display:flex;
+      flex-direction:column;
+      gap:10px;
     }}
     .title-row {{
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 10px;
+      gap: 12px;
+      flex-shrink:0;
+      margin:0;
     }}
     h1 {{
       margin: 0;
-      font-size: clamp(24px, 2.2vw, 34px);
+      font-size: clamp(20px, 1.6vw, 26px);
       line-height: 1.2;
       letter-spacing: -.03em;
       color: var(--navy);
@@ -782,14 +786,14 @@ def _render_html(data: dict[str, object]) -> str:
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 10px 12px;
+      padding: 8px 10px;
+      flex-wrap:wrap;
+      flex-shrink:0;
       border-bottom: 1px solid var(--line);
       background: color-mix(in srgb, var(--panel) 92%, transparent);
       backdrop-filter: blur(16px);
     }}
-    .map-toolbar strong {{ font-size: 13px; color: var(--navy); }}
-    .map-hint {{ color: var(--muted); font-size: 12px; }}
-    .layer-toggles {{ display: flex; gap: 6px; flex-wrap: wrap; }}
+    .layer-toggles {{ display:flex; align-items:center; flex:1; gap:6px; flex-wrap:wrap; }}
     .node-search {{
       width: 190px; min-height: 32px; border:1px solid var(--line); border-radius:8px;
       padding:0 10px; color:var(--ink); background:var(--soft); outline:none; font-size:12px;
@@ -809,20 +813,12 @@ def _render_html(data: dict[str, object]) -> str:
       overflow: hidden;
       position: relative;
       min-height: 0;
+      flex:1;
+      display:flex;
+      flex-direction:column;
       box-shadow: var(--shadow);
     }}
-    .zoom-controls {{
-      position: absolute;
-      top: 62px;
-      left: 12px;
-      display: flex;
-      gap: 6px;
-      padding: 6px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: color-mix(in srgb, var(--panel) 90%, transparent);
-      z-index: 3;
-    }}
+    .zoom-controls {{ display:flex; align-items:center; gap:6px; flex-shrink:0; }}
     .zoom-controls button {{
       width: 34px;
       height: 34px;
@@ -846,8 +842,10 @@ def _render_html(data: dict[str, object]) -> str:
       background: #081523;
     }}
     #map {{
-      height:calc(100vh - 332px);
-      min-height:360px;
+      height:0;
+      flex:1 1 0;
+      min-height:0;
+      max-height:none;
       cursor: default;
       touch-action: none;
       overscroll-behavior: contain;
@@ -1055,8 +1053,8 @@ def _render_html(data: dict[str, object]) -> str:
     body[data-theme="light"] .label {{ fill:#243b4d; stroke:#fbfdff; stroke-width:5px; }}
     body[data-theme="light"] .label-leader {{ stroke:#6f8799; opacity:.72; }}
     body[data-theme="light"] .blocked-label {{ fill:#991b1b; stroke:#fff7f7; }}
-    .topology-timeline {{ padding:14px 18px; border-top:1px solid var(--line); background:var(--panel); }}
-    .topology-time-heading {{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }}
+    .topology-timeline {{ flex-shrink:0; padding:10px 14px; border-top:1px solid var(--line); background:var(--panel); }}
+    .topology-time-heading {{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:4px; }}
     .topology-time-heading strong {{ font-size:14px; }}
     .topology-time-controls {{ display:flex; align-items:center; gap:12px; }}
     .topology-time-controls button {{ min-width:44px; min-height:44px; border:1px solid var(--line); border-radius:8px; background:var(--soft); color:var(--ink); cursor:pointer; }}
@@ -1066,7 +1064,7 @@ def _render_html(data: dict[str, object]) -> str:
       border-left: 1px solid var(--line);
       padding: 20px;
       overflow: auto;
-      max-height: 100vh;
+      max-height: calc(100dvh - 54px);
       position: sticky;
       top: 0;
       box-shadow: -18px 0 48px rgba(0,0,0,.16);
@@ -1164,31 +1162,30 @@ def _render_html(data: dict[str, object]) -> str:
     }}
     .focus-mode .app {{ grid-template-columns: 1fr; }}
     .focus-mode .side {{ display:none; }}
-    .focus-mode #map {{ height:calc(100vh - 332px); min-height:300px; }}
     .pulse {{ animation:pulse 1.5s ease-in-out infinite; }}
     @keyframes pulse {{ 50% {{ filter:drop-shadow(0 0 9px var(--accent)); }} }}
     @media (prefers-reduced-motion: reduce) {{ *,*::before,*::after {{ animation:none!important; transition:none!important; }} }}
     .empty-list {{ padding: 22px 8px; color: var(--muted); font-size: 13px; text-align: center; }}
     @media (max-width: 920px) {{
       .app {{ grid-template-columns: 1fr; }}
-      .map-pane {{ padding: 16px; }}
+      .map-pane {{ padding:12px; height:auto; }}
       .side {{ border-left: 0; border-top: 1px solid var(--line); max-height: none; position: static; }}
       svg {{ height: 62vh; min-height: 480px; }}
-      #map {{ height:62vh; min-height:480px; }}
-      .map-shell {{ min-height: 0; }}
+      #map {{ flex:none; height:auto; aspect-ratio:1500 / 1020; min-height:0; max-height:none; }}
+      .map-shell {{ flex:none; min-height:0; }}
       .section-list {{ max-height: 280px; }}
     }}
     @media (max-width: 560px) {{
       .map-pane {{ padding: 12px; }}
-      .title-row {{ margin: 6px 2px 14px; }}
+      .title-row {{ margin:0; align-items:flex-start; }}
       .title-row {{ flex-direction:column; }}
       .header-actions {{ width:100%; justify-content:flex-start; }}
-      .map-toolbar {{ align-items: flex-start; flex-direction: column; }}
-      .node-search {{ width:min(100%, 220px); }}
-      .map-hint {{ display: none; }}
-      .zoom-controls {{ top: 96px; }}
+      .map-toolbar {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) 114px; gap:6px; }}
+      .layer-toggles {{ display:contents; }}
+      .zoom-controls {{ grid-column:4; grid-row:1; }}
+      .map-toolbar .toggle {{ min-width:0; padding:6px 4px; }}
+      .node-search {{ grid-column:1 / 4; width:100%; min-width:0; }}
       svg {{ height:78vw; min-height:300px; max-height:390px; }}
-      #map {{ height:78vw; min-height:300px; max-height:390px; }}
     }}
   </style>
   <style>{curve_css}</style>
@@ -1212,7 +1209,6 @@ def _render_html(data: dict[str, object]) -> str:
       </div>
       <div class="map-shell">
         <div class="map-toolbar">
-          <div><strong>{map_layer_title}</strong> <span class="map-hint">触控板双指移动 · 捏合缩放 · 鼠标滚轮缩放 · 点击节点查看详情</span></div>
           <div class="layer-toggles" aria-label="地图图层">
             <input class="node-search" id="nodeSearch" type="search" placeholder="搜索节点，Enter定位" aria-label="搜索节点">
             <button class="toggle" id="focusSelected" type="button">定位所选</button>
@@ -1220,6 +1216,11 @@ def _render_html(data: dict[str, object]) -> str:
             <button class="toggle" id="toggleLabels" type="button" aria-pressed="true">标签</button>
             <button class="toggle" id="toggleFlow" type="button" aria-pressed="true">潮流查看</button>
           </div>
+        <div class="zoom-controls" aria-label="地图缩放控制">
+          <button id="zoomIn" type="button" title="放大">+</button>
+          <button id="zoomOut" type="button" title="缩小">−</button>
+          <button id="zoomReset" type="button" title="重置">⌂</button>
+        </div>
         </div>
         <svg id="map" viewBox="0 0 {SVG_W} {SVG_H}" role="img" aria-label="{map_label}">
           <defs>
@@ -1227,8 +1228,9 @@ def _render_html(data: dict[str, object]) -> str:
               <path d="M 0 0 L 8 4 L 0 8 Z" fill="#087ca7"></path>
             </marker>
           </defs>
+          <g id="mapBackground">{substrate if diagram_mode else ''}</g>
           <g id="mapViewport">
-            {substrate}
+            {'' if diagram_mode else substrate}
             <g id="regions"></g>
             <g id="edges"></g>
             <g id="flowArrows"></g>
@@ -1237,11 +1239,7 @@ def _render_html(data: dict[str, object]) -> str:
             <g id="nodeLabels"></g>
           </g>
         </svg>
-        <div class="zoom-controls" aria-label="地图缩放控制">
-          <button id="zoomIn" type="button" title="放大">+</button>
-          <button id="zoomOut" type="button" title="缩小">−</button>
-          <button id="zoomReset" type="button" title="重置">⌂</button>
-        </div>
+
         <section class="topology-timeline" aria-label="24小时潮流方向时间轴">
           <div class="topology-time-heading"><strong title="按节点价差推断方向：低价到高价">24小时潮流方向</strong></div>
           <div class="topology-time-controls">
@@ -1343,6 +1341,8 @@ def _render_html(data: dict[str, object]) -> str:
     let selectedNodeName = '';
     let visibleSectionNames = new Set(sectionEdges.map(edge => edge.edge));
     let view = {{ scale: 1, x: 0, y: 0 }};
+    let autoFitMap = true;
+    const mapCanvas = {{width:{SVG_W}, height:{SVG_H}}};
     let drag = null;
     let trackpadUntil = 0;
     let gestureBaseScale = null;
@@ -1353,10 +1353,10 @@ def _render_html(data: dict[str, object]) -> str:
     const topologyTimeIndices = topologyTimes.map(time => DATA.time_headers.indexOf(time));
 
     function clampView() {{
-      const visibleMarginX = {SVG_W} * .12;
-      const visibleMarginY = {SVG_H} * .12;
-      view.x = Math.max(-{SVG_W} * view.scale + visibleMarginX, Math.min({SVG_W} - visibleMarginX, view.x));
-      view.y = Math.max(-{SVG_H} * view.scale + visibleMarginY, Math.min({SVG_H} - visibleMarginY, view.y));
+      const visibleMarginX = mapCanvas.width * .12;
+      const visibleMarginY = mapCanvas.height * .12;
+      view.x = Math.max(-{SVG_W} * view.scale + visibleMarginX, Math.min(mapCanvas.width - visibleMarginX, view.x));
+      view.y = Math.max(-{SVG_H} * view.scale + visibleMarginY, Math.min(mapCanvas.height - visibleMarginY, view.y));
     }}
 
     function applyView() {{
@@ -1366,10 +1366,11 @@ def _render_html(data: dict[str, object]) -> str:
 
     function zoomToScale(targetScale, clientX, clientY) {{
       const rect = mapSvg.getBoundingClientRect();
-      const px = ((clientX ?? (rect.left + rect.width / 2)) - rect.left) / rect.width * {SVG_W};
-      const py = ((clientY ?? (rect.top + rect.height / 2)) - rect.top) / rect.height * {SVG_H};
+      autoFitMap = false;
+      const px = ((clientX ?? (rect.left + rect.width / 2)) - rect.left) / rect.width * mapCanvas.width;
+      const py = ((clientY ?? (rect.top + rect.height / 2)) - rect.top) / rect.height * mapCanvas.height;
       const oldScale = view.scale;
-      const nextScale = Math.max(0.8, Math.min(5.2, targetScale));
+      const nextScale = Math.max(.2, Math.min(5.2, targetScale));
       view.x = px - (px - view.x) * (nextScale / oldScale);
       view.y = py - (py - view.y) * (nextScale / oldScale);
       view.scale = nextScale;
@@ -1382,8 +1383,9 @@ def _render_html(data: dict[str, object]) -> str:
 
     function panByWheel(deltaX, deltaY) {{
       const rect = mapSvg.getBoundingClientRect();
-      view.x -= deltaX / rect.width * {SVG_W};
-      view.y -= deltaY / rect.height * {SVG_H};
+      autoFitMap = false;
+      view.x -= deltaX / rect.width * mapCanvas.width;
+      view.y -= deltaY / rect.height * mapCanvas.height;
       applyView();
     }}
 
@@ -1400,8 +1402,8 @@ def _render_html(data: dict[str, object]) -> str:
     document.getElementById('zoomIn').addEventListener('click', () => zoomBy(1.28));
     document.getElementById('zoomOut').addEventListener('click', () => zoomBy(1 / 1.28));
     document.getElementById('zoomReset').addEventListener('click', () => {{
-      view = {{ scale: 1, x: 0, y: 0 }};
-      applyView();
+      autoFitMap = true;
+      fitMap();
     }});
     mapSvg.addEventListener('wheel', event => {{
       event.preventDefault();
@@ -1447,8 +1449,9 @@ def _render_html(data: dict[str, object]) -> str:
         mapSvg.classList.add('is-panning');
       }}
       const rect = mapSvg.getBoundingClientRect();
-      view.x = drag.startX + moveX / rect.width * {SVG_W};
-      view.y = drag.startY + moveY / rect.height * {SVG_H};
+      autoFitMap = false;
+      view.x = drag.startX + moveX / rect.width * mapCanvas.width;
+      view.y = drag.startY + moveY / rect.height * mapCanvas.height;
       applyView();
     }});
     mapSvg.addEventListener('pointerup', event => {{
@@ -1866,8 +1869,50 @@ def _render_html(data: dict[str, object]) -> str:
       }});
     }}
 
+    function resizeMapCanvas() {{
+      const rect = mapSvg.getBoundingClientRect();
+      if (!rect.width || !rect.height) return false;
+      const oldWidth = mapCanvas.width, oldHeight = mapCanvas.height;
+      mapCanvas.height = {SVG_H};
+      mapCanvas.width = rect.width / rect.height * mapCanvas.height;
+      mapSvg.setAttribute('viewBox', `0 0 ${{mapCanvas.width}} ${{mapCanvas.height}}`);
+      document.querySelectorAll('#mapBackground rect').forEach(rectangle => {{
+        rectangle.setAttribute('x', '0'); rectangle.setAttribute('y', '0');
+        rectangle.setAttribute('width', mapCanvas.width); rectangle.setAttribute('height', mapCanvas.height);
+        rectangle.setAttribute('rx', '0');
+      }});
+      if (!autoFitMap) {{
+        view.x += (mapCanvas.width - oldWidth) / 2;
+        view.y += (mapCanvas.height - oldHeight) / 2;
+      }}
+      return true;
+    }}
+    function fitMap() {{
+      if (!resizeMapCanvas() || !DATA.nodes.length) return;
+      const boxes = nodeLabelItems.map(item => item.label.getBBox()).filter(box => box.width && box.height);
+      const province = mapViewport.querySelector('.province');
+      if (province) boxes.push(province.getBBox());
+      const left = Math.min(...DATA.nodes.map(n => n.x - 12), ...boxes.map(b => b.x));
+      const right = Math.max(...DATA.nodes.map(n => n.x + 12), ...boxes.map(b => b.x + b.width));
+      const top = Math.min(...DATA.nodes.map(n => n.y - 12), ...boxes.map(b => b.y));
+      const bottom = Math.max(...DATA.nodes.map(n => n.y + 12), ...boxes.map(b => b.y + b.height));
+      const padding = 28;
+      const scale = Math.min(mapCanvas.width / Math.max(1, right - left + padding * 2), mapCanvas.height / Math.max(1, bottom - top + padding * 2));
+      view = {{scale, x:mapCanvas.width / 2 - (left + right) / 2 * scale, y:mapCanvas.height / 2 - (top + bottom) / 2 * scale}};
+      applyView();
+    }}
+    let mapResizeFrame;
+    const mapResizeObserver = new ResizeObserver(() => {{
+      cancelAnimationFrame(mapResizeFrame);
+      mapResizeFrame = requestAnimationFrame(() => {{
+        if (autoFitMap) fitMap();
+        else if (resizeMapCanvas()) applyView();
+      }});
+    }});
+    mapResizeObserver.observe(mapSvg);
     layoutNodeLabels();
-    if (document.fonts?.ready) document.fonts.ready.then(layoutNodeLabels);
+    fitMap();
+    if (document.fonts?.ready) document.fonts.ready.then(() => {{ layoutNodeLabels(); if (autoFitMap) fitMap(); }});
 
     function edgePriceStats(a, b) {{
       const comparable = DATA.time_headers.map((time, index) => {{
@@ -2092,9 +2137,10 @@ def _render_html(data: dict[str, object]) -> str:
       if (!node || !group) return;
       event.preventDefault();
       selectNode(node, group);
+      autoFitMap = false;
       view.scale = 2.6;
-      view.x = {SVG_W} / 2 - node.x * view.scale;
-      view.y = {SVG_H} / 2 - node.y * view.scale;
+      view.x = mapCanvas.width / 2 - node.x * view.scale;
+      view.y = mapCanvas.height / 2 - node.y * view.scale;
       applyView();
     }});
     document.getElementById('focusSelected').addEventListener('click', () => {{
@@ -2103,9 +2149,10 @@ def _render_html(data: dict[str, object]) -> str:
       if (!edge && !node) return;
       const centerX = node ? node.x : (edge.x1 + edge.x2) / 2;
       const centerY = node ? node.y : (edge.y1 + edge.y2) / 2;
+      autoFitMap = false;
       view.scale = 2.6;
-      view.x = {SVG_W} / 2 - centerX * view.scale;
-      view.y = {SVG_H} / 2 - centerY * view.scale;
+      view.x = mapCanvas.width / 2 - centerX * view.scale;
+      view.y = mapCanvas.height / 2 - centerY * view.scale;
       applyView();
       const target = node ? nodeGroups.get(node.name) : edgeLines.get(edge.edge);
       target?.classList.add('pulse');
@@ -2116,6 +2163,8 @@ def _render_html(data: dict[str, object]) -> str:
       document.body.classList.toggle('focus-mode', active);
       event.currentTarget.setAttribute('aria-pressed', String(active));
       event.currentTarget.textContent = active ? '退出沉浸' : '沉浸地图';
+      autoFitMap = true;
+      requestAnimationFrame(fitMap);
     }});
     document.addEventListener('keydown', event => {{
       if (event.key === 'Escape' && document.body.classList.contains('focus-mode')) document.getElementById('focusMode').click();

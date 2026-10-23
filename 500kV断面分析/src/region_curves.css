@@ -7,7 +7,7 @@
 .time-slider::-moz-range-thumb { width:18px; height:18px; border:0; border-radius:50%; background:var(--blue); }
 .time-slider-ticks { margin-top:24px; display:flex; justify-content:space-between; color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }
 [hidden] { display:none !important; }
-.analysis-views { display:flex; gap:8px; padding:12px 18px 0; }
+.analysis-views { display:flex; height:54px; gap:8px; padding:12px 18px 0; }
 .analysis-views button,.region-price button,.region-price select,.region-price input[type=search] {
   font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:9px 12px;
 }
