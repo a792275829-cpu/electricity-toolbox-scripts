@@ -48,10 +48,7 @@ VIEW_HTML = """
       <svg id="regionPriceChart" role="img" aria-label="所选节点分时电价曲线"></svg>
       <div class="curve-time"><label for="curveTime">时间：<strong id="curveTimeLabel"></strong></label>
         <input id="curveTime" type="range" min="0" value="0" aria-label="查看曲线时点"></div>
-      <div id="curveValues" class="curve-values" aria-label="所选时点电价与有效节点数"></div>
-      <p class="curve-note">市／大区汇总只计算已勾选节点：每个时点按有效节点等权平均，缺失值不按零计；无有效值时断开曲线。有效节点数变化时请结合读数比较。勾选上级会选择其全部节点。</p>
       <section class="curve-rankings" aria-label="节点日均价排序">
-        <p class="curve-rank-note">节点日均价：按当前已勾选节点在文件中的有效时点算术平均，单位元/MWh。缺失时点不算零，无数据节点不参与排序；隐藏曲线不改变节点选择、汇总分母或排名。有效时点不足96个时，请勿视作完整日均价。条形中线为零，负价向左、正价向右。</p>
         <div class="curve-ranking-grid"><section><h2>节点日均价前10</h2><ol id="curveRankHigh"></ol></section>
           <section><h2>节点日均价倒数前10</h2><ol id="curveRankLow"></ol></section></div>
       </section>

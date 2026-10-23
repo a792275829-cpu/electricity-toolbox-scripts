@@ -182,13 +182,14 @@
         const row=document.createElement('div');row.className='curve-tooltip-row';
         const label=document.createElement('span'),swatch=document.createElement('i');
         swatch.className='curve-swatch';swatch.style.borderColor=color(item.name);
-        label.append(swatch,document.createTextNode(item.name));
+        const name=$('curveMode').value==='nodes' ? item.name : `${item.name}（${item.counts[currentIndex]}/${item.total} 节点有效）`;
+        label.append(swatch,document.createTextNode(name));
         const value=document.createElement('b'),price=item.prices[currentIndex];
         value.textContent=finite(price) ? price.toFixed(4) : '暂无数据';row.append(label,value);tooltip.append(row);
       });
       const note=document.createElement('small');
       note.textContent=($('curveSort').value.startsWith('mean') ? '顺序按日均价，数值为当前时点价格。' : '') +
-        (items.length>limit ? `另有 ${items.length-limit} 条曲线，完整读数见下方。` : '');
+        (items.length>limit ? `另有 ${items.length-limit} 条曲线，可缩小选择范围查看。` : '');
       if (note.textContent) tooltip.append(note);
       tooltipKey=key;
     }
@@ -253,21 +254,6 @@
           fill:'var(--panel)',stroke:color(item.name),'stroke-width':2}));
       });
     }
-    const values=$('curveValues'); values.replaceChildren();
-    sortReadings(visibleSeries(),currentIndex,$('curveSort').value).forEach(item => {
-      const row=document.createElement('div'); row.className='curve-reading';
-      const label=document.createElement('span'), swatch=document.createElement('i');
-      swatch.className='curve-swatch'; swatch.style.borderColor=color(item.name);
-      if (dash(item.name)) swatch.style.borderTopStyle='dashed';
-      label.append(swatch,document.createTextNode(item.name));
-      const value=document.createElement('b'), price=item.prices[currentIndex];
-      value.textContent=finite(price) ? price.toFixed(2) : '暂无数据';
-      value.title='元/MWh'; row.append(label,value);
-      if ($('curveMode').value!=='nodes') {
-        const count=document.createElement('span'); count.textContent=`${item.counts[currentIndex]}/${item.total} 节点有效`;row.append(count);
-      }
-      values.append(row);
-    });
     if (lastPointer) showTooltip(lastPointer.x,lastPointer.y);
   }
   function draw() {

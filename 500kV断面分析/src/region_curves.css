@@ -26,14 +26,11 @@
 .curve-unavailable { color:var(--muted); font-size:12px; }
 .curve-controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .curve-controls select { flex:1; min-width:170px; max-width:380px; }
-#curveBasis,.curve-note { font-size:12px; color:var(--muted); }
+#curveBasis { font-size:12px; color:var(--muted); }
 .region-price #regionPriceChart { display:block; width:100%; height:auto; min-height:0; max-height:none; touch-action:pan-y; }
 .curve-time { display:flex; align-items:center; gap:18px; margin:10px 0 16px; }
 .curve-time label { white-space:nowrap; }
 .curve-time input { flex:1; min-width:0; }
-.curve-values { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); max-height:260px; overflow:auto; gap:6px 16px; }
-.curve-reading { display:flex; gap:8px; justify-content:space-between; align-items:baseline; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
-.curve-reading b { white-space:nowrap; font-variant-numeric:tabular-nums; }
 .curve-display-controls,.curve-legend-tools { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:12px 0; }
 .curve-display-controls label { display:flex; align-items:center; gap:6px; }
 .curve-legend-tools { font-size:12px; color:var(--muted); }
@@ -53,7 +50,6 @@ body[data-theme=dark] .curve-tooltip { background:rgba(12,23,38,.62); color:#e9f
 .curve-tooltip small { display:block; margin-top:8px; opacity:.75; }
 .curve-ranking-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; }
 .curve-rankings { border-top:1px solid var(--line); margin-top:24px; }
-.curve-rank-note { color:var(--muted); font-size:12px; }
 .curve-ranking-grid h2 { font-size:15px; margin:16px 0; }
 .curve-ranking-grid ol { list-style:none; padding:0; margin:0; }
 .curve-rank-row { margin-bottom:16px; }
@@ -75,7 +71,6 @@ body[data-theme=dark] .curve-tooltip { background:rgba(12,23,38,.62); color:#e9f
   .curve-picker,.curve-main { padding:14px; }
   .curve-controls { align-items:stretch; }
   .curve-controls label { width:100%; }
-  .curve-values { grid-template-columns:1fr; }
   .curve-ranking-grid { grid-template-columns:1fr; gap:8px; }
   .curve-display-controls select { max-width:100%; }
 }
