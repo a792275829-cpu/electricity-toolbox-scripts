@@ -77,6 +77,7 @@ def _recursive_prediction(
     blend_weight: float,
     prediction_dates: list[pd.Timestamp] | None = None,
     feature_options: dict[str, Any] | None = None,
+    prepared_features: tuple[pd.DataFrame, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     working = frame.copy()
     dates = prediction_dates or sorted(
@@ -84,7 +85,10 @@ def _recursive_prediction(
     )
     outputs = []
     for day in dates:
-        X, _, identity = build_features(working, **(feature_options or {}))
+        if len(dates) == 1 and prepared_features is not None:
+            X, identity = prepared_features
+        else:
+            X, _, identity = build_features(working, **(feature_options or {}))
         rows = identity["日期"].eq(day)
         model_prediction = predict_model(model, X.loc[rows])
         baseline = X.loc[rows, "price_lag_1d"].to_numpy(dtype=float)
@@ -193,7 +197,8 @@ def run_pipeline(
     final_train = training_indices(identity, y, target_day, months)
     final_model = fit_model(X.iloc[final_train], y.iloc[final_train], best_config)
     future = _recursive_prediction(
-        frame, final_model, weight, prediction_dates=prediction_dates, feature_options=feature_options
+        frame, final_model, weight, prediction_dates=prediction_dates, feature_options=feature_options,
+        prepared_features=(X_all, identity_all),
     )
     if len(future) != 96 or not np.isfinite(future['预测日前电价']).all():
         raise ValueError('预测结果必须包含96个有限电价值')

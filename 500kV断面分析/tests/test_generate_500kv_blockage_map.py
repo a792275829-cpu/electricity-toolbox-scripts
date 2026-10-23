@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from openpyxl import Workbook
 
@@ -8,6 +9,42 @@ from src.generate_500kv_blockage_map import generate_blockage_map
 
 
 class Generate500kVBlockageMapTest(unittest.TestCase):
+    def test_in_memory_pipeline_matches_standalone_workbook_and_html_bytes(self):
+        from src import analyze_500kv_section_gaps as analysis
+        from src.build_500kv_map_html import build_map_html
+        from src.deduplicate_500kv_prices import process_workbook
+        from src.generate_500kv_blockage_map import _run_pipeline
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            topology, raw, cleaned = root / "topology.md", root / "raw.xlsx", root / "cleaned.xlsx"
+            topology.write_text("## 1. 节点分区\n### 片区\n甲、乙、丙\n## 2. 接线\n### 片区\n甲-乙、乙-丙\n## 3. 约定\n")
+            book = Workbook()
+            sheet = book.active
+            times = [f"{i // 4:02d}:{i % 4 * 15:02d}" for i in range(12)]
+            sheet.append(["节点名称", "数据项", *times])
+            for index, name in enumerate(("甲", "乙", "丙")):
+                sheet.append([f"其他{name}站500kV", "电价(元/MWh)", *[
+                    (100.1234567890123 + i * 99.9876543210123) * (-1 if index == 1 else 1)
+                    for i in range(12)
+                ]])
+            book.save(raw)
+            book.close()
+            process_workbook(raw, cleaned, topology)
+            result = analysis.analyze_section_gaps(topology, cleaned, root)
+            html = root / "map.html"
+            build_map_html(topology, raw, cleaned, result.output_path, html)
+            reference = html.read_bytes()
+            result.output_path.unlink()
+            with patch.object(analysis, "write_analysis_workbook", side_effect=AssertionError("intermediate export")), patch.object(
+                analysis, "read_price_workbook", wraps=analysis.read_price_workbook
+            ) as read:
+                optimized = _run_pipeline(topology, raw, root, 80.0, html, cleaned)
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(html.read_bytes(), reference)
+            self.assertEqual(optimized.flagged_edges, result.flagged_edges)
+            self.assertEqual(optimized.flagged_intervals, result.flagged_intervals)
+            self.assertFalse(result.output_path.exists())
+
     def test_generate_blockage_map_runs_full_pipeline_from_raw_prices(self):
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

@@ -194,6 +194,8 @@ def build_map_html(
     analysis_path: Path,
     output_path: Path,
     node_positions_path: Path | None = None,
+    *,
+    analysis_data: dict | None = None,
 ) -> None:
     topology_path = Path(topology_path)
     original_price_path = Path(original_price_path)
@@ -201,13 +203,20 @@ def build_map_html(
     analysis_path = Path(analysis_path)
     output_path = Path(output_path)
 
-    edges, skipped_duplicates = parse_topology_edges(topology_path)
-    time_headers, price_rows = read_price_workbook(processed_price_path)
+    if analysis_data is None:
+        edges, skipped_duplicates = parse_topology_edges(topology_path)
+        time_headers, price_rows = read_price_workbook(processed_price_path)
+        edge_summary = _read_sheet_dicts(analysis_path, "断面汇总")
+        interval_details = _read_sheet_dicts(analysis_path, "逐时段明细")
+        group_summary = _read_sheet_dicts(analysis_path, "片区汇总")
+    else:
+        edges, skipped_duplicates = analysis_data["edges"], analysis_data["skipped_duplicates"]
+        time_headers, price_rows = analysis_data["time_headers"], analysis_data["price_rows"]
+        edge_summary = _analysis_records(analysis_data["edge_summary"])
+        interval_details = _analysis_records(analysis_data["interval_details"])
+        group_summary = _analysis_records(analysis_data["group_summary"])
     topology_nodes = sorted({edge.a for edge in edges} | {edge.b for edge in edges})
     matched_rows = match_price_rows(topology_nodes, price_rows)
-    edge_summary = _read_sheet_dicts(analysis_path, "断面汇总")
-    interval_details = _read_sheet_dicts(analysis_path, "逐时段明细")
-    group_summary = _read_sheet_dicts(analysis_path, "片区汇总")
     node_regions = _parse_node_regions(topology_path)
     for edge in edges:
         inferred_region = TOPOLOGY_GROUP_REGIONS.get(edge.group)
@@ -286,21 +295,30 @@ def build_map_html(
     output_path.write_text(_render_html(data), encoding="utf-8")
 
 
+def _analysis_records(records):
+    # Keep the same numeric representation as the standalone XLSX round trip.
+    from openpyxl.compat.strings import safe_string
+    from openpyxl.worksheet._reader import _cast_number
+    def value(item):
+        if isinstance(item, (int, float)) and not isinstance(item, bool):
+            return _cast_number(safe_string(item))
+        return _clean_cell(item)
+    return [{key: value(item) for key, item in row.items()} for row in records]
+
+
 def _read_sheet_dicts(path: Path, sheet_name: str) -> list[dict[str, object]]:
     workbook = load_workbook(path, read_only=True, data_only=True)
-    sheet = workbook[sheet_name]
-    rows = sheet.iter_rows(values_only=True)
     try:
-        headers = [str(value) for value in next(rows)]
-    except StopIteration:
-        return []
-
-    records = []
-    for row in rows:
-        if all(value is None for value in row):
-            continue
-        records.append({header: _clean_cell(value) for header, value in zip(headers, row)})
-    return records
+        sheet = workbook[sheet_name]
+        rows = sheet.iter_rows(values_only=True)
+        try:
+            headers = [str(value) for value in next(rows)]
+        except StopIteration:
+            return []
+        return [{header: _clean_cell(value) for header, value in zip(headers, row)}
+                for row in rows if not all(value is None for value in row)]
+    finally:
+        workbook.close()
 
 
 def _parse_node_regions(topology_path: Path) -> dict[str, str]:
@@ -331,10 +349,11 @@ def _parse_node_regions(topology_path: Path) -> dict[str, str]:
 
 def _workbook_stats(path: Path) -> dict[str, int]:
     workbook = load_workbook(path, read_only=True, data_only=True)
-    rows = 0
-    for sheet in workbook.worksheets:
-        rows += max(sheet.max_row - 1, 0)
-    return {"rows": rows, "sheets": len(workbook.worksheets)}
+    try:
+        rows = sum(max(sheet.max_row - 1, 0) for sheet in workbook.worksheets)
+        return {"rows": rows, "sheets": len(workbook.worksheets)}
+    finally:
+        workbook.close()
 
 
 def _build_coordinates(nodes: list[str], node_regions: dict[str, str]) -> dict[str, dict[str, float]]:

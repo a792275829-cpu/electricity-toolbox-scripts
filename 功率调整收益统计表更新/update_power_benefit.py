@@ -426,7 +426,17 @@ def patch_sparse_sheet(data: bytes, changes: dict[str, float]) -> bytes:
     original_text = text
     # 自闭合空单元格必须优先匹配，不能吞入后面的单元格或公式。
     cell_pattern = re.compile(r'<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:/>|>.*?</c>)', re.S)
+    replaced = set()
+    def replace_existing(match):
+        coordinate = match[1]
+        if coordinate not in changes or coordinate in replaced:
+            return match[0]
+        replaced.add(coordinate)
+        return spot._numeric_cell_xml(coordinate, changes[coordinate], spot._style_from_cell_xml(match[0]))
+    text = cell_pattern.sub(replace_existing, text)
     for coordinate, value in changes.items():
+        if coordinate in replaced:
+            continue
         pattern = re.compile(rf'<c\b(?=[^>]*\br="{re.escape(coordinate)}")[^>]*?(?:/>|>.*?</c>)', re.S)
         match = pattern.search(text)
         if match is None:

@@ -8,6 +8,8 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,6 +25,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 APP_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name in {"scripts", "\u811a\u672c"} else SCRIPT_DIR
 if str(APP_ROOT.parent) not in sys.path:
     sys.path.insert(0, str(APP_ROOT.parent))
+from toolbox_excel_read import read_cell_snapshots
 from toolbox_dates import normalize_date_input
 from toolbox_storage import data_path
 
@@ -233,40 +236,68 @@ def find_clearing_workbook(date_text: str, workbook_dir: Path = CLEARING_WORKBOO
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
+_clearing_inputs = ContextVar("early_report_clearing_inputs", default=None)
+
+
+@contextmanager
+def clearing_input_cache():
+    """Keep parsed values only for one report, never open workbook handles."""
+    if _clearing_inputs.get() is not None:
+        yield
+        return
+    token = _clearing_inputs.set({})
+    try:
+        yield
+    finally:
+        _clearing_inputs.reset(token)
+
+
+def _read_clearing_values(path):
+    source = Path(path).resolve()
+    info = source.stat()
+    key = (source, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    cache = _clearing_inputs.get()
+    if cache is not None and key in cache:
+        return cache[key]
+    workbook = load_workbook(source, read_only=True, data_only=True)
+    try:
+        sheet_name = next((name for name in workbook.sheetnames if "快报" in name and "日前" in name), None)
+        if sheet_name is None:
+            raise KeyError(f"{path} 中未找到快报（日前）工作表")
+        values, labels = {}, {}
+        for row_number, row in enumerate(workbook[sheet_name].iter_rows(min_col=1, max_col=8, values_only=True), 1):
+            if isinstance(row[0], str):
+                labels.setdefault(row[0].strip(), row_number)
+            for column in (6, 7, 8):
+                if row[column - 1] is not None:
+                    values[(row_number, column)] = row[column - 1]
+        basic = None
+        if "基础信息" in workbook.sheetnames:
+            snapshots = read_cell_snapshots(workbook, [("基础信息", cell) for cell in ("AA64", "AC64")])
+            basic = {cell: snapshots[("基础信息", cell)][0] for cell in ("AA64", "AC64")}
+        result = (sheet_name, values, labels, basic)
+    finally:
+        workbook.close()
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def _clearing_label_row(labels, wanted, sheet_name):
+    matches = [labels[label.strip()] for label in wanted if label.strip() in labels]
+    if not matches:
+        raise KeyError(f"{sheet_name} 中未找到行：{'/'.join(wanted)}")
+    return min(matches)
+
+
 def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None = None) -> dict[str, Any]:
     if workbook_path is None:
         workbook_path = find_clearing_workbook(date_text)
-    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
-    sheet_name = next(
-        (
-            name
-            for name in workbook.sheetnames
-            if "\u5feb\u62a5" in name and "\u65e5\u524d" in name
-        ),
-        None,
-    )
-    if sheet_name is None:
-        raise KeyError(f"{workbook_path} 中未找到快报（日前）工作表")
-    sheet = workbook[sheet_name]
-    basic_info_sheet = (
-        workbook["\u57fa\u7840\u4fe1\u606f"]
-        if "\u57fa\u7840\u4fe1\u606f" in workbook.sheetnames
-        else None
-    )
-    qingyuan_raw_values = (
-        {
-            "AA64": basic_info_sheet["AA64"].value,
-            "AC64": basic_info_sheet["AC64"].value,
-        }
-        if basic_info_sheet is not None
-        else {"AA64": 0, "AC64": 0}
-    )
-    if basic_info_sheet is not None:
-        missing_qingyuan_cells = [
-            cell
-            for cell, value in qingyuan_raw_values.items()
-            if value is None
-        ]
+    sheet_name, values, label_rows, basic = _read_clearing_values(workbook_path)
+    value = lambda row, column: values.get((row, column))
+    qingyuan_raw_values = basic if basic is not None else {"AA64": 0, "AC64": 0}
+    if basic is not None:
+        missing_qingyuan_cells = [cell for cell, number in basic.items() if number is None]
         if missing_qingyuan_cells:
             raise ValueError(
                 f"{workbook_path} 的基础信息!{'/'.join(missing_qingyuan_cells)}没有可用计算结果，"
@@ -283,45 +314,45 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
         "\u6c55\u5934": 8,
         "\u6d77\u95e8": 13,
         "\u4e1c\u839e": 19,
-        "\u6d77\u4e0a\u98ce\u7535": find_first_column_row(sheet, ("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535")),
-        "\u9b80\u83b2": find_first_column_row(sheet, ("\u9b80\u83b2\u5149\u4f0f", "\u9b80\u83b2")),
-        "\u5f52\u6e56": find_first_column_row(sheet, ("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56")),
+        "\u6d77\u4e0a\u98ce\u7535": _clearing_label_row(label_rows, ("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535"), sheet_name),
+        "\u9b80\u83b2": _clearing_label_row(label_rows, ("\u9b80\u83b2\u5149\u4f0f", "\u9b80\u83b2"), sheet_name),
+        "\u5f52\u6e56": _clearing_label_row(label_rows, ("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56"), sheet_name),
     }
-    base_total_energy = parse_float(sheet.cell(rows["company"], 6).value)
+    base_total_energy = parse_float(value(rows["company"], 6))
     return {
         "workbook": str(workbook_path),
         "sheet": sheet_name,
         "qingyuanSource": {
-            "sheet": basic_info_sheet.title if basic_info_sheet is not None else None,
+            "sheet": "基础信息" if basic is not None else None,
             "cells": qingyuan_components,
         },
         "baseTotalEnergy": base_total_energy,
         "totalEnergy": base_total_energy + qingyuan_energy,
-        "averagePrice": parse_float(sheet.cell(rows["company"], 7).value),
+        "averagePrice": parse_float(value(rows["company"], 7)),
         "companies": {
             "\u6c55\u5934": {
-                "energy": parse_float(sheet.cell(rows["\u6c55\u5934"], 6).value),
-                "price": parse_float(sheet.cell(rows["\u6c55\u5934"], 7).value),
+                "energy": parse_float(value(rows["\u6c55\u5934"], 6)),
+                "price": parse_float(value(rows["\u6c55\u5934"], 7)),
             },
             "\u6d77\u95e8": {
-                "energy": parse_float(sheet.cell(rows["\u6d77\u95e8"], 6).value),
-                "price": parse_float(sheet.cell(rows["\u6d77\u95e8"], 7).value),
+                "energy": parse_float(value(rows["\u6d77\u95e8"], 6)),
+                "price": parse_float(value(rows["\u6d77\u95e8"], 7)),
             },
             "\u4e1c\u839e": {
-                "energy": parse_float(sheet.cell(rows["\u4e1c\u839e"], 6).value),
-                "price": parse_float(sheet.cell(rows["\u4e1c\u839e"], 7).value),
+                "energy": parse_float(value(rows["\u4e1c\u839e"], 6)),
+                "price": parse_float(value(rows["\u4e1c\u839e"], 7)),
             },
             "\u6d77\u4e0a\u98ce\u7535": {
-                "energy": parse_float(sheet.cell(rows["\u6d77\u4e0a\u98ce\u7535"], 7).value),
-                "price": parse_float(sheet.cell(rows["\u6d77\u4e0a\u98ce\u7535"], 8).value),
+                "energy": parse_float(value(rows["\u6d77\u4e0a\u98ce\u7535"], 7)),
+                "price": parse_float(value(rows["\u6d77\u4e0a\u98ce\u7535"], 8)),
             },
             "\u9b80\u83b2": {
-                "energy": parse_float(sheet.cell(rows["\u9b80\u83b2"], 7).value),
-                "price": parse_float(sheet.cell(rows["\u9b80\u83b2"], 8).value),
+                "energy": parse_float(value(rows["\u9b80\u83b2"], 7)),
+                "price": parse_float(value(rows["\u9b80\u83b2"], 8)),
             },
             "\u5f52\u6e56": {
-                "energy": parse_float(sheet.cell(rows["\u5f52\u6e56"], 7).value),
-                "price": parse_float(sheet.cell(rows["\u5f52\u6e56"], 8).value),
+                "energy": parse_float(value(rows["\u5f52\u6e56"], 7)),
+                "price": parse_float(value(rows["\u5f52\u6e56"], 8)),
             },
             "\u6e05\u8fdc": {
                 "energy": qingyuan_energy,
@@ -333,34 +364,24 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
 def load_online_price_summary(date_text: str, workbook_path: Path | None = None) -> dict[str, Any]:
     if workbook_path is None:
         workbook_path = find_clearing_workbook(date_text)
-    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
-    sheet_name = next(
-        (
-            name
-            for name in workbook.sheetnames
-            if "\u5feb\u62a5" in name and "\u65e5\u524d" in name
-        ),
-        None,
-    )
-    if sheet_name is None:
-        raise KeyError(f"{workbook_path} 中未找到快报（日前）工作表")
-    sheet = workbook[sheet_name]
+    sheet_name, values, label_rows, basic = _read_clearing_values(workbook_path)
+    value = lambda row, column: values.get((row, column))
     renewable_rows = {
-        "\u6d77\u4e0a\u98ce\u7535": find_first_column_row(sheet, ("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535")),
-        "\u9b80\u83b2": find_first_column_row(sheet, ("\u9b80\u83b2\u5149\u4f0f", "\u9b80\u83b2")),
-        "\u5f52\u6e56": find_first_column_row(sheet, ("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56")),
+        "\u6d77\u4e0a\u98ce\u7535": _clearing_label_row(label_rows, ("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535"), sheet_name),
+        "\u9b80\u83b2": _clearing_label_row(label_rows, ("\u9b80\u83b2\u5149\u4f0f", "\u9b80\u83b2"), sheet_name),
+        "\u5f52\u6e56": _clearing_label_row(label_rows, ("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56"), sheet_name),
     }
     return {
         "workbook": str(workbook_path),
         "sheet": sheet_name,
-        "averagePrice": parse_float(sheet["G7"].value),
+        "averagePrice": parse_float(value(7, 7)),
         "companies": {
-            "\u6c55\u5934": parse_float(sheet["G8"].value),
-            "\u6d77\u95e8": parse_float(sheet["G13"].value),
-            "\u4e1c\u839e": parse_float(sheet["G19"].value),
-            "\u6d77\u4e0a\u98ce\u7535": parse_float(sheet.cell(renewable_rows["\u6d77\u4e0a\u98ce\u7535"], 8).value),
-            "\u9b80\u83b2": parse_float(sheet.cell(renewable_rows["\u9b80\u83b2"], 8).value),
-            "\u5f52\u6e56": parse_float(sheet.cell(renewable_rows["\u5f52\u6e56"], 8).value),
+            "\u6c55\u5934": parse_float(value(8, 7)),
+            "\u6d77\u95e8": parse_float(value(13, 7)),
+            "\u4e1c\u839e": parse_float(value(19, 7)),
+            "\u6d77\u4e0a\u98ce\u7535": parse_float(value(renewable_rows["\u6d77\u4e0a\u98ce\u7535"], 8)),
+            "\u9b80\u83b2": parse_float(value(renewable_rows["\u9b80\u83b2"], 8)),
+            "\u5f52\u6e56": parse_float(value(renewable_rows["\u5f52\u6e56"], 8)),
         },
     }
 
@@ -837,8 +858,9 @@ def generate(
         compare_date=plan["loadAndPriceCompareDate"],
         subjects=LOAD_SUBJECT_CODES,
     )
-    day_ahead_clearing = load_day_ahead_clearing_summary(plan["dayAheadDate"], day_ahead_workbook)
-    online_prices = load_online_price_summary(plan["actualOnlineEnergyDate"], online_workbook)
+    with clearing_input_cache():
+        day_ahead_clearing = load_day_ahead_clearing_summary(plan["dayAheadDate"], day_ahead_workbook)
+        online_prices = load_online_price_summary(plan["actualOnlineEnergyDate"], online_workbook)
     doc = Document(actual_template_path)
     ensure_qingyuan_template_content(doc)
     startup_dates = startup_date_paragraphs(doc)

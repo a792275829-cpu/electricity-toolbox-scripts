@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
@@ -31,6 +31,7 @@ class AnalysisResult:
     missing_nodes: list[str]
     flagged_edges: int
     flagged_intervals: int
+    data: dict | None = field(default=None, repr=False, compare=False)
 
 
 def analyze_section_gaps(
@@ -38,6 +39,8 @@ def analyze_section_gaps(
     workbook_path: Path,
     output_dir: Path,
     threshold: float = 80.0,
+    *,
+    export_workbook: bool = True,
 ) -> AnalysisResult:
     topology_path = Path(topology_path)
     workbook_path = Path(workbook_path)
@@ -111,14 +114,15 @@ def analyze_section_gaps(
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "500kv_section_price_gap_analysis.xlsx"
 
-    write_analysis_workbook(
-        output_path,
-        [
-            ("断面汇总", edge_summary),
-            ("逐时段明细", interval_records),
-            ("片区汇总", group_summary),
-        ],
-    )
+    if export_workbook:
+        write_analysis_workbook(
+            output_path,
+            [
+                ("断面汇总", edge_summary),
+                ("逐时段明细", interval_records),
+                ("片区汇总", group_summary),
+            ],
+        )
 
     return AnalysisResult(
         output_path=output_path,
@@ -128,6 +132,10 @@ def analyze_section_gaps(
         missing_nodes=missing_nodes,
         flagged_edges=len({record["edge"] for record in interval_records}),
         flagged_intervals=len(interval_records),
+        data=dict(edges=edges, skipped_duplicates=skipped_duplicates,
+                  time_headers=time_headers, price_rows=price_rows,
+                  edge_summary=edge_summary, interval_details=interval_records,
+                  group_summary=group_summary),
     )
 
 

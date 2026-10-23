@@ -462,11 +462,29 @@ def values_match(existing: Iterable[Any], expected: tuple[float, ...]) -> bool:
 
 
 def effective_number_format(sheet, row: int, column: int) -> str:
-    for candidate_row in range(row, 1, -1):
-        cell = sheet.cell(row=candidate_row, column=column)
+    return effective_number_formats(sheet, (row,), column)[row]
+
+
+def effective_number_formats(sheet, rows: Iterable[int], column: int) -> dict[int, str]:
+    """Resolve inherited formats in one forward scan, including styled blanks."""
+    requested = set(rows)
+    result = {row: "General" for row in requested}
+    if not requested or max(requested) < 2:
+        return result
+    inherited = "General"
+    last_row = 1
+    for row, (cell,) in enumerate(sheet.iter_rows(
+        min_row=2, max_row=max(requested), min_col=column, max_col=column,
+    ), start=2):
+        last_row = row
         if getattr(cell, "has_style", False):
-            return str(getattr(cell, "number_format", None) or "General")
-    return "General"
+            inherited = str(getattr(cell, "number_format", None) or "General")
+        if row in requested:
+            result[row] = inherited
+    for row in requested:
+        if row > last_row:
+            result[row] = inherited
+    return result
 
 
 def plan_date_extensions(sheet, prices: dict[date, tuple[float, ...]], *, epoch) -> dict[int, date]:
@@ -838,8 +856,10 @@ def prepare_workbook(prices: TargetPrices, *, overwrite: bool) -> PreparedWorkbo
             for name, values in ((DAY_AHEAD_SHEET, prices.day_ahead), (REAL_TIME_SHEET, prices.real_time))
             if name in workbook.sheetnames
         }
+        date_formats = {name: effective_number_formats(workbook[name], dates, 1)
+                        for name, dates in extensions.items() if dates}
         date_expectations = tuple(
-            DateExpectation(name, row, day, effective_number_format(workbook[name], row, 1))
+            DateExpectation(name, row, day, date_formats[name][row])
             for name, dates in extensions.items() for row, day in dates.items()
         )
         day_expectations, day_updated, day_skipped, day_rows = plan_price_sheet(

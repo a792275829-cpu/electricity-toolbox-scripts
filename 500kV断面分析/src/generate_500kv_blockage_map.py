@@ -80,6 +80,7 @@ def _run_pipeline(
         workbook_path=processed_price_path,
         output_dir=output_dir,
         threshold=threshold,
+        export_workbook=False,
     )
     build_map_html(
         topology_path=topology_path,
@@ -87,6 +88,7 @@ def _run_pipeline(
         processed_price_path=processed_price_path,
         analysis_path=analysis_result.output_path,
         output_path=html_path,
+        analysis_data=analysis_result.data,
     )
 
     return BlockageMapResult(

@@ -345,13 +345,6 @@ def extract_quote_chart_image(pdf_path: Path) -> tuple[Image.Image, str]:
     except Exception:
         pass
 
-    try:
-        candidates.append((render_quote_chart_crop(pdf_path), "rendered-page-crop"))
-    except Exception:
-        pass
-    if not candidates:
-        raise ParseError("未能提取报价分布图。")
-
     scored = sorted(
         ((_score_quote_chart_candidate(image), image, source) for image, source in candidates),
         key=lambda item: item[0],
@@ -361,6 +354,16 @@ def extract_quote_chart_image(pdf_path: Path) -> tuple[Image.Image, str]:
     if embedded:
         _, image, source = embedded[0]
         return image, source
+    # A qualified embedded image has always taken precedence over the crop.
+    # Render the expensive fallback only when it can affect the selection.
+    try:
+        crop = render_quote_chart_crop(pdf_path)
+        scored.append((_score_quote_chart_candidate(crop), crop, "rendered-page-crop"))
+    except Exception:
+        pass
+    if not scored:
+        raise ParseError("未能提取报价分布图。")
+    scored.sort(key=lambda item: item[0], reverse=True)
     best_score, best_image, best_source = scored[0]
     if best_score < 5:
         raise ParseError("未能从 PDF 中识别报价分布柱状图。")
