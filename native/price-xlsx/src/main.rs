@@ -7,6 +7,7 @@ use std::io::{self, BufReader, BufWriter, Write};
 mod cells;
 mod compute;
 mod frame;
+mod wps;
 
 #[derive(Deserialize)]
 struct Request {
@@ -47,8 +48,9 @@ fn execute(request: Request) -> Result<Value, Box<dyn std::error::Error>> {
     }
     match request.operation.as_str() {
         "capabilities" => Ok(
-            serde_json::json!({"protocol":1,"stream":true,"operations":["unmix","sheet_data","read_frame","write_frame"]}),
+            serde_json::json!({"protocol":1,"stream":true,"operations":["unmix","sheet_data","read_frame","write_frame","wps_url_choices"]}),
         ),
+        "wps_url_choices" => wps::url_choices(&request.payload),
         "unmix" => compute::unmix(&request.payload),
         "sheet_data" => compute::sheet_data(&request.payload),
         "write_frame" => frame::write(&request.payload),

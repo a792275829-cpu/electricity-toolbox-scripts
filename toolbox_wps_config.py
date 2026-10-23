@@ -45,7 +45,7 @@ def normalize_runtime_config(data: dict[str, Any]) -> dict[str, Any]:
     documents = data.get("configs")
     if not isinstance(documents, list):
         documents = legacy_documents(data)
-    return {
+    config = {
         "recent_urls": _string_list(data.get("recent_urls", [])),
         "browser_mode": str(data.get("browser_mode", "persistent") or "persistent"),
         "cdp_url": str(data.get("cdp_url", "http://127.0.0.1:9222") or "http://127.0.0.1:9222"),
@@ -55,6 +55,13 @@ def normalize_runtime_config(data: dict[str, Any]) -> dict[str, Any]:
             if isinstance(row, dict)
         ],
     }
+    titles = data.get("document_titles")
+    if isinstance(titles, dict):
+        titles = {url.strip(): title.strip() for url, title in titles.items()
+                  if isinstance(url, str) and url.strip() and isinstance(title, str) and title.strip()}
+        if titles:
+            config["document_titles"] = titles
+    return config
 
 
 def legacy_documents(data: dict[str, Any]) -> list[dict[str, Any]]:

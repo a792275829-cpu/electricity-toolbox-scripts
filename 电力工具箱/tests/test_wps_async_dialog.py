@@ -550,6 +550,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         ):
             dialog = module.DocumentConfigDialog(self.root, "编辑配置", log=log)
             dialog.online_sheets = ["原有工作表"]
+            dialog.kdocs_url.set("https://www.kdocs.cn/l/target")
             dialog._start_online_read("target", "https://www.kdocs.cn/l/target", False)
             deadline = time.monotonic() + 1
             while dialog._pending_online_reads and time.monotonic() < deadline:

@@ -46,6 +46,7 @@ from toolbox_storage import data_path
 from toolbox_wps_config import (_document_config_from_dict, _region_config_from_dict, _string_list, build_config_export, load_config_export, normalize_runtime_config, runtime_config_from_export_payload, save_config_export)
 from toolbox_log_console import LogConsole, explain_error, redact
 from toolbox_choices import SegmentedGroup
+from toolbox_wps_urls import url_choices
 
 DATA_DIR = data_path(BASE_DIR)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -1738,6 +1739,8 @@ class DocumentConfigDialog(tk.Toplevel):
         cdp_url: str = "http://127.0.0.1:9222",
         log=None,
         autosave=None,
+        document_titles: dict[str, str] | None = None,
+        on_document_title=None,
     ):
         super().__init__(parent)
         self.title(title)
@@ -1749,6 +1752,9 @@ class DocumentConfigDialog(tk.Toplevel):
         self.cdp_url = cdp_url
         self.log = log or (lambda _message: None)
         self.autosave = autosave
+        self.document_titles = document_titles if document_titles is not None else {}
+        self.on_document_title = on_document_title
+        self._updating_target_url = False
         self.local_sheets: list[str] = list(
             dict.fromkeys(
                 region.source_sheet
@@ -1781,9 +1787,10 @@ class DocumentConfigDialog(tk.Toplevel):
         self.source_type = tk.StringVar(value=initial.source_type if initial else "excel")
         self.source_url = tk.StringVar(value=default_source_url)
         self.kdocs_url = tk.StringVar(value=default_url)
+        self.target_url_display = tk.StringVar(value=default_url)
         self.local_file = tk.StringVar(value=initial.local_file if initial else "")
         self.source_doc_title = tk.StringVar(value="")
-        self.target_doc_title = tk.StringVar(value="")
+        self.target_doc_title = tk.StringVar(value=self.document_titles.get(default_url, ""))
         cached_sheet_count = len(self.online_sheets)
         cached_status = (
             f"已载入配置中保存的 {cached_sheet_count} 个工作表名称；"
@@ -1794,6 +1801,9 @@ class DocumentConfigDialog(tk.Toplevel):
         self.read_status = tk.StringVar(value=cached_status)
 
         self.create_widgets()
+        self._refresh_target_url_choices()
+        self.target_url_display.trace_add("write", self._target_url_edited)
+        self.kdocs_url.trace_add("write", self._target_raw_url_changed)
         # Editing an existing configuration should immediately restore the
         # target document title and current sheet list. The read is asynchronous
         # and managed mode uses the saved profile in headless Chrome, so the
@@ -1835,8 +1845,12 @@ class DocumentConfigDialog(tk.Toplevel):
         self.refresh_source_button.grid(row=2, column=2, padx=8, pady=6)
 
         ttk.Label(docs, text="目标表格链接").grid(row=3, column=0, padx=8, pady=6, sticky="w")
-        url_combo = ttk.Combobox(docs, textvariable=self.kdocs_url, values=self.recent_urls)
-        url_combo.grid(row=3, column=1, padx=8, pady=6, sticky="ew")
+        self.target_url_combo = ttk.Combobox(
+            docs, textvariable=self.target_url_display, postcommand=self._refresh_target_url_choices
+        )
+        self.target_url_combo.grid(row=3, column=1, padx=8, pady=6, sticky="ew")
+        self.target_url_combo.bind("<<ComboboxSelected>>", lambda _event: self.refresh_online_sheets(auto=True))
+        self.target_url_combo.bind("<FocusOut>", lambda _event: self._refresh_target_url_choices())
         self.refresh_target_button = ttk.Button(
             docs, text="刷新目标工作表", command=self.refresh_online_sheets
         )
@@ -1845,17 +1859,14 @@ class DocumentConfigDialog(tk.Toplevel):
         ttk.Label(docs, text="来源表格名称").grid(row=4, column=0, padx=8, pady=6, sticky="w")
         ttk.Entry(docs, textvariable=self.source_doc_title, state="readonly").grid(row=4, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
 
-        ttk.Label(docs, text="目标表格名称").grid(row=5, column=0, padx=8, pady=6, sticky="w")
-        ttk.Entry(docs, textvariable=self.target_doc_title, state="readonly").grid(row=5, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
-
-        ttk.Label(docs, text="本地文件").grid(row=6, column=0, padx=8, pady=6, sticky="w")
-        ttk.Entry(docs, textvariable=self.local_file).grid(row=6, column=1, padx=8, pady=6, sticky="ew")
+        ttk.Label(docs, text="本地文件").grid(row=5, column=0, padx=8, pady=6, sticky="w")
+        ttk.Entry(docs, textvariable=self.local_file).grid(row=5, column=1, padx=8, pady=6, sticky="ew")
         file_buttons = ttk.Frame(docs)
-        file_buttons.grid(row=6, column=2, padx=8, pady=6)
+        file_buttons.grid(row=5, column=2, padx=8, pady=6)
         ttk.Button(file_buttons, text="选择文件", command=self.browse_local_file).pack(side="left")
         ttk.Button(file_buttons, text="刷新工作表", command=self.refresh_local_sheets).pack(side="left", padx=(6, 0))
         ttk.Label(docs, textvariable=self.read_status, style="Muted.TLabel").grid(
-            row=7, column=0, columnspan=3, padx=8, pady=(0, 6), sticky="w"
+            row=6, column=0, columnspan=3, padx=8, pady=(0, 6), sticky="w"
         )
         docs.columnconfigure(1, weight=1)
 
@@ -1931,6 +1942,35 @@ class DocumentConfigDialog(tk.Toplevel):
             self.local_sheets = []
             if show_errors:
                 messagebox.showerror("读取来源工作表失败", str(exc), parent=self)
+
+    def _refresh_target_url_choices(self) -> None:
+        url = self.kdocs_url.get().strip()
+        choices = url_choices(self.recent_urls + ([url] if url else []), self.document_titles, url)
+        self.target_url_combo.configure(values=[option["label"] for option in choices["options"]])
+        self._updating_target_url = True
+        try:
+            self.target_url_display.set(choices["label"])
+        finally:
+            self._updating_target_url = False
+
+    def _target_url_edited(self, *_args) -> None:
+        if self._updating_target_url:
+            return
+        choices = url_choices(self.recent_urls, self.document_titles, self.target_url_display.get())
+        url = choices["url"]
+        if url != self.kdocs_url.get():
+            # Keep typed input editable; decorating happens on selection/blur/read.
+            self._updating_target_url = True
+            try:
+                self.kdocs_url.set(url)
+                self.target_doc_title.set(self.document_titles.get(url, ""))
+            finally:
+                self._updating_target_url = False
+
+    def _target_raw_url_changed(self, *_args) -> None:
+        if not self._updating_target_url:
+            self.target_doc_title.set(self.document_titles.get(self.kdocs_url.get().strip(), ""))
+            self._refresh_target_url_choices()
 
     def refresh_online_sheets(self, auto: bool = False) -> None:
         url = self.kdocs_url.get().strip()
@@ -2023,6 +2063,8 @@ class DocumentConfigDialog(tk.Toplevel):
             self._pending_online_reads.pop(kind, None)
             button = self.refresh_source_button if kind == "source" else self.refresh_target_button
             button.configure(state="normal")
+            if kind == "target" and url != self.kdocs_url.get().strip():
+                continue
             if error is not None:
                 if kind == "source":
                     self.source_doc_title.set("读取失败")
@@ -2039,6 +2081,10 @@ class DocumentConfigDialog(tk.Toplevel):
 
             sheets = list((info or {}).get("sheets") or [])
             document_title = str((info or {}).get("title") or "")
+            if document_title:
+                self.document_titles[url] = document_title
+                if self.on_document_title is not None:
+                    self.on_document_title(url, document_title)
             if kind == "source":
                 self.local_sheets = sheets
                 self.source_doc_title.set(document_title)
@@ -2046,6 +2092,7 @@ class DocumentConfigDialog(tk.Toplevel):
                 self.online_sheets = sheets
                 self.target_doc_title.set(document_title)
                 self.last_online_sheet_url = url
+            self._refresh_target_url_choices()
             self.read_status.set(f"已读取 {len(sheets)} 个工作表。")
 
         if self._pending_online_reads:
@@ -2208,6 +2255,7 @@ class WpsWriterFrame(ttk.Frame):
         self._login_poll_after_id: str | None = None
 
         self.recent_urls: list[str] = []
+        self.document_titles: dict[str, str] = {}
         self.browser_mode = tk.StringVar(master=self, value="managed_cdp")
         self.cdp_url = tk.StringVar(master=self, value="http://127.0.0.1:9222")
         self.browser_status = tk.StringVar(master=self, value="尚未检查浏览器连接")
@@ -2409,6 +2457,8 @@ class WpsWriterFrame(ttk.Frame):
             browser_mode=self.browser_mode.get(),
             cdp_url=self.cdp_url.get().strip(),
             log=self.log,
+            document_titles=self.document_titles,
+            on_document_title=self.remember_document_title,
         )
         if dialog.result:
             self.configs.append(dialog.result)
@@ -2436,6 +2486,8 @@ class WpsWriterFrame(ttk.Frame):
             cdp_url=self.cdp_url.get().strip(),
             log=self.log,
             autosave=autosave,
+            document_titles=self.document_titles,
+            on_document_title=self.remember_document_title,
         )
         if dialog.result:
             self.configs[index] = dialog.result
@@ -2838,6 +2890,7 @@ class WpsWriterFrame(ttk.Frame):
 
     def load_initial_config(self) -> None:
         config = load_config()
+        self.document_titles = normalize_runtime_config(config).get("document_titles", {})
         self.recent_urls = [url for url in config.get("recent_urls", []) if isinstance(url, str) and url.strip()]
         if config.get("kdocs_url"):
             self.recent_urls = update_recent_urls(self.recent_urls, config["kdocs_url"])
@@ -2944,10 +2997,18 @@ class WpsWriterFrame(ttk.Frame):
         self.remember_mapping_urls()
         save_config(self.current_runtime_config())
 
+    def remember_document_title(self, url: str, title: str) -> None:
+        self.document_titles[url] = title
+        try:
+            self.save_current_config()
+        except OSError as exc:
+            self.log(f"表格名称已读取，但缓存未能保存：{exc}")
+
     def current_runtime_config(self) -> dict[str, Any]:
         return normalize_runtime_config(
             {
                 "recent_urls": self.recent_urls,
+                "document_titles": self.document_titles,
                 "browser_mode": self.browser_mode.get(),
                 "cdp_url": self.cdp_url.get(),
                 "configs": [
@@ -2967,6 +3028,7 @@ class WpsWriterFrame(ttk.Frame):
     def apply_runtime_config(self, config: dict[str, Any]) -> None:
         runtime_config = normalize_runtime_config(config)
         self.recent_urls = runtime_config["recent_urls"]
+        self.document_titles = runtime_config.get("document_titles", {})
         self.browser_mode.set(runtime_config["browser_mode"])
         self.cdp_url.set(runtime_config["cdp_url"])
         self.configs = [self.document_config_from_config(row) for row in runtime_config["configs"]]
