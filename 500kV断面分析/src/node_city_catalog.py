@@ -52,3 +52,8 @@ def price_hierarchy(names):
     if unknown:
         result.append({"name": "未分类", "cities": [{"name": "待确认", "nodes": unknown}]})
     return result
+
+
+def city_pair_label(a, b):
+    """Display endpoint cities in topology order, collapsing a shared city."""
+    return "-".join(dict.fromkeys(NODE_CITY.get(name, "未分类") for name in (a, b)))

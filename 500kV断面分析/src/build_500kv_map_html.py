@@ -20,7 +20,7 @@ from src.analyze_500kv_section_gaps import (
     read_price_workbook,
 )
 from src.classify_500kv_nodes import topology_inventory
-from src.node_city_catalog import price_hierarchy
+from src.node_city_catalog import NODE_CITY, city_pair_label, price_hierarchy
 from src.region_curve_view import VIEW_HTML, view_assets
 
 
@@ -439,6 +439,7 @@ def _build_node_payloads(
             {
                 "name": node,
                 "region": node_regions.get(node, "未分片"),
+                "city": NODE_CITY.get(node, "未分类"),
                 "raw_name": raw_name,
                 "prices": prices,
                 "blocked": node in blocked_nodes,
@@ -524,6 +525,7 @@ def _build_edge_payloads(
         payload.append(
             {
                 "group": edge.group,
+                "city_label": city_pair_label(edge.a, edge.b),
                 "edge": edge_name,
                 "a": edge.a,
                 "b": edge.b,
@@ -1025,11 +1027,14 @@ def _render_html(data: dict[str, object]) -> str:
       width:380px;
       height:100dvh;
       max-height:100dvh;
+      display:flex;
+      flex-direction:column;
       position:fixed;
       top:0;
       right:0;
       box-shadow: -18px 0 48px rgba(0,0,0,.16);
     }}
+    .side > * {{ flex-shrink:0; }}
     .side-header {{
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
       margin-bottom: 12px;
@@ -1042,7 +1047,7 @@ def _render_html(data: dict[str, object]) -> str:
     .search:focus {{ border-color: #88ace8; box-shadow: 0 0 0 3px rgba(31,99,211,.11); }}
     .list-head {{ display: flex; align-items: center; justify-content: space-between; margin: 14px 0 8px; }}
     .sort-select {{ border: 0; color: var(--blue); background: transparent; font-size: 12px; }}
-    .section-list {{ display: grid; gap: 7px; max-height: 240px; overflow: auto; padding-right: 3px; }}
+    .section-list {{ display:grid; align-content:start; gap:7px; flex:1; min-height:100px; max-height:none; overflow:auto; padding-right:3px; }}
     .section-item {{
       width: 100%; text-align: left; border: 1px solid var(--line); background: var(--panel);
       border-radius: 10px; padding: 10px 11px; cursor: pointer; color: var(--ink);
@@ -1053,39 +1058,11 @@ def _render_html(data: dict[str, object]) -> str:
     .item-gap {{ color: var(--accent); white-space: nowrap; }}
     .item-meta {{ margin-top: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
     .detail-divider {{ border: 0; border-top: 1px solid var(--line); margin: 18px 0; }}
-    .metric-grid {{
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin: 14px 0;
-    }}
-    .metric {{
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 10px;
-      background: var(--soft);
-    }}
-    .metric .k {{
-      font-size: 12px;
-      color: var(--muted);
-      margin-bottom: 4px;
-    }}
-    .metric .v {{
-      font-size: 17px;
-      font-weight: 700;
-      overflow-wrap: anywhere;
-    }}
     .panel-title {{
       font-size: 19px;
       font-weight: 700;
       margin: 0 0 6px;
     }}
-    .panel-subtitle {{
-      font-size: 13px;
-      color: var(--muted);
-      line-height: 1.45;
-    }}
-    .panel-subtitle:empty {{ display:none; }}
     .chart-wrap {{
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -1134,7 +1111,7 @@ def _render_html(data: dict[str, object]) -> str:
     @media (max-width: 920px) {{
       .app {{ grid-template-columns: 1fr; }}
       .map-pane {{ padding:0 2px 2px; height:auto; }}
-      .side {{ border-left: 0; border-top: 1px solid var(--line); max-height:none; position:static; width:auto; height:auto; }}
+      .side {{ border-left: 0; border-top: 1px solid var(--line); max-height:none; position:static; width:auto; height:auto; display:block; }}
       svg {{ height: 62vh; min-height: 480px; }}
       #map {{ flex:none; height:auto; aspect-ratio:1500 / 1020; min-height:0; max-height:none; }}
       .map-shell {{ flex:none; min-height:0; }}
@@ -1206,13 +1183,6 @@ def _render_html(data: dict[str, object]) -> str:
     </main>
     <aside class="side">
       <p class="panel-title" id="detailTitle">点击任意节点查看电价数据</p>
-      <div class="panel-subtitle" id="detailSubtitle">当前共识别 <span id="sectionCount"></span> 条价差断面；可点击节点查看分时电价和相邻线路。</div>
-      <div class="metric-grid">
-        <div class="metric"><div class="k" id="metricLabel1">最大价差</div><div class="v" id="maxGap">-</div></div>
-        <div class="metric"><div class="k" id="metricLabel2">累计时点</div><div class="v" id="intervals">-</div></div>
-        <div class="metric"><div class="k" id="metricLabel3">主方向</div><div class="v" id="direction">-</div></div>
-        <div class="metric"><div class="k" id="metricLabel4">最大时点</div><div class="v" id="maxTime">-</div></div>
-      </div>
       <div class="chart-wrap">
         <div class="chart-title" id="chartTitle">24小时节点电价曲线</div>
         <svg id="priceChart" viewBox="0 0 360 280" role="img" aria-label="两端节点24小时电价曲线"></svg>
@@ -1276,7 +1246,6 @@ def _render_html(data: dict[str, object]) -> str:
     const nodeByName = new Map(DATA.nodes.map(d => [d.name, d]));
     const regionData = DATA.regions || [];
     const sectionEdges = DATA.edges.filter(d => d.is_section);
-    document.getElementById('sectionCount').textContent = sectionEdges.length;
     const mapSvg = document.getElementById('map');
     const mapViewport = document.getElementById('mapViewport');
     const edgeLines = new Map();
@@ -1905,17 +1874,6 @@ def _render_html(data: dict[str, object]) -> str:
     fitMap();
     if (document.fonts?.ready) document.fonts.ready.then(() => {{ layoutNodeLabels(); if (autoFitMap) fitMap(); }});
 
-    function edgePriceStats(a, b) {{
-      const comparable = DATA.time_headers.map((time, index) => {{
-        const priceA = a?.prices[index];
-        const priceB = b?.prices[index];
-        if (typeof priceA !== 'number' || typeof priceB !== 'number') return null;
-        return {{ time, priceA, priceB, gap: Math.abs(priceB - priceA) }};
-      }}).filter(Boolean);
-      const maximum = comparable.reduce((best, item) => !best || item.gap > best.gap ? item : best, null);
-      return {{ comparable, maximum }};
-    }}
-
     function clearSelection() {{
       resetAllFlowArrows();
       document.querySelectorAll('.flow-arrow').forEach(element => element.classList.remove('context-dimmed'));
@@ -1928,15 +1886,7 @@ def _render_html(data: dict[str, object]) -> str:
       document.querySelectorAll('.section-item').forEach(item => item.classList.remove('active'));
       selectedEdgeName = '';
       selectedNodeName = '';
-      document.getElementById('metricLabel1').textContent = '最大价差';
-      document.getElementById('metricLabel2').textContent = '累计时点';
-      document.getElementById('metricLabel3').textContent = '主方向';
-      document.getElementById('metricLabel4').textContent = '最大时点';
       document.getElementById('detailTitle').textContent = '未选择节点或线路';
-      document.getElementById('detailSubtitle').textContent = `当前共识别 ${{sectionEdges.length}} 条价差断面；点击节点或线路查看电价。`;
-      ['maxGap', 'intervals', 'direction', 'maxTime'].forEach(id => {{
-        document.getElementById(id).textContent = '-';
-      }});
       document.getElementById('chartTitle').textContent = '24小时节点电价曲线';
       const chart = document.getElementById('priceChart');
       chart.innerHTML = '';
@@ -1964,23 +1914,7 @@ def _render_html(data: dict[str, object]) -> str:
       document.querySelectorAll('.section-item').forEach(item => item.classList.toggle('active', item.dataset.edge === edge.edge));
       const a = nodeByName.get(edge.a);
       const b = nodeByName.get(edge.b);
-      const observed = edgePriceStats(a, b);
-      const displayGap = edge.is_section ? edge.max_abs_diff : (observed.maximum?.gap ?? 0);
-      const displayTime = edge.is_section ? edge.max_time : (observed.maximum?.time || '-');
-      document.getElementById('metricLabel1').textContent = '最大价差';
-      document.getElementById('metricLabel2').textContent = edge.is_section ? '累计时点' : '可比时点';
-      document.getElementById('metricLabel3').textContent = edge.is_section ? '主方向' : '线路状态';
-      document.getElementById('metricLabel4').textContent = '最大时点';
-      document.getElementById('detailTitle').innerHTML = `${{edge.edge}} <span class="pill">${{edge.group}}</span>`;
-      document.getElementById('detailSubtitle').textContent = edge.is_section
-        ? `触发窗口：${{edge.windows || '无'}}`
-        : '';
-      document.getElementById('maxGap').textContent = displayGap.toFixed(2);
-      document.getElementById('intervals').textContent = edge.is_section
-        ? `${{edge.intervals}} 个`
-        : `${{observed.comparable.length}} 个`;
-      document.getElementById('direction').textContent = edge.is_section ? flowDirectionLabel(edge) : '未触发断面';
-      document.getElementById('maxTime').textContent = displayTime || '-';
+      document.getElementById('detailTitle').innerHTML = `${{escapeHtml(edge.edge)}} <span class="pill">${{escapeHtml(edge.city_label || '未分类')}}</span>`;
       document.getElementById('chartTitle').textContent = `${{edge.a}} / ${{edge.b}} 24小时节点电价曲线`;
       drawChart(a, b, edge);
     }}
@@ -2009,21 +1943,7 @@ def _render_html(data: dict[str, object]) -> str:
       selectedEdgeName = '';
       selectedNodeName = node.name;
       document.querySelectorAll('.section-item').forEach(item => item.classList.remove('active'));
-      const prices = node.prices.filter(value => typeof value === 'number');
-      const average = prices.length ? prices.reduce((sum, value) => sum + value, 0) / prices.length : null;
-      const minimum = prices.length ? Math.min(...prices) : null;
-      const maximum = prices.length ? Math.max(...prices) : null;
-      const peakIndex = maximum === null ? -1 : node.prices.indexOf(maximum);
-      document.getElementById('detailTitle').innerHTML = `${{escapeHtml(node.name)}} <span class="pill">${{escapeHtml(node.region || '未分片')}}</span>`;
-      document.getElementById('detailSubtitle').textContent = '';
-      document.getElementById('metricLabel1').textContent = '平均电价';
-      document.getElementById('metricLabel2').textContent = '最低电价';
-      document.getElementById('metricLabel3').textContent = '最高电价';
-      document.getElementById('metricLabel4').textContent = '峰值时点';
-      document.getElementById('maxGap').textContent = average === null ? '-' : average.toFixed(2);
-      document.getElementById('intervals').textContent = minimum === null ? '-' : minimum.toFixed(2);
-      document.getElementById('direction').textContent = maximum === null ? '-' : maximum.toFixed(2);
-      document.getElementById('maxTime').textContent = peakIndex >= 0 ? (DATA.time_headers[peakIndex] || '-') : '-';
+      document.getElementById('detailTitle').innerHTML = `${{escapeHtml(node.name)}} <span class="pill">${{escapeHtml(node.city || '未分类')}}</span>`;
       document.getElementById('chartTitle').textContent = `${{node.name}} 24小时节点电价曲线`;
       drawNodeChart(node);
       if (window.innerWidth <= 920) document.getElementById('detailTitle').scrollIntoView({{ behavior:'smooth', block:'start' }});
@@ -2033,7 +1953,7 @@ def _render_html(data: dict[str, object]) -> str:
       const query = document.getElementById('sectionSearch').value.trim().toLowerCase();
       const sort = document.getElementById('sectionSort').value;
       const filtered = sectionEdges.filter(edge =>
-        [edge.edge, edge.group, edge.main_direction, edge.windows].join(' ').toLowerCase().includes(query));
+        [edge.edge, edge.city_label, edge.group, edge.main_direction, edge.windows].join(' ').toLowerCase().includes(query));
       visibleSectionNames = new Set(filtered.map(edge => edge.edge));
       sectionEdgeLines.forEach((line, name) => line.style.display = visibleSectionNames.has(name) ? '' : 'none');
       resetAllFlowArrows();
@@ -2056,7 +1976,7 @@ def _render_html(data: dict[str, object]) -> str:
         button.className = `section-item${{edge.edge === selectedEdgeName ? ' active' : ''}}`;
         button.dataset.edge = edge.edge;
         button.innerHTML = `<div class="item-top"><span>${{escapeHtml(edge.edge)}}</span><span class="item-gap">${{edge.max_abs_diff.toFixed(0)}}</span></div>
-          <div class="item-meta">${{escapeHtml(edge.group)}} · ${{edge.intervals}} 个时点 · ${{escapeHtml(flowDirectionLabel(edge))}}</div>`;
+          <div class="item-meta">${{escapeHtml(edge.city_label || '未分类')}} · ${{edge.intervals}} 个时点 · ${{escapeHtml(flowDirectionLabel(edge))}}</div>`;
         button.addEventListener('click', () => {{
           const line = edgeLines.get(edge.edge);
           if (line) selectEdge(edge, line);

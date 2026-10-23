@@ -6,12 +6,18 @@ from pathlib import Path
 
 from src.classify_500kv_nodes import topology_inventory
 from src.deduplicate_500kv_prices import load_topology_nodes
-from src.node_city_catalog import CITY_NODES, NODE_CITY, USER_CONFIRMED_CITIES, price_hierarchy
+from src.node_city_catalog import CITY_NODES, NODE_CITY, USER_CONFIRMED_CITIES, city_pair_label, price_hierarchy
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class RegionPriceCurvesTests(unittest.TestCase):
+    def test_endpoint_city_labels_collapse_same_city_and_preserve_order(self):
+        self.assertEqual(city_pair_label("广南变", "增城站"), "广州")
+        self.assertEqual(city_pair_label("广南变", "铜鼓电厂"), "广州-江门")
+        self.assertEqual(city_pair_label("铜鼓电厂", "广南变"), "江门-广州")
+        self.assertEqual(city_pair_label("新节点", "广南变"), "未分类-广州")
+
     def test_reviewed_catalog_covers_every_topology_node_once(self):
         nodes, _ = topology_inventory(ROOT / "500kV节点拓扑.md")
         self.assertEqual(nodes, set(NODE_CITY))
