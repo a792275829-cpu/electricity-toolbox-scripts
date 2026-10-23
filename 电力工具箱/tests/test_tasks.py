@@ -36,6 +36,50 @@ class EventBufferTests(unittest.TestCase):
 
 
 class ProcessRunnerTests(unittest.TestCase):
+    def test_permission_denied_group_probe_does_not_replace_cancellation(self):
+        import os
+        import signal
+        from unittest.mock import patch
+        from toolbox.tasks import CancellationToken, ProcessRunner, TaskCancelled
+
+        original_killpg = os.killpg
+        signals = []
+        def deny_probe(group, sig):
+            signals.append(sig)
+            if sig == 0:
+                raise PermissionError(1, 'Operation not permitted')
+            return original_killpg(group, sig)
+
+        token, runner = CancellationToken(), ProcessRunner(terminate_timeout=.15)
+        errors, ready = [], threading.Event()
+        def run():
+            try:
+                runner.run([sys.executable, '-u', '-c',
+                            'import time; print("ready", flush=True); time.sleep(30)'],
+                           cwd=Path.cwd(), env=None, token=token,
+                           on_output=lambda _: ready.set())
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=run)
+        with patch('toolbox.tasks.process.os.killpg', side_effect=deny_probe):
+            thread.start()
+            try:
+                self.assertTrue(ready.wait(3))
+                process = runner.active_process
+                token.cancel()
+                thread.join(3)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(len(errors), 1)
+                self.assertIsInstance(errors[0], TaskCancelled)
+                self.assertIn(0, signals)
+                self.assertIn(signal.SIGKILL, signals)
+                self.assertIsNotNone(process.poll())
+                self.assertIsNone(runner.active_process)
+            finally:
+                token.cancel()
+                thread.join(3)
+
     def test_already_cancelled_task_never_starts_a_process(self):
         from unittest.mock import patch
         from toolbox.tasks import CancellationToken, ProcessRunner, TaskCancelled

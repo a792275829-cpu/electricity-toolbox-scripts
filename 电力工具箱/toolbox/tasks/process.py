@@ -141,6 +141,10 @@ class ProcessRunner:
                     os.killpg(group, 0)
                 except ProcessLookupError:
                     break
+                except PermissionError:
+                    # The existence probe is advisory. macOS can deny it as
+                    # the group exits; still attempt SIGKILL and reap below.
+                    break
                 time.sleep(0.01)
         try:
             # The leader may already be gone while a child ignored SIGTERM.
