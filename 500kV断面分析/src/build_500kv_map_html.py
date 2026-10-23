@@ -808,7 +808,7 @@ def _render_html(data: dict[str, object]) -> str:
       border-radius: 14px;
       overflow: hidden;
       position: relative;
-      min-height: calc(100vh - 90px);
+      min-height: 0;
       box-shadow: var(--shadow);
     }}
     .zoom-controls {{
@@ -846,6 +846,8 @@ def _render_html(data: dict[str, object]) -> str:
       background: #081523;
     }}
     #map {{
+      height:calc(100vh - 332px);
+      min-height:360px;
       cursor: default;
       touch-action: none;
       overscroll-behavior: contain;
@@ -1053,25 +1055,15 @@ def _render_html(data: dict[str, object]) -> str:
     body[data-theme="light"] .label {{ fill:#243b4d; stroke:#fbfdff; stroke-width:5px; }}
     body[data-theme="light"] .label-leader {{ stroke:#6f8799; opacity:.72; }}
     body[data-theme="light"] .blocked-label {{ fill:#991b1b; stroke:#fff7f7; }}
-    .legend {{
-      position: absolute;
-      left: 14px;
-      bottom: 14px;
-      width: 310px;
-      padding: 12px;
-      border-radius: 10px;
-      background: color-mix(in srgb, var(--panel) 90%, transparent);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--line);
-      font-size: 12px;
-      color: var(--muted);
-    }}
-    .ramp {{
-      height: 10px;
-      border-radius: 999px;
-      background: linear-gradient(90deg, #ffd6d6, #fb7770, #c5161d, #64000a);
-      margin: 8px 0 6px;
-    }}
+    .topology-timeline {{ padding:14px 18px; border-top:1px solid var(--line); background:var(--panel); }}
+    .topology-time-heading {{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }}
+    .topology-time-heading strong {{ font-size:14px; }}
+    #topologyTimeLabel {{ font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--blue); }}
+    .topology-time-controls {{ display:flex; align-items:center; gap:12px; }}
+    .topology-time-controls button {{ min-width:44px; min-height:44px; border:1px solid var(--line); border-radius:8px; background:var(--soft); color:var(--ink); cursor:pointer; }}
+    .topology-time-track {{ flex:1; min-width:0; }}
+    #topologyTime {{ display:block; width:100%; margin:0; min-height:28px; accent-color:var(--blue); cursor:pointer; }}
+    .topology-time-ticks {{ display:flex; justify-content:space-between; color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }}
     .side {{
       background: var(--panel);
       border-left: 1px solid var(--line);
@@ -1175,7 +1167,7 @@ def _render_html(data: dict[str, object]) -> str:
     }}
     .focus-mode .app {{ grid-template-columns: 1fr; }}
     .focus-mode .side {{ display:none; }}
-    .focus-mode svg {{ height:calc(100vh - 139px); }}
+    .focus-mode #map {{ height:calc(100vh - 332px); min-height:300px; }}
     .pulse {{ animation:pulse 1.5s ease-in-out infinite; }}
     @keyframes pulse {{ 50% {{ filter:drop-shadow(0 0 9px var(--accent)); }} }}
     @media (prefers-reduced-motion: reduce) {{ *,*::before,*::after {{ animation:none!important; transition:none!important; }} }}
@@ -1185,6 +1177,7 @@ def _render_html(data: dict[str, object]) -> str:
       .map-pane {{ padding: 16px; }}
       .side {{ border-left: 0; border-top: 1px solid var(--line); max-height: none; position: static; }}
       svg {{ height: 62vh; min-height: 480px; }}
+      #map {{ height:62vh; min-height:480px; }}
       .map-shell {{ min-height: 0; }}
       .section-list {{ max-height: 280px; }}
     }}
@@ -1197,8 +1190,8 @@ def _render_html(data: dict[str, object]) -> str:
       .node-search {{ width:min(100%, 220px); }}
       .map-hint {{ display: none; }}
       .zoom-controls {{ top: 96px; }}
-      .legend {{ display:none; }}
       svg {{ height:78vw; min-height:300px; max-height:390px; }}
+      #map {{ height:78vw; min-height:300px; max-height:390px; }}
     }}
   </style>
   <style>{curve_css}</style>
@@ -1228,7 +1221,7 @@ def _render_html(data: dict[str, object]) -> str:
             <button class="toggle" id="focusSelected" type="button">定位所选</button>
             <button class="toggle" id="toggleTopology" type="button" aria-pressed="true">拓扑</button>
             <button class="toggle" id="toggleLabels" type="button" aria-pressed="true">标签</button>
-            <button class="toggle" id="toggleFlow" type="button" aria-pressed="false">潮流查看</button>
+            <button class="toggle" id="toggleFlow" type="button" aria-pressed="true">潮流查看</button>
           </div>
         </div>
         <svg id="map" viewBox="0 0 {SVG_W} {SVG_H}" role="img" aria-label="{map_label}">
@@ -1241,7 +1234,7 @@ def _render_html(data: dict[str, object]) -> str:
             {substrate}
             <g id="regions"></g>
             <g id="edges"></g>
-            <g id="flowArrows" class="is-hidden"></g>
+            <g id="flowArrows"></g>
             <g id="labelLeaders"></g>
             <g id="nodes"></g>
             <g id="nodeLabels"></g>
@@ -1252,11 +1245,15 @@ def _render_html(data: dict[str, object]) -> str:
           <button id="zoomOut" type="button" title="缩小">−</button>
           <button id="zoomReset" type="button" title="重置">⌂</button>
         </div>
-        <div class="legend" aria-label="断面强度颜色图例">
-          <strong>断面强度</strong>
-          <div class="ramp" aria-hidden="true"></div>
-          <div>浅：触发时点较少、价差较小　深：累计时点更多、价差更大</div>
-        </div>
+        <section class="topology-timeline" aria-label="24小时潮流方向时间轴">
+          <div class="topology-time-heading"><strong title="按节点价差推断方向：低价到高价">24小时潮流方向</strong><output id="topologyTimeLabel" for="topologyTime">00:00</output></div>
+          <div class="topology-time-controls">
+            <button id="topologyTimePrev" type="button" aria-label="前15分钟">‹</button>
+            <div class="topology-time-track"><input id="topologyTime" type="range" min="0" max="95" step="1" value="0" aria-label="潮流时点，每格15分钟">
+              <div class="topology-time-ticks" aria-hidden="true"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:45</span></div></div>
+            <button id="topologyTimeNext" type="button" aria-label="后15分钟">›</button>
+          </div>
+        </section>
       </div>
     </main>
     <aside class="side">
@@ -1348,7 +1345,10 @@ def _render_html(data: dict[str, object]) -> str:
     let drag = null;
     let trackpadUntil = 0;
     let gestureBaseScale = null;
-    let flowVisible = false;
+    let flowVisible = true;
+    let topologyTimeSlot = 0;
+    const topologyTimes = Array.from({{length:96}}, (_, i) => `${{String(Math.floor(i / 4)).padStart(2,'0')}}:${{String(i % 4 * 15).padStart(2,'0')}}`);
+    const topologyTimeIndices = topologyTimes.map(time => DATA.time_headers.indexOf(time));
 
     function clampView() {{
       const visibleMarginX = {SVG_W} * .12;
@@ -1573,27 +1573,14 @@ def _render_html(data: dict[str, object]) -> str:
       item.title.textContent = time
         ? `${{time}}｜${{direction}}｜价差${{Number(gap || 0).toFixed(2)}}元/MWh`
         : flowTooltip(edge);
+      item.group.dataset.direction = direction;
+      item.group.dataset.time = time;
+      item.group.setAttribute('aria-label', `${{edge.edge}} ${{time}} ${{direction}}`);
       item.group.style.display = '';
     }}
 
     function resetFlowArrow(edge) {{
-      const item = flowArrowItems.get(edge.edge);
-      if (!item) return;
-      if (edge.is_section && !visibleSectionNames.has(edge.edge)) {{
-        item.group.style.display = 'none';
-        return;
-      }}
-      if (edge.flow_kind === 'bidirectional') {{
-        const maximumGap = Math.max(...edge.flow_directions.map(item => Number(item.max_abs_diff) || 0));
-        setFlowArrowGeometry(edge, item, 'bidirectional', maximumGap);
-        return;
-      }}
-      const primary = edge.flow_directions?.[0];
-      if (!primary) {{
-        item.group.style.display = 'none';
-        return;
-      }}
-      setFlowArrowGeometry(edge, item, primary.direction, primary.max_abs_diff);
+      updateFlowForTime(edge, topologyTimeIndices[topologyTimeSlot]);
     }}
 
     function resetAllFlowArrows() {{
@@ -1613,7 +1600,7 @@ def _render_html(data: dict[str, object]) -> str:
       const b = nodeByName.get(edge.b);
       const priceA = a?.prices[index];
       const priceB = b?.prices[index];
-      if (!direction || typeof priceA !== 'number' || typeof priceB !== 'number') {{
+      if (!direction || !Number.isFinite(priceA) || !Number.isFinite(priceB)) {{
         item.group.style.display = 'none';
         return;
       }}
@@ -1622,6 +1609,7 @@ def _render_html(data: dict[str, object]) -> str:
 
     DATA.edges.filter(edge => edge.flow_kind !== 'none').forEach(edge => {{
       const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      group.dataset.edge = edge.edge;
       group.setAttribute('class', edge.is_section ? 'flow-arrow section-flow' : 'flow-arrow non-section-flow');
       group.setAttribute('tabindex', '0');
       group.setAttribute('role', 'button');
@@ -2022,6 +2010,26 @@ def _render_html(data: dict[str, object]) -> str:
       flowArrowsG.classList.toggle('is-hidden', !flowVisible);
       if (flowVisible) resetAllFlowArrows();
     }});
+    function setTopologyTime(slot, reveal = true) {{
+      topologyTimeSlot = Math.max(0, Math.min(95, Math.round(Number(slot) || 0)));
+      const time = topologyTimes[topologyTimeSlot];
+      const slider = document.getElementById('topologyTime');
+      slider.value = String(topologyTimeSlot);
+      slider.setAttribute('aria-valuetext', time);
+      document.getElementById('topologyTimeLabel').textContent = time;
+      document.getElementById('topologyTimePrev').disabled = topologyTimeSlot === 0;
+      document.getElementById('topologyTimeNext').disabled = topologyTimeSlot === 95;
+      if (reveal) {{
+        flowVisible = true;
+        document.getElementById('toggleFlow').setAttribute('aria-pressed', 'true');
+        flowArrowsG.classList.remove('is-hidden');
+      }}
+      resetAllFlowArrows();
+    }}
+    document.getElementById('topologyTime').addEventListener('input', event => setTopologyTime(event.target.value));
+    document.getElementById('topologyTimePrev').addEventListener('click', () => setTopologyTime(topologyTimeSlot - 1));
+    document.getElementById('topologyTimeNext').addEventListener('click', () => setTopologyTime(topologyTimeSlot + 1));
+    setTopologyTime(0, false);
     const nodeSearch = document.getElementById('nodeSearch');
     function matchingNodes() {{
       const query = nodeSearch.value.trim().toLowerCase();
@@ -2305,7 +2313,10 @@ def _render_html(data: dict[str, object]) -> str:
           {{ name: b.name, color: '#e02020', prices: b.prices }}
         ],
         x, y, count: DATA.time_headers.length, margin, width, height, make,
-        onIndexChange: index => updateFlowForTime(edge, index),
+        onIndexChange: index => {{
+          const slot = topologyTimes.indexOf(DATA.time_headers[index]);
+          if (slot >= 0) setTopologyTime(slot, false);
+        }},
         onLeave: () => resetFlowArrow(edge)
       }});
 
