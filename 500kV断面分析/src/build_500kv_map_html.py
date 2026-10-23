@@ -933,13 +933,13 @@ def _render_html(data: dict[str, object]) -> str:
       pointer-events: stroke;
     }}
     .flow-arrow-line {{ stroke:#087ca7; stroke-width:1.3; opacity:.3; pointer-events:none; vector-effect:non-scaling-stroke; }}
-    .flow-packet {{ color:#0069d8; pointer-events:none; filter:drop-shadow(0 0 2px rgba(255,255,255,.85)); }}
+    .flow-packet {{ color:#0069d8; pointer-events:none; }}
     .flow-packet path {{ fill:none; stroke:currentColor; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }}
     .flow-packet .flow-tail {{ opacity:.42; stroke-width:2.4; }}
     .flow-arrow:hover .flow-packet,.flow-arrow:focus-visible .flow-packet {{ color:#ed6600; }}
     .flow-arrow.context-dimmed {{ opacity:.14; }}
     @media (prefers-reduced-motion:reduce) {{ .flow-packet {{ opacity:1!important; }} }}
-    body:not([data-theme="light"]) .flow-packet {{ color:#72eeff; filter:drop-shadow(0 0 3px rgba(42,201,255,.7)); }}
+    body:not([data-theme="light"]) .flow-packet {{ color:#72eeff; }}
     body:not([data-theme="light"]) .flow-arrow-line {{ stroke:#67e8f9; }}
     .node {{
       fill: #b9eaff;
@@ -1299,7 +1299,7 @@ def _render_html(data: dict[str, object]) -> str:
     let trackpadUntil = 0;
     let gestureBaseScale = null;
     let flowVisible = true;
-    let topologyTimeSlot = 0;
+    let topologyTimeSlot = 0, lastTopologyDisplay = -1;
     let nodePriceHover = null;
     const topologyTimes = Array.from({{length:96}}, (_, i) => `${{String(Math.floor(i / 4)).padStart(2,'0')}}:${{String(i % 4 * 15).padStart(2,'0')}}`);
     const topologyTimeIndices = topologyTimes.map(time => DATA.time_headers.indexOf(time));
@@ -1486,10 +1486,40 @@ def _render_html(data: dict[str, object]) -> str:
 
     const flowArrowsG = document.getElementById('flowArrows');
     const flowMotionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+    const activeFlowItems = [];
+    let flowAnimationFrame = 0, flowMotionRunning = false, flowLastFrame = 0, flowClock = 370;
+    function renderFlowPackets() {{
+      activeFlowItems.forEach(item => {{
+        const box = item.bounds;
+        if (box[0]*view.scale+view.x > mapCanvas.width || box[2]*view.scale+view.x < 0 ||
+            box[1]*view.scale+view.y > mapCanvas.height || box[3]*view.scale+view.y < 0) return;
+        const phase = flowClock * .065 / item.routeLength;
+        item.packets.forEach((packet,index) => {{
+          const offset = ((phase + index/item.packets.length) % 1) * item.routeLength;
+          packet.element.setAttribute('transform', `translate(${{offset.toFixed(2)}} 0)`);
+        }});
+      }});
+    }}
+    function advanceFlowFrame(timestamp) {{
+      flowAnimationFrame = 0;
+      if (!flowMotionRunning) return;
+      if (!flowLastFrame) flowLastFrame = timestamp;
+      const elapsed = timestamp-flowLastFrame;
+      if (elapsed >= 1000/30-1) {{
+        flowClock += elapsed;
+        flowLastFrame = timestamp;
+        renderFlowPackets();
+      }}
+      flowAnimationFrame = requestAnimationFrame(advanceFlowFrame);
+    }}
     function syncFlowMotion() {{
-      const pause = !flowVisible || document.querySelector('.app').hidden || document.hidden || flowMotionPreference.matches;
-      if (pause && !mapSvg.animationsPaused()) mapSvg.pauseAnimations();
-      else if (!pause && mapSvg.animationsPaused()) mapSvg.unpauseAnimations();
+      const running = flowVisible && !document.querySelector('.app').hidden && !document.hidden && !flowMotionPreference.matches;
+      if (running === flowMotionRunning) return;
+      flowMotionRunning = running;
+      if (flowAnimationFrame) cancelAnimationFrame(flowAnimationFrame);
+      flowAnimationFrame = 0;flowLastFrame = 0;
+      if (running) flowAnimationFrame = requestAnimationFrame(advanceFlowFrame);
+      else renderFlowPackets();
     }}
     flowMotionPreference.addEventListener('change', syncFlowMotion);
     document.addEventListener('visibilitychange', syncFlowMotion);
@@ -1501,35 +1531,32 @@ def _render_html(data: dict[str, object]) -> str:
     }}
 
     function setFlowGeometry(edge, item, direction, time) {{
-      const reverse = direction === `${{edge.b}}->${{edge.a}}`;
-      const startX = reverse ? edge.x2 : edge.x1, startY = reverse ? edge.y2 : edge.y1;
-      const endX = reverse ? edge.x1 : edge.x2, endY = reverse ? edge.y1 : edge.y2;
-      const length = Math.max(Math.hypot(endX - startX, endY - startY), 1);
-      const inset = Math.min(12, length * .2);
-      const dx = (endX - startX) / length, dy = (endY - startY) / length;
-      [item.hit, item.line].forEach(element => {{
-        element.setAttribute('x1', startX + dx * inset);
-        element.setAttribute('y1', startY + dy * inset);
-        element.setAttribute('x2', endX - dx * inset);
-        element.setAttribute('y2', endY - dy * inset);
-      }});
-      const routeLength = Math.max(1, length - inset * 2);
-      const duration = routeLength / 65;
-      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-      item.route.setAttribute('transform', `translate(${{startX + dx * inset}} ${{startY + dy * inset}}) rotate(${{angle}})`);
-      item.packets.forEach((packet, index) => {{
-        packet.motion.setAttribute('to', `${{routeLength}} 0`);
-        [packet.motion, packet.fade].forEach(animation => {{
-          const dur = `${{duration}}s`, begin = `${{-index * duration / item.packets.length}}s`;
-          if (animation.getAttribute('dur') !== dur) animation.setAttribute('dur', dur);
-          if (animation.getAttribute('begin') !== begin) animation.setAttribute('begin', begin);
+      if (item.direction === direction && item.time === time && item.group.style.display !== 'none') return;
+      if (item.direction !== direction) {{
+        const reverse = direction === `${{edge.b}}->${{edge.a}}`;
+        const startX = reverse ? edge.x2 : edge.x1, startY = reverse ? edge.y2 : edge.y1;
+        const endX = reverse ? edge.x1 : edge.x2, endY = reverse ? edge.y1 : edge.y2;
+        const length = Math.max(Math.hypot(endX - startX, endY - startY), 1);
+        const inset = Math.min(12, length * .2);
+        const dx = (endX - startX) / length, dy = (endY - startY) / length;
+        [item.hit, item.line].forEach(element => {{
+          element.setAttribute('x1', startX + dx * inset);
+          element.setAttribute('y1', startY + dy * inset);
+          element.setAttribute('x2', endX - dx * inset);
+          element.setAttribute('y2', endY - dy * inset);
         }});
-      }});
+        const routeLength = Math.max(1, length - inset * 2);
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        item.route.setAttribute('transform', `translate(${{startX + dx * inset}} ${{startY + dy * inset}}) rotate(${{angle}})`);
+        item.routeLength = routeLength;
+        item.direction = direction;
+      }}
+      item.time = time;
       item.title.textContent = `${{time}}｜${{direction}}`;
       item.group.dataset.direction = direction;
       item.group.dataset.time = time;
       item.group.setAttribute('aria-label', `${{edge.edge}} ${{time}} ${{direction}}`);
-      item.group.style.display = '';
+      if (item.group.style.display === 'none') item.group.style.display = '';
     }}
 
     function resetFlowArrow(edge) {{
@@ -1538,13 +1565,16 @@ def _render_html(data: dict[str, object]) -> str:
 
     function resetAllFlowArrows() {{
       DATA.edges.forEach(resetFlowArrow);
+      activeFlowItems.length = 0;
+      flowArrowItems.forEach(item => {{ if (item.group.style.display !== 'none' && item.routeLength) activeFlowItems.push(item); }});
+      if (!flowMotionRunning) renderFlowPackets();
     }}
 
     function updateFlowForTime(edge, index) {{
       const item = flowArrowItems.get(edge.edge);
       if (!item) return;
       if (edge.is_section && !visibleSectionNames.has(edge.edge)) {{
-        item.group.style.display = 'none';
+        if (item.group.style.display !== 'none') item.group.style.display = 'none';
         return;
       }}
       const time = DATA.time_headers[index];
@@ -1554,7 +1584,7 @@ def _render_html(data: dict[str, object]) -> str:
       const priceA = a?.prices[index];
       const priceB = b?.prices[index];
       if (!direction || !Number.isFinite(priceA) || !Number.isFinite(priceB)) {{
-        item.group.style.display = 'none';
+        if (item.group.style.display !== 'none') item.group.style.display = 'none';
         return;
       }}
       setFlowGeometry(edge, item, direction, time);
@@ -1574,7 +1604,7 @@ def _render_html(data: dict[str, object]) -> str:
       line.setAttribute('class', 'flow-arrow-line');
       const route = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       route.setAttribute('class', 'flow-route');
-      const count = Math.max(1, Math.min(8, Math.ceil(Math.hypot(edge.x2-edge.x1, edge.y2-edge.y1) / 100)));
+      const count = Math.max(1, Math.min(2, Math.ceil(Math.hypot(edge.x2-edge.x1, edge.y2-edge.y1) / 180)));
       const packets = Array.from({{length:count}}, () => {{
         const packet = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         packet.setAttribute('class', 'flow-packet');
@@ -1582,14 +1612,8 @@ def _render_html(data: dict[str, object]) -> str:
         tail.setAttribute('d', 'M -18 -5 L -12 0 L -18 5');tail.setAttribute('class', 'flow-tail');
         const head = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         head.setAttribute('d', 'M -7 -5 L 0 0 L -7 5');head.setAttribute('class', 'flow-head');
-        const motion = document.createElementNS('http://www.w3.org/2000/svg', 'animateTransform');
-        motion.setAttribute('attributeName', 'transform');motion.setAttribute('type', 'translate');
-        motion.setAttribute('from', '0 0');motion.setAttribute('repeatCount', 'indefinite');
-        const fade = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
-        fade.setAttribute('attributeName', 'opacity');fade.setAttribute('values', '0;1;1;0');
-        fade.setAttribute('keyTimes', '0;0.12;0.88;1');fade.setAttribute('repeatCount', 'indefinite');
-        packet.append(tail,head,motion,fade);route.append(packet);
-        return {{motion,fade}};
+        packet.append(tail,head);route.append(packet);
+        return {{element:packet}};
       }});
       group.append(title, hit, line, route);
       const activate = event => {{
@@ -1607,7 +1631,7 @@ def _render_html(data: dict[str, object]) -> str:
         if (event.key === 'Enter' || event.key === ' ') activate(event);
       }});
       flowArrowsG.appendChild(group);
-      flowArrowItems.set(edge.edge, {{ group, title, hit, line, route, packets }});
+      flowArrowItems.set(edge.edge, {{ group, title, hit, line, route, packets, bounds:[Math.min(edge.x1,edge.x2),Math.min(edge.y1,edge.y2),Math.max(edge.x1,edge.x2),Math.max(edge.y1,edge.y2)] }});
       resetFlowArrow(edge);
     }});
 
@@ -1619,12 +1643,16 @@ def _render_html(data: dict[str, object]) -> str:
     function showNodePriceTooltip(node, element, clientX, clientY) {{
       const tooltip = document.getElementById('nodePriceTooltip');
       if (nodePriceHover?.element !== element) nodePriceHover?.element.removeAttribute('aria-describedby');
-      nodePriceHover = {{node, element, clientX, clientY}};
-      element.setAttribute('aria-describedby', 'nodePriceTooltip');
-      const price = node.prices[topologyTimeIndices[topologyTimeSlot]];
-      document.getElementById('nodePriceValue').textContent = Number.isFinite(price) ? price.toFixed(4) : '暂无数据';
-      tooltip.hidden = false;
-      const box = tooltip.getBoundingClientRect();
+      const cached = nodePriceHover?.node === node && nodePriceHover.element === element && nodePriceHover.slot === topologyTimeSlot && !tooltip.hidden;
+      let box = cached ? nodePriceHover.box : null;
+      if (!cached) {{
+        element.setAttribute('aria-describedby', 'nodePriceTooltip');
+        const price = node.prices[topologyTimeIndices[topologyTimeSlot]];
+        document.getElementById('nodePriceValue').textContent = Number.isFinite(price) ? price.toFixed(4) : '暂无数据';
+        tooltip.hidden = false;
+        box = tooltip.getBoundingClientRect();
+      }}
+      nodePriceHover = {{node, element, clientX, clientY, box, slot:topologyTimeSlot}};
       const left = clientX + 16 + box.width < innerWidth - 12 ? clientX + 16 : clientX - box.width - 16;
       tooltip.style.left = `${{Math.max(12, Math.min(innerWidth - box.width - 12, left))}}px`;
       tooltip.style.top = `${{Math.max(12, Math.min(innerHeight - box.height - 12, clientY + 14))}}px`;
@@ -2048,7 +2076,11 @@ def _render_html(data: dict[str, object]) -> str:
       syncFlowMotion();
     }});
     function setTopologyTime(slot, reveal = true) {{
-      topologyTimeSlot = Math.max(0, Math.min(95, Math.round(Number(slot) || 0)));
+      if (topologyTimeFrame) {{ cancelAnimationFrame(topologyTimeFrame); topologyTimeFrame=0; }}
+      const nextSlot = Math.max(0, Math.min(95, Math.round(Number(slot) || 0)));
+      if (nextSlot === lastTopologyDisplay && (!reveal || flowVisible)) return;
+      lastTopologyDisplay = nextSlot;
+      topologyTimeSlot = nextSlot;
       const time = topologyTimes[topologyTimeSlot];
       const slider = document.getElementById('topologyTime');
       slider.value = String(topologyTimeSlot);
@@ -2069,7 +2101,15 @@ def _render_html(data: dict[str, object]) -> str:
       }}
       resetAllFlowArrows();
     }}
-    document.getElementById('topologyTime').addEventListener('input', event => setTopologyTime(event.target.value));
+    let pendingTopologySlot = null, topologyTimeFrame = 0;
+    document.getElementById('topologyTime').addEventListener('input', event => {{
+      pendingTopologySlot = Number(event.target.value);
+      if (topologyTimeFrame) return;
+      topologyTimeFrame = requestAnimationFrame(() => {{
+        topologyTimeFrame = 0;
+        setTopologyTime(pendingTopologySlot);
+      }});
+    }});
     document.getElementById('topologyTimePrev').addEventListener('click', () => setTopologyTime(topologyTimeSlot - 1));
     document.getElementById('topologyTimeNext').addEventListener('click', () => setTopologyTime(topologyTimeSlot + 1));
     setTopologyTime(0, false);
