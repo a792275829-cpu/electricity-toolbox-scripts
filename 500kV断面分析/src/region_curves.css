@@ -89,3 +89,6 @@ body[data-theme=dark] .curve-tooltip { background:rgba(12,23,38,.62); color:#e9f
   .curve-controls label { width:100%; }
   .curve-ranking-grid { grid-template-columns:1fr; gap:8px; }
 }
+
+#nodePriceTooltip { padding:6px 9px; background:rgba(255,255,255,.25); border-color:rgba(145,163,188,.12); backdrop-filter:blur(1px); -webkit-backdrop-filter:blur(1px); box-shadow:0 2px 8px rgba(28,44,66,.06); font-variant-numeric:tabular-nums; }
+body[data-theme=dark] #nodePriceTooltip { background:rgba(12,23,38,.25); }

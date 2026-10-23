@@ -1284,7 +1284,7 @@ def _render_html(data: dict[str, object]) -> str:
     </aside>
   </div>
   <div id="nodePriceTooltip" class="curve-tooltip" role="tooltip" hidden>
-    <h3 id="nodePriceName"></h3><div class="curve-tooltip-row"><span id="nodePriceTime"></span><b id="nodePriceValue"></b></div>
+    <b id="nodePriceValue"></b>
   </div>
   <script>
     const DATA = {json_data};
@@ -1656,9 +1656,7 @@ def _render_html(data: dict[str, object]) -> str:
       nodePriceHover = {{node, element, clientX, clientY}};
       element.setAttribute('aria-describedby', 'nodePriceTooltip');
       const price = node.prices[topologyTimeIndices[topologyTimeSlot]];
-      document.getElementById('nodePriceName').textContent = node.name;
-      document.getElementById('nodePriceTime').textContent = topologyTimes[topologyTimeSlot];
-      document.getElementById('nodePriceValue').textContent = Number.isFinite(price) ? `${{price.toFixed(4)}} 元/MWh` : '暂无数据';
+      document.getElementById('nodePriceValue').textContent = Number.isFinite(price) ? price.toFixed(4) : '暂无数据';
       tooltip.hidden = false;
       const box = tooltip.getBoundingClientRect();
       const left = clientX + 16 + box.width < innerWidth - 12 ? clientX + 16 : clientX - box.width - 16;
