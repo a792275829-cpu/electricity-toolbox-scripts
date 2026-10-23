@@ -10,8 +10,9 @@ from typing import Iterable
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from src.analyze_500kv_section_gaps import normalize_price_node_name, parse_topology_edges
+from src.analyze_500kv_section_gaps import normalize_price_node_name
 from src.price_xlsx_backend import open_price_workbooks
+from src.classify_500kv_nodes import topology_inventory
 
 
 TIME_HEADER_RE = re.compile(r"^\d{2}:\d{2}$")
@@ -43,8 +44,8 @@ def default_output_path(input_path: Path) -> Path:
 
 
 def load_topology_nodes(topology_path: Path) -> list[str]:
-    edges, _ = parse_topology_edges(Path(topology_path))
-    return sorted({edge.a for edge in edges} | {edge.b for edge in edges})
+    nodes, _ = topology_inventory(Path(topology_path))
+    return sorted(nodes)
 
 
 def match_topology_node(node_name: object, topology_nodes: Iterable[str]) -> str | None:

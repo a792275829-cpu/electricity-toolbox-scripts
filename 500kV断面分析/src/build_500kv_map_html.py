@@ -19,6 +19,9 @@ from src.analyze_500kv_section_gaps import (
     parse_topology_edges,
     read_price_workbook,
 )
+from src.classify_500kv_nodes import topology_inventory
+from src.node_city_catalog import price_hierarchy
+from src.region_curve_view import VIEW_HTML, view_assets
 
 
 REGION_CENTERS = {
@@ -244,10 +247,20 @@ def build_map_html(
     }
     nodes = _build_node_payloads(topology_nodes, node_regions, coordinates, matched_rows, time_headers, blocked_nodes)
     regions = _build_region_payloads(nodes)
+    curve_names, connected_names = topology_inventory(topology_path)
+    curve_regions = price_hierarchy(curve_names)
+    administrative = {name: (region["name"], city["name"])
+                      for region in curve_regions for city in region["cities"] for name in city["nodes"]}
+    curve_rows = match_price_rows(curve_names, price_rows)
+    curve_nodes = [{"name": name, "region": administrative[name][0], "city": administrative[name][1],
+                    "connected": name in connected_names,
+                    "prices": [curve_rows[name]["prices"].get(t) for t in time_headers] if name in curve_rows else []}
+                   for region in curve_regions for city in region["cities"] for name in city["nodes"]]
 
     data = {
         "nodes": nodes,
         "regions": regions,
+        "curve_data": {"regions": curve_regions, "nodes": curve_nodes},
         "edges": severity_by_edge,
         "time_headers": time_headers,
         "group_summary": group_summary,
@@ -672,7 +685,8 @@ def _outline_points() -> str:
 
 
 def _render_html(data: dict[str, object]) -> str:
-    json_data = json.dumps(data, ensure_ascii=False, allow_nan=False)
+    json_data = json.dumps(data, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
+    curve_css, curve_js = view_assets()
     outline = _outline_points()
     diagram_mode = data.get("metadata", {}).get("coordinate_mode") == "wiring-diagram"
     artifact_title = "广东电网 500kV 接线拓扑与电价分析" if diagram_mode else "广东省电网 500kV 节点断面地图"
@@ -1187,8 +1201,13 @@ def _render_html(data: dict[str, object]) -> str:
       svg {{ height:78vw; min-height:300px; max-height:390px; }}
     }}
   </style>
+  <style>{curve_css}</style>
 </head>
 <body data-theme="light">
+  <nav class="analysis-views" aria-label="分析视图">
+    <button type="button" id="showTopology" aria-pressed="true">接线拓扑</button>
+    <button type="button" id="showRegionCurves" aria-pressed="false">区域电价曲线</button>
+  </nav>
   <div class="app">
     <main class="map-pane">
       <div class="title-row">
@@ -2303,6 +2322,8 @@ def _render_html(data: dict[str, object]) -> str:
       if (line) selectEdge(strongest, line);
     }}
   </script>
+  {VIEW_HTML}
+  <script>{curve_js}</script>
 </body>
 </html>
 """

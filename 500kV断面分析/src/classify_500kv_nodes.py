@@ -14,14 +14,9 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.analyze_500kv_section_gaps import normalize_price_node_name, parse_topology_edges
+from src.node_city_catalog import REGIONS, USER_CONFIRMED_CITIES
 
 MODULE_ROOT = Path(__file__).resolve().parents[1]
-REGIONS = (
-    ("珠三角地区", ("广州", "深圳", "珠海", "佛山", "惠州", "东莞", "中山", "江门", "肇庆")),
-    ("粤东地区", ("汕头", "潮州", "揭阳", "汕尾")),
-    ("粤西地区", ("湛江", "茂名", "阳江")),
-    ("粤北地区", ("韶关", "河源", "梅州", "清远", "云浮")),
-)
 CITY_REGION = {city: region for region, cities in REGIONS for city in cities}
 
 
@@ -62,7 +57,8 @@ def topology_inventory(path: Path):
     return connected | declared, connected
 
 
-def classify(workbook: Path, topology: Path) -> dict:
+def classify(workbook: Path, topology: Path, *, confirmed_cities=None) -> dict:
+    confirmed_cities = USER_CONFIRMED_CITIES if confirmed_cities is None else confirmed_cities
     nodes, connected = topology_inventory(topology)
     book = load_workbook(workbook, read_only=True, data_only=True)
     accepted: dict[str, list[dict]] = {}
@@ -118,6 +114,12 @@ def classify(workbook: Path, topology: Path) -> dict:
         evidence = accepted.get(node_key(name), [])
         cities = {item["city"] for item in evidence}
         city = next(iter(cities)) if len(cities) == 1 else None
+        if name in confirmed_cities:
+            city = confirmed_cities[name]
+            if city not in CITY_REGION:
+                raise ValueError(f"确认地市不在指定21市中：{city}")
+            evidence = [{"city": city, "source_city": city + "市", "source_node": name,
+                         "sheet": "用户确认", "row": None, "source_status": "2026-10-23用户确认"}]
         candidate = pending.get(node_key(name), [])
         reason = ("来源存在多个地市归属，需确认" if len(cities) > 1 else
                   "来源补充表标记待核验，暂不归类" if candidate else
@@ -141,6 +143,7 @@ def classify(workbook: Path, topology: Path) -> dict:
             "rules": ["仅包含拓扑名单及已确认接线中的节点，使用拓扑原名作稳定键",
                       "按用户指定的4大区21市排序；不从接线片区标题推断行政地市",
                       "站/变、厂/电厂及核电/核电厂写法规范化；A/B/C及省份后缀保留",
+                      "徐闻开关站、玄陆升压站、铜鼓电厂、阳西A厂使用2026-10-23用户确认的地市",
                       "待核验与无法匹配节点单独保留，不纳入已分类菜单；不计算区域均价"],
             "summary": {"topology_nodes": len(nodes), "connected_nodes": len(connected),
                         "classified_nodes": len(records) - len(unclassified), "unclassified_nodes": len(unclassified),
@@ -158,6 +161,8 @@ def write_report(result: dict, path: Path) -> None:
         candidates = sorted({e["source_city"] for e in node["evidence"] if e["source_city"]})
         suffix = "；来源候选：" + "、".join(candidates) if candidates else ""
         lines.append(f"- {node['name']}：{node['reason']}{suffix}。")
+    if not result["unclassified"]:
+        lines.append("无；4个原待确认节点已按用户确认归类。")
     lines.extend(["", "## 来源及范围差异", "", *["- " + w for w in result["warnings"]], ""])
     for region in result["regions"]:
         lines.extend(["## " + region["label"], ""])
@@ -178,7 +183,7 @@ def main() -> None:
     (args.output_dir / "500kv_node_regions.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_report(result, args.output_dir / "500kV拓扑节点区域分类.md")
     print(json.dumps(result["summary"], ensure_ascii=False))
-    print("待确认：" + "、".join(node["name"] for node in result["unclassified"]))
+    print("待确认：" + ("、".join(node["name"] for node in result["unclassified"]) or "无"))
 
 
 if __name__ == "__main__":

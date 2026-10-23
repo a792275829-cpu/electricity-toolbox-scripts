@@ -36,11 +36,19 @@ class Classify500kvNodesTests(unittest.TestCase):
                           for _, cities in REGIONS for city in cities])
         self.supplement = [["识别状态", "匹配地市", "补充记录统一节点名", "原始节点名称（逐条）"]]
 
-    def run_classify(self):
+    def run_classify(self, confirmed_cities=None):
         book = Book({"各市节点名单": Sheet("各市节点名单", self.rows),
                      "补充节点待核验": Sheet("补充节点待核验", self.supplement)})
         with patch("src.classify_500kv_nodes.load_workbook", return_value=book):
-            return classify(self.workbook, self.topology)
+            return classify(self.workbook, self.topology, confirmed_cities=confirmed_cities or {})
+
+    def test_human_confirmation_resolves_pending_city_with_its_own_evidence(self):
+        self.supplement.append(["地市待核验", "江门市", "阳西A厂", "阳西A厂500kV#1M"])
+        result = self.run_classify({"阳西A厂": "阳江"})
+        node = next(n for n in result["nodes"] if n["name"] == "阳西A厂")
+        self.assertEqual(node["city"], "阳江")
+        self.assertEqual(node["evidence"][0]["sheet"], "用户确认")
+        self.assertEqual(node["status"], "classified")
 
     def test_city_order_preserves_all_21_cities_and_only_topology_nodes(self):
         result = self.run_classify()
