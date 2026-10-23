@@ -64,6 +64,35 @@ console.log('aggregation and gaps verified');
                                 text=True, capture_output=True, check=True)
         self.assertIn("verified", result.stdout)
 
+    @unittest.skipUnless(shutil.which("node"), "Node only needed to test embedded JS")
+    def test_js_price_sort_and_daily_rankings_preserve_zero_and_missingness(self):
+        script = r"""
+const assert = require('node:assert/strict');
+require(process.argv[1]);
+const {meanPrice, sortReadings, rankNodes} = globalThis.RegionPriceCurves;
+const items = [
+ {name:'A',prices:[0,null,10]},
+ {name:'B',prices:[-2,-4,null]},
+ {name:'C',prices:[null,null,null]},
+ {name:'D',prices:[6,6,6]},
+];
+assert.equal(meanPrice([0,null,10,Infinity]),5);
+assert.equal(meanPrice([null,NaN]),null);
+assert.deepEqual(sortReadings(items,0,'time-desc').map(n=>n.name),['D','A','B','C']);
+assert.deepEqual(sortReadings(items,0,'time-asc').map(n=>n.name),['B','A','D','C']);
+assert.deepEqual(sortReadings(items,1,'mean-asc').map(n=>n.name),['B','A','D','C']);
+assert.deepEqual(items.map(n=>n.name),['A','B','C','D']); // sorting cannot mutate legend order
+const high = rankNodes(items,new Set(['A','B','C']));
+assert.deepEqual(high.map(n=>n.name),['A','B']);
+assert.deepEqual(high[0],{name:'A',mean:5,count:2,total:3});
+assert.equal(rankNodes(items,new Set(['A','B']),false,1)[0].mean,-3);
+assert.deepEqual(rankNodes(items,new Set(['C'])),[]);
+console.log('rankings verified');
+"""
+        result = subprocess.run([shutil.which("node"), "-e", script, str(ROOT / "src/region_curves.js")],
+                                text=True, capture_output=True, check=True)
+        self.assertIn("rankings verified", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
