@@ -1263,19 +1263,6 @@ def _render_html(data: dict[str, object]) -> str:
       </div>
     </main>
     <aside class="side">
-      <div class="side-header"><span class="side-label">断面导航</span><span class="pill" id="visibleCount">0 条</span></div>
-      <input class="search" id="sectionSearch" type="search" placeholder="搜索节点、片区或方向" aria-label="搜索断面">
-      <div class="list-head">
-        <strong>断面列表</strong>
-        <select class="sort-select" id="sectionSort" aria-label="断面排序">
-          <option value="severity">按严重度</option>
-          <option value="gap">按最大价差</option>
-          <option value="duration">按累计时点</option>
-          <option value="name">按名称</option>
-        </select>
-      </div>
-      <div class="section-list" id="sectionList"></div>
-      <hr class="detail-divider">
       <p class="panel-title" id="detailTitle">点击任意节点查看电价数据</p>
       <div class="panel-subtitle" id="detailSubtitle">当前共识别 <span id="sectionCount"></span> 条价差断面；可点击节点查看分时电价和相邻线路。</div>
       <div class="metric-grid">
@@ -1289,6 +1276,19 @@ def _render_html(data: dict[str, object]) -> str:
         <svg id="priceChart" viewBox="0 0 360 280" role="img" aria-label="两端节点24小时电价曲线"></svg>
       </div>
       <div class="source" id="sourceText"></div>
+      <hr class="detail-divider">
+      <div class="side-header"><span class="side-label">断面导航</span><span class="pill" id="visibleCount">0 条</span></div>
+      <input class="search" id="sectionSearch" type="search" placeholder="搜索节点、片区或方向" aria-label="搜索断面">
+      <div class="list-head">
+        <strong>断面列表</strong>
+        <select class="sort-select" id="sectionSort" aria-label="断面排序">
+          <option value="severity">按严重度</option>
+          <option value="gap">按最大价差</option>
+          <option value="duration">按累计时点</option>
+          <option value="name">按名称</option>
+        </select>
+      </div>
+      <div class="section-list" id="sectionList"></div>
     </aside>
   </div>
   <script>
