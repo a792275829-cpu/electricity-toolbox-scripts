@@ -8,7 +8,9 @@
 .region-price { padding:18px; max-width:1700px; margin:auto; }
 .region-price h1 { margin:0; font-size:25px; }
 .region-price p { line-height:1.6; }
-.curve-heading { display:flex; justify-content:space-between; gap:16px; align-items:center; margin-bottom:18px; }
+.curve-heading { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:18px; }
+.curve-heading > div { min-width:0; }
+.curve-popup-toggle { display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap; min-height:36px; cursor:pointer; }
 .curve-heading p { margin:6px 0 0; color:var(--muted); }
 .curve-layout { display:grid; grid-template-columns:310px minmax(0,1fr); gap:18px; }
 .curve-picker,.curve-main { padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--panel); min-width:0; }
@@ -49,23 +51,26 @@ body[data-theme=dark] .curve-tooltip { background:rgba(12,23,38,.62); color:#e9f
 .curve-tooltip-row b { font-variant-numeric:tabular-nums; white-space:nowrap; }
 .curve-tooltip small { display:block; margin-top:8px; opacity:.75; }
 .curve-ranking-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; }
+.curve-ranking-grid > section { min-width:0; padding:14px; border:1px solid var(--line); border-radius:10px; }
 .curve-rankings { border-top:1px solid var(--line); margin-top:24px; }
-.curve-ranking-grid h2 { font-size:15px; margin:16px 0; }
+.curve-ranking-grid h2 { font-size:15px; margin:0 0 14px; }
 .curve-ranking-grid ol { list-style:none; padding:0; margin:0; }
 .curve-rank-row { margin-bottom:16px; }
-.curve-rank-label { display:flex; gap:8px; align-items:baseline; justify-content:space-between; font-size:12px; }
+.curve-rank-label,.curve-rank-columns { display:grid; grid-template-columns:minmax(0,1fr) 10ch 9ch; gap:10px; align-items:baseline; font-size:12px; }
+.curve-rank-columns { color:var(--muted); font-size:11px; margin-bottom:12px; }
+.curve-rank-columns span:not(:first-child),.curve-rank-label b,.curve-rank-label small { text-align:right; }
 .curve-rank-label span { min-width:0; overflow-wrap:anywhere; }
 .curve-rank-label b { white-space:nowrap; font-variant-numeric:tabular-nums; }
 .curve-rank-label small { color:var(--muted); white-space:nowrap; }
 .curve-rank-track { position:relative; height:6px; background:var(--soft); border-radius:4px; margin-top:7px; }
-.curve-rank-track::after { content:''; position:absolute; top:-2px; bottom:-2px; left:50%; border-left:1px solid var(--muted); opacity:.4; }
+.curve-rank-track.has-zero::after { content:''; position:absolute; top:-2px; bottom:-2px; left:var(--rank-zero); border-left:1px solid var(--muted); opacity:.4; }
 .curve-rank-bar { position:absolute; height:6px; border-radius:4px; background:var(--blue); }
 .curve-rank-bar.is-negative { background:#bd4934; }
 .curve-swatch { width:18px; display:inline-block; border-top:3px solid; margin-right:6px; vertical-align:middle; }
 .region-price :focus-visible,.analysis-views :focus-visible { outline:3px solid var(--blue); outline-offset:3px; }
 @media(max-width:800px) {
   .region-price { padding:14px; }
-  .curve-heading { align-items:flex-start; flex-direction:column; }
+  .curve-heading { gap:10px; }
   .curve-layout { grid-template-columns:1fr; }
   .curve-picker { max-height:290px; }
   .curve-picker,.curve-main { padding:14px; }

@@ -13,7 +13,7 @@ VIEW_HTML = """
 <section id="regionCurveView" class="region-price" hidden aria-label="区域电价曲线">
   <header class="curve-heading"><div><h1>区域电价曲线</h1>
     <p>按大区、市、节点选择，比较同一份数据中的分时电价。</p></div>
-    <button type="button" id="curveCopyLink">复制当前选择链接</button></header>
+    <label class="curve-popup-toggle"><input id="curvePopupEnabled" type="checkbox" checked> 显示弹框</label></header>
   <div class="curve-layout">
     <aside class="curve-picker" aria-label="大区市节点选择">
       <label for="curveSearch">搜索大区、市或节点</label>
@@ -32,7 +32,6 @@ VIEW_HTML = """
         <button type="button" id="curveExport">导出当前曲线 CSV</button></div>
       <p id="curveBasis">沿用原分析的同节点多母线逐时均价；单位：元/MWh。</p>
       <div class="curve-display-controls">
-        <label><input id="curvePopupEnabled" type="checkbox" checked> 显示弹框</label>
         <label for="curveSort">价格读数排序</label>
         <select id="curveSort"><option value="time-desc">当前时点：高价在前</option>
           <option value="time-asc">当前时点：低价在前</option>
@@ -49,8 +48,10 @@ VIEW_HTML = """
       <div class="curve-time"><label for="curveTime">时间：<strong id="curveTimeLabel"></strong></label>
         <input id="curveTime" type="range" min="0" value="0" aria-label="查看曲线时点"></div>
       <section class="curve-rankings" aria-label="节点日均价排序">
-        <div class="curve-ranking-grid"><section><h2>节点日均价前10</h2><ol id="curveRankHigh"></ol></section>
-          <section><h2>节点日均价倒数前10</h2><ol id="curveRankLow"></ol></section></div>
+        <div class="curve-ranking-grid"><section><h2>节点日均价前10</h2>
+          <div class="curve-rank-columns" aria-hidden="true"><span>节点</span><span>日均价（元/MWh）</span><span>有效时点</span></div><ol id="curveRankHigh"></ol></section>
+          <section><h2>节点日均价倒数前10</h2>
+          <div class="curve-rank-columns" aria-hidden="true"><span>节点</span><span>日均价（元/MWh）</span><span>有效时点</span></div><ol id="curveRankLow"></ol></section></div>
       </section>
     </main>
   </div>

@@ -49,7 +49,15 @@
       count:n.prices.filter(finite).length,total:n.prices.length})).filter(n => finite(n.mean))
       .sort((a,b) => (descending ? b.mean-a.mean : a.mean-b.mean) || a.name.localeCompare(b.name,'zh-CN')).slice(0,limit);
   }
-  globalThis.RegionPriceCurves = {aggregateSeries, linePath, meanPrice, sortReadings, rankNodes};
+  function rankingScale(values) {
+    const valid=values.filter(finite),min=Math.min(0,...valid),max=Math.max(0,...valid);
+    const span=max-min || 1,zero=min<0 ? -min/span*100 : 0;
+    return {zero,mixed:min<0 && max>0,bar:value => {
+      const point=(value-min)/span*100;
+      return {left:Math.min(point,zero),width:Math.abs(point-zero)};
+    }};
+  }
+  globalThis.RegionPriceCurves = {aggregateSeries, linePath, meanPrice, sortReadings, rankNodes, rankingScale};
   if (typeof document === 'undefined') return;
   const model = DATA.curve_data;
   if (!model) return;
@@ -222,7 +230,7 @@
   }
   function renderRankings() {
     const high=rankNodes(nodes,selected),low=rankNodes(nodes,selected,false);
-    const scale=Math.max(1,...high.concat(low).map(n => Math.abs(n.mean)));
+    const scale=rankingScale(high.concat(low).map(n => n.mean));
     [[high,'curveRankHigh'],[low,'curveRankLow']].forEach(([items,id]) => {
       const list=$(id);list.replaceChildren();
       if (!items.length) {const empty=document.createElement('li');empty.textContent='所选节点暂无有效电价';list.append(empty);}
@@ -235,7 +243,8 @@
         label.append(name,value,count);
         const track=document.createElement('div'),bar=document.createElement('span');
         track.className='curve-rank-track';bar.className=`curve-rank-bar${item.mean<0 ? ' is-negative' : ''}`;
-        const width=Math.abs(item.mean)/scale*50;bar.style.width=`${width}%`;bar.style.left=`${item.mean<0 ? 50-width : 50}%`;
+        const geometry=scale.bar(item.mean);bar.style.width=`${geometry.width}%`;bar.style.left=`${geometry.left}%`;
+        track.style.setProperty('--rank-zero',`${scale.zero}%`);track.classList.toggle('has-zero',scale.mixed);
         track.append(bar);row.append(label,track);list.append(row);
       });
     });
@@ -327,10 +336,6 @@
   });
   $('showRegionCurves').addEventListener('click',() => switchView(true));
   $('showTopology').addEventListener('click',() => switchView(false));
-  $('curveCopyLink').addEventListener('click',async () => {
-    save();try { await navigator.clipboard.writeText(location.href);$('curveCopyLink').textContent='已复制当前选择链接'; }
-    catch (_) { window.prompt('复制当前选择链接',location.href); }
-  });
   $('curveExport').addEventListener('click',() => {
     const cell=value => `"${String(value??'').replaceAll('"','""')}"`;
     const text=value => cell(/^[=+@-]/.test(value) ? "'"+value : value);

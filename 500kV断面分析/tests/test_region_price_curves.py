@@ -69,7 +69,7 @@ console.log('aggregation and gaps verified');
         script = r"""
 const assert = require('node:assert/strict');
 require(process.argv[1]);
-const {meanPrice, sortReadings, rankNodes} = globalThis.RegionPriceCurves;
+const {meanPrice, sortReadings, rankNodes, rankingScale} = globalThis.RegionPriceCurves;
 const items = [
  {name:'A',prices:[0,null,10]},
  {name:'B',prices:[-2,-4,null]},
@@ -87,6 +87,19 @@ assert.deepEqual(high.map(n=>n.name),['A','B']);
 assert.deepEqual(high[0],{name:'A',mean:5,count:2,total:3});
 assert.equal(rankNodes(items,new Set(['A','B']),false,1)[0].mean,-3);
 assert.deepEqual(rankNodes(items,new Set(['C'])),[]);
+const positive=rankingScale([10,20]);
+assert.equal(positive.zero,0);
+assert.equal(positive.mixed,false);
+assert.deepEqual(positive.bar(20),{left:0,width:100});
+assert.deepEqual(positive.bar(10),{left:0,width:50});
+const negative=rankingScale([-10,-5]);
+assert.deepEqual(negative.bar(-10),{left:0,width:100});
+assert.equal(negative.zero,100);
+const mixed=rankingScale([-10,30]);
+assert.equal(mixed.mixed,true);
+assert.equal(mixed.zero,25);
+assert.deepEqual(mixed.bar(30),{left:25,width:75});
+assert.deepEqual(rankingScale([0,0]).bar(0),{left:0,width:0});
 console.log('rankings verified');
 """
         result = subprocess.run([shutil.which("node"), "-e", script, str(ROOT / "src/region_curves.js")],
