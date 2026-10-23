@@ -1058,12 +1058,17 @@ def _render_html(data: dict[str, object]) -> str:
     .topology-timeline {{ padding:14px 18px; border-top:1px solid var(--line); background:var(--panel); }}
     .topology-time-heading {{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }}
     .topology-time-heading strong {{ font-size:14px; }}
-    #topologyTimeLabel {{ font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--blue); }}
+    #topologyTimeLabel {{ position:absolute; top:28px; left:calc(23px + (100% - 46px) * var(--time-progress, 0)); transform:translateX(-50%); font-size:13px; line-height:20px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink); pointer-events:none; }}
     .topology-time-controls {{ display:flex; align-items:center; gap:12px; }}
     .topology-time-controls button {{ min-width:44px; min-height:44px; border:1px solid var(--line); border-radius:8px; background:var(--soft); color:var(--ink); cursor:pointer; }}
-    .topology-time-track {{ flex:1; min-width:0; }}
-    #topologyTime {{ display:block; width:100%; margin:0; min-height:28px; accent-color:var(--blue); cursor:pointer; }}
-    .topology-time-ticks {{ display:flex; justify-content:space-between; color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }}
+    .topology-time-track {{ position:relative; flex:1; min-width:0; padding:0 14px; }}
+    #topologyTime {{ appearance:none; -webkit-appearance:none; display:block; width:100%; height:28px; margin:0; padding:0; border:0; background:transparent; cursor:pointer; }}
+    #topologyTime::-webkit-slider-runnable-track {{ height:4px; border-radius:4px; background:var(--line); }}
+    #topologyTime::-webkit-slider-thumb {{ appearance:none; -webkit-appearance:none; width:18px; height:18px; margin-top:-7px; border:0; border-radius:50%; background:var(--blue); }}
+    #topologyTime::-moz-range-track,#topologyTime::-moz-range-progress {{ height:4px; border:0; border-radius:4px; background:var(--line); }}
+    #topologyTime::-moz-range-thumb {{ width:18px; height:18px; border:0; border-radius:50%; background:var(--blue); }}
+    #topologyTime:focus-visible {{ outline:2px solid var(--blue); outline-offset:3px; border-radius:4px; }}
+    .topology-time-ticks {{ margin-top:24px; display:flex; justify-content:space-between; color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }}
     .side {{
       background: var(--panel);
       border-left: 1px solid var(--line);
@@ -1246,10 +1251,11 @@ def _render_html(data: dict[str, object]) -> str:
           <button id="zoomReset" type="button" title="重置">⌂</button>
         </div>
         <section class="topology-timeline" aria-label="24小时潮流方向时间轴">
-          <div class="topology-time-heading"><strong title="按节点价差推断方向：低价到高价">24小时潮流方向</strong><output id="topologyTimeLabel" for="topologyTime">00:00</output></div>
+          <div class="topology-time-heading"><strong title="按节点价差推断方向：低价到高价">24小时潮流方向</strong></div>
           <div class="topology-time-controls">
             <button id="topologyTimePrev" type="button" aria-label="前15分钟">‹</button>
             <div class="topology-time-track"><input id="topologyTime" type="range" min="0" max="95" step="1" value="0" aria-label="潮流时点，每格15分钟">
+              <output id="topologyTimeLabel" for="topologyTime">00:00</output>
               <div class="topology-time-ticks" aria-hidden="true"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:45</span></div></div>
             <button id="topologyTimeNext" type="button" aria-label="后15分钟">›</button>
           </div>
@@ -2015,6 +2021,7 @@ def _render_html(data: dict[str, object]) -> str:
       const time = topologyTimes[topologyTimeSlot];
       const slider = document.getElementById('topologyTime');
       slider.value = String(topologyTimeSlot);
+      slider.parentElement.style.setProperty('--time-progress', String(topologyTimeSlot / 95));
       slider.setAttribute('aria-valuetext', time);
       document.getElementById('topologyTimeLabel').textContent = time;
       document.getElementById('topologyTimePrev').disabled = topologyTimeSlot === 0;
