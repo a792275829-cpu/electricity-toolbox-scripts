@@ -98,7 +98,9 @@ class TaskEngine:
                 return False
             self._snapshots[task_id] = snapshot.transition(TaskState.CANCELLING)
             token = self._tokens[task_id]
-        token.cancel()
+            # Publish the state and signal together: a worker must not observe
+            # accepted cancellation while still seeing an uncancelled token.
+            token.cancel()
         self._events.publish(TaskEvent(task_id, TaskEventKind.STATE, message=TaskState.CANCELLING.value))
         return True
 

@@ -36,6 +36,19 @@ class EventBufferTests(unittest.TestCase):
 
 
 class ProcessRunnerTests(unittest.TestCase):
+    def test_already_cancelled_task_never_starts_a_process(self):
+        from unittest.mock import patch
+        from toolbox.tasks import CancellationToken, ProcessRunner, TaskCancelled
+
+        token = CancellationToken()
+        token.cancel()
+        with patch('toolbox.tasks.process.subprocess.Popen',
+                   side_effect=AssertionError('cancelled task attempted to spawn')) as spawn:
+            with self.assertRaises(TaskCancelled):
+                ProcessRunner().run([sys.executable, '-c', 'print("unexpected")'],
+                    cwd=Path.cwd(), env=None, token=token, on_output=lambda _: None)
+            spawn.assert_not_called()
+
     def test_cancel_reaps_orphans_and_children_ignoring_sigterm(self) -> None:
         import os
         import signal
@@ -277,6 +290,56 @@ class ProcessRunnerTests(unittest.TestCase):
 
 
 class TaskEngineTests(unittest.TestCase):
+    def test_cancelling_snapshot_never_precedes_cancellation_signal(self):
+        from unittest.mock import patch
+        from toolbox.tasks import CancellationToken, TaskEngine, TaskState
+
+        engine = TaskEngine()
+        started, finish_worker = threading.Event(), threading.Event()
+        entered_cancel, finish_cancel = threading.Event(), threading.Event()
+        observed = threading.Event()
+        tokens, observations = [], []
+
+        def worker(token, _emit):
+            tokens.append(token)
+            started.set()
+            finish_worker.wait(5)
+            token.raise_if_cancelled()
+
+        original_cancel = CancellationToken.cancel
+        def delayed_cancel(token):
+            entered_cancel.set()
+            finish_cancel.wait(5)
+            original_cancel(token)
+
+        task_id = engine.start_callable('取消信号一致性', worker)
+        self.assertTrue(started.wait(2))
+        def observe():
+            snapshot = engine.snapshot(task_id)
+            observations.append((snapshot.state, tokens[0].cancelled))
+            observed.set()
+
+        cancel_thread = threading.Thread(target=lambda: engine.cancel(task_id))
+        observer = threading.Thread(target=observe)
+        try:
+            with patch.object(CancellationToken, 'cancel', delayed_cancel):
+                cancel_thread.start()
+                self.assertTrue(entered_cancel.wait(2))
+                observer.start()
+                # Readers must wait until the accepted cancellation is signalled.
+                self.assertFalse(observed.wait(.1))
+                finish_cancel.set()
+                cancel_thread.join(2)
+                observer.join(2)
+            self.assertEqual(observations, [(TaskState.CANCELLING, True)])
+        finally:
+            finish_cancel.set()
+            finish_worker.set()
+            cancel_thread.join(2)
+            if observer.ident is not None:
+                observer.join(2)
+            engine.shutdown()
+
     def test_engine_tracks_success_cancel_and_process_output(self) -> None:
         from toolbox.tasks import TaskEngine, TaskState
 

@@ -67,6 +67,8 @@ jobs:
       - run: TOOLBOX_500KV_BACKEND=rust python -m unittest discover -s tests -v
         working-directory: 500kV断面分析
       - run: python -m unittest discover -s desktop/tests/python -v
+      - run: PYTHONPATH=.. python -m unittest discover -s tests -p test_tasks.py -v
+        working-directory: 电力工具箱
       - name: Create synthetic forecast workbook for CI smoke build
         run: |
           python - <<'PY'

@@ -47,6 +47,7 @@ class ProcessRunner:
         token: CancellationToken,
         on_output: Callable[[str], None],
     ) -> ProcessResult:
+        token.raise_if_cancelled()
         lines: Queue[str | None] = Queue()
         process = subprocess.Popen(
             list(command), cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,

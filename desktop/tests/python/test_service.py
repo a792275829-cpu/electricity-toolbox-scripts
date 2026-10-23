@@ -89,12 +89,64 @@ class ServiceTaskTests(unittest.TestCase):
         finally:
             release.set()
     def test_cancel_terminates_worker_and_owned_child(self):
-        self.service.paths.online_energy.write_text('import time\nprint("started",flush=True)\ntime.sleep(60)\n')
+        self.service.paths.online_energy.write_text(
+            'import os,time\n'
+            'print(f"started:{os.getpid()}:{os.getppid()}",flush=True)\n'
+            'time.sleep(60)\n')
         task_id = self.service.call('start', self.params)
-        time.sleep(.2)
+        deadline = time.monotonic() + 10
+        owned_pids = None
+        while time.monotonic() < deadline:
+            events = self.service.call('events', {})['events']
+            ready = next((e['message'].strip() for e in events
+                          if e['message'].startswith('started:')), None)
+            if ready:
+                owned_pids = tuple(int(pid) for pid in ready.split(':')[1:])
+                break
+            snapshot = self.service.registry.snapshot(task_id)
+            self.assertIn(snapshot.state.value, {'created', 'running'},
+                          f'{snapshot!r}; events={events!r}')
+            time.sleep(.01)
+        self.assertIsNotNone(owned_pids, f'worker not ready; events={events!r}')
         self.assertTrue(self.service.call('cancel', {'task_id': task_id}))
-        self.assertEqual(self.finish(task_id).state.value, 'cancelled')
+        snapshot = self.finish(task_id)
+        self.assertEqual(snapshot.state.value, 'cancelled',
+                         f'{snapshot!r}; events={self.service.call("events", {})!r}')
         self.assertFalse(self.service.registry.has_running_tasks())
+        for pid in owned_pids:
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(.01)
+            else:
+                self.fail(f'owned process {pid} survived cancellation')
+    def test_cancel_before_worker_launch_does_not_run_business_script(self):
+        from toolbox.tasks import ProcessRunner
+
+        marker = self.root / 'unexpected-business-start'
+        self.service.paths.online_energy.write_text(
+            f'from pathlib import Path\nPath({str(marker)!r}).touch()\n')
+        entered, release = threading.Event(), threading.Event()
+        original_run = ProcessRunner.run
+        def delayed_run(runner, *args, **kwargs):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError('test did not release worker launch')
+            return original_run(runner, *args, **kwargs)
+
+        with patch.object(ProcessRunner, 'run', delayed_run):
+            task_id = self.service.call('start', self.params)
+            try:
+                self.assertTrue(entered.wait(2))
+                self.assertTrue(self.service.call('cancel', {'task_id': task_id}))
+            finally:
+                release.set()
+            snapshot = self.finish(task_id)
+        self.assertEqual(snapshot.state.value, 'cancelled', repr(snapshot))
+        self.assertFalse(marker.exists())
     def test_unknown_action_and_shell_input_are_rejected(self):
         with self.assertRaises(ValueError):
             self.service.call('start', {**self.params, 'action': 'shell'})
