@@ -1058,17 +1058,9 @@ def _render_html(data: dict[str, object]) -> str:
     .topology-timeline {{ padding:14px 18px; border-top:1px solid var(--line); background:var(--panel); }}
     .topology-time-heading {{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }}
     .topology-time-heading strong {{ font-size:14px; }}
-    #topologyTimeLabel {{ position:absolute; top:28px; left:calc(23px + (100% - 46px) * var(--time-progress, 0)); transform:translateX(-50%); font-size:13px; line-height:20px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink); pointer-events:none; }}
     .topology-time-controls {{ display:flex; align-items:center; gap:12px; }}
     .topology-time-controls button {{ min-width:44px; min-height:44px; border:1px solid var(--line); border-radius:8px; background:var(--soft); color:var(--ink); cursor:pointer; }}
-    .topology-time-track {{ position:relative; flex:1; min-width:0; padding:0 14px; }}
-    #topologyTime {{ appearance:none; -webkit-appearance:none; display:block; width:100%; height:28px; margin:0; padding:0; border:0; background:transparent; cursor:pointer; }}
-    #topologyTime::-webkit-slider-runnable-track {{ height:4px; border-radius:4px; background:var(--line); }}
-    #topologyTime::-webkit-slider-thumb {{ appearance:none; -webkit-appearance:none; width:18px; height:18px; margin-top:-7px; border:0; border-radius:50%; background:var(--blue); }}
-    #topologyTime::-moz-range-track,#topologyTime::-moz-range-progress {{ height:4px; border:0; border-radius:4px; background:var(--line); }}
-    #topologyTime::-moz-range-thumb {{ width:18px; height:18px; border:0; border-radius:50%; background:var(--blue); }}
     #topologyTime:focus-visible {{ outline:2px solid var(--blue); outline-offset:3px; border-radius:4px; }}
-    .topology-time-ticks {{ margin-top:24px; display:flex; justify-content:space-between; color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }}
     .side {{
       background: var(--panel);
       border-left: 1px solid var(--line);
@@ -1254,9 +1246,9 @@ def _render_html(data: dict[str, object]) -> str:
           <div class="topology-time-heading"><strong title="按节点价差推断方向：低价到高价">24小时潮流方向</strong></div>
           <div class="topology-time-controls">
             <button id="topologyTimePrev" type="button" aria-label="前15分钟">‹</button>
-            <div class="topology-time-track"><input id="topologyTime" type="range" min="0" max="95" step="1" value="0" aria-label="潮流时点，每格15分钟">
-              <output id="topologyTimeLabel" for="topologyTime">00:00</output>
-              <div class="topology-time-ticks" aria-hidden="true"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:45</span></div></div>
+            <div class="topology-time-track time-slider-track"><input id="topologyTime" type="range" min="0" max="95" step="1" value="0" aria-label="潮流时点，每格15分钟" class="time-slider">
+              <output class="time-slider-readout" id="topologyTimeLabel" for="topologyTime">00:00</output>
+              <div class="topology-time-ticks time-slider-ticks" aria-hidden="true"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:45</span></div></div>
             <button id="topologyTimeNext" type="button" aria-label="后15分钟">›</button>
           </div>
         </section>
@@ -1290,6 +1282,9 @@ def _render_html(data: dict[str, object]) -> str:
       </div>
       <div class="section-list" id="sectionList"></div>
     </aside>
+  </div>
+  <div id="nodePriceTooltip" class="curve-tooltip" role="tooltip" hidden>
+    <h3 id="nodePriceName"></h3><div class="curve-tooltip-row"><span id="nodePriceTime"></span><b id="nodePriceValue"></b></div>
   </div>
   <script>
     const DATA = {json_data};
@@ -1353,6 +1348,7 @@ def _render_html(data: dict[str, object]) -> str:
     let gestureBaseScale = null;
     let flowVisible = true;
     let topologyTimeSlot = 0;
+    let nodePriceHover = null;
     const topologyTimes = Array.from({{length:96}}, (_, i) => `${{String(Math.floor(i / 4)).padStart(2,'0')}}:${{String(i % 4 * 15).padStart(2,'0')}}`);
     const topologyTimeIndices = topologyTimes.map(time => DATA.time_headers.indexOf(time));
 
@@ -1649,6 +1645,42 @@ def _render_html(data: dict[str, object]) -> str:
       resetFlowArrow(edge);
     }});
 
+    function hideNodePriceTooltip() {{
+      document.getElementById('nodePriceTooltip').hidden = true;
+      nodePriceHover?.element.removeAttribute('aria-describedby');
+      nodePriceHover = null;
+    }}
+    function showNodePriceTooltip(node, element, clientX, clientY) {{
+      const tooltip = document.getElementById('nodePriceTooltip');
+      if (nodePriceHover?.element !== element) nodePriceHover?.element.removeAttribute('aria-describedby');
+      nodePriceHover = {{node, element, clientX, clientY}};
+      element.setAttribute('aria-describedby', 'nodePriceTooltip');
+      const price = node.prices[topologyTimeIndices[topologyTimeSlot]];
+      document.getElementById('nodePriceName').textContent = node.name;
+      document.getElementById('nodePriceTime').textContent = topologyTimes[topologyTimeSlot];
+      document.getElementById('nodePriceValue').textContent = Number.isFinite(price) ? `${{price.toFixed(4)}} 元/MWh` : '暂无数据';
+      tooltip.hidden = false;
+      const box = tooltip.getBoundingClientRect();
+      const left = clientX + 16 + box.width < innerWidth - 12 ? clientX + 16 : clientX - box.width - 16;
+      tooltip.style.left = `${{Math.max(12, Math.min(innerWidth - box.width - 12, left))}}px`;
+      tooltip.style.top = `${{Math.max(12, Math.min(innerHeight - box.height - 12, clientY + 14))}}px`;
+    }}
+    function bindNodePriceTooltip(element, node) {{
+      const show = event => showNodePriceTooltip(node, element, event.clientX, event.clientY);
+      element.addEventListener('pointerenter', show);
+      element.addEventListener('pointermove', show);
+      element.addEventListener('pointerleave', hideNodePriceTooltip);
+      element.addEventListener('focus', () => requestAnimationFrame(() => {{
+        if (document.activeElement !== element) return;
+        const box = element.getBoundingClientRect();
+        showNodePriceTooltip(node, element, box.x + box.width / 2, box.y + box.height / 2);
+      }}));
+      element.addEventListener('blur', hideNodePriceTooltip);
+    }}
+    window.addEventListener('scroll', hideNodePriceTooltip, true);
+    window.addEventListener('resize', hideNodePriceTooltip);
+    document.getElementById('showRegionCurves').addEventListener('click', hideNodePriceTooltip);
+    document.addEventListener('keydown', event => {{ if (event.key === 'Escape') hideNodePriceTooltip(); }});
     const nodesG = document.getElementById('nodes');
     const labelLeadersG = document.getElementById('labelLeaders');
     const nodeLabelsG = document.getElementById('nodeLabels');
@@ -1672,7 +1704,6 @@ def _render_html(data: dict[str, object]) -> str:
       circle.setAttribute('class', node.blocked ? 'node blocked' : (node.prices.length ? 'node' : 'node missing'));
       const region = regionData.find(item => item.name === node.region);
       circle.setAttribute('stroke', node.blocked ? '#a40012' : (region?.color || '#9aabbc'));
-      circle.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title')).textContent = `${{node.name}}｜${{node.region}}｜${{node.location_accuracy}}｜${{node.position_label}}｜${{node.location_source}}`;
       group.appendChild(circle);
 
       const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -1698,6 +1729,8 @@ def _render_html(data: dict[str, object]) -> str:
       nodeLabelsG.appendChild(label);
       nodeLabelItems.push({{ node, label, leader }});
       nodeGroups.set(node.name, group);
+      bindNodePriceTooltip(group, node);
+      bindNodePriceTooltip(label, node);
     }});
 
     function boxesOverlap(a, b, padding = 4) {{
@@ -2024,6 +2057,10 @@ def _render_html(data: dict[str, object]) -> str:
       slider.parentElement.style.setProperty('--time-progress', String(topologyTimeSlot / 95));
       slider.setAttribute('aria-valuetext', time);
       document.getElementById('topologyTimeLabel').textContent = time;
+      if (nodePriceHover) {{
+        const {{node, element, clientX, clientY}} = nodePriceHover;
+        showNodePriceTooltip(node, element, clientX, clientY);
+      }}
       document.getElementById('topologyTimePrev').disabled = topologyTimeSlot === 0;
       document.getElementById('topologyTimeNext').disabled = topologyTimeSlot === 95;
       if (reveal) {{

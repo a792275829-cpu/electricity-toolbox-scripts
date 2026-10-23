@@ -268,6 +268,7 @@
   function showTime(index) {
     currentIndex=Math.max(0,Math.min(times.length-1,index));
     $('curveTime').value=String(currentIndex);
+    $('curveTime').parentElement.style.setProperty('--time-progress',String(currentIndex/Math.max(1,times.length-1)));
     $('curveTimeLabel').textContent=times[currentIndex] || '无时点';
     $('curveTime').setAttribute('aria-valuetext',times[currentIndex] || '无时点');
     if (guide && chartX) { guide.setAttribute('x1',chartX(currentIndex)); guide.setAttribute('x2',chartX(currentIndex)); }
@@ -296,6 +297,9 @@
       '所有曲线已隐藏，可点击图例或“显示全部曲线”恢复。' : '所选节点在这份数据中暂无有效电价，请更换节点或数据文件。';
     svg.hidden=!all.length; $('curveExport').disabled=!all.length;
     $('curveTime').max=String(Math.max(0,times.length-1)); $('curveTime').disabled=!all.length;
+    $('curveTimeTicks').replaceChildren(...[...new Set([0,Math.round(times.length/4),Math.round(times.length/2),Math.round(times.length*3/4),times.length-1])].filter(i => i>=0 && i<times.length).map(i => {
+      const tick=document.createElement('span');tick.textContent=times[i];return tick;
+    }));
     if (!all.length) { showTime(currentIndex); return; }
     const width=Math.max(340,Math.round(svg.parentElement.clientWidth-36)), height=360;
     svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
