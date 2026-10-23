@@ -11,7 +11,7 @@ def view_assets():
 
 VIEW_HTML = """
 <section id="regionCurveView" class="region-price" hidden aria-label="区域电价曲线">
-  <header class="curve-heading"><div><h1>区域电价曲线</h1></div>
+  <header class="curve-heading"><div><h1>区域电价分析</h1></div>
     <label class="curve-popup-toggle"><input id="curvePopupEnabled" type="checkbox" checked> 显示弹框</label></header>
   <div class="curve-layout">
     <aside class="curve-picker" aria-label="大区市节点选择">

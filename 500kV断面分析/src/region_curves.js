@@ -125,6 +125,7 @@
   }
   function switchView(curves) {
     hideTooltip();
+    document.querySelector('.analysis-switch').dataset.view=curves ? 'curves' : 'topology';
     panel.hidden = !curves; mapPanel.hidden = curves;
     $('showRegionCurves').setAttribute('aria-pressed',String(curves));
     $('showTopology').setAttribute('aria-pressed',String(!curves));
@@ -353,6 +354,12 @@
   $('curveMatches').addEventListener('click',() => {
     const term=searchKey($('curveSearch').value);
     nodes.filter(n => searchKey(`${n.region} ${n.city} ${n.name}`).includes(term)).forEach(n => selected.add(n.name));update();
+  });
+  document.querySelector('.analysis-switch').addEventListener('keydown',event => {
+    if (!['ArrowLeft','ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const curves=event.key==='ArrowRight';switchView(curves);
+    $(curves ? 'showRegionCurves' : 'showTopology').focus();
   });
   $('showRegionCurves').addEventListener('click',() => switchView(true));
   $('showTopology').addEventListener('click',() => switchView(false));

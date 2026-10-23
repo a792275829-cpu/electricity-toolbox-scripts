@@ -739,25 +739,17 @@ def _render_html(data: dict[str, object]) -> str:
     }}
     body[data-theme="light"] {{ background: #f2f5f9; }}
     .app {{
-      min-height: calc(100dvh - 54px);
+      min-height: calc(100dvh - 42px);
       display: grid;
       grid-template-columns: minmax(0, 1fr) 380px;
     }}
     .map-pane {{
-      padding: 12px 14px 14px;
+      padding:0 2px 2px;
       min-width: 0;
-      height:calc(100dvh - 54px);
+      height:calc(100dvh - 42px);
       display:flex;
       flex-direction:column;
-      gap:10px;
-    }}
-    .title-row {{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-shrink:0;
-      margin:0;
+      gap:0;
     }}
     h1 {{
       margin: 0;
@@ -766,16 +758,9 @@ def _render_html(data: dict[str, object]) -> str:
       letter-spacing: -.03em;
       color: var(--navy);
     }}
-    .eyebrow {{
-      color: var(--blue);
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: .12em;
-      margin-bottom: 6px;
-    }}
     .header-actions {{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }}
     .icon-button {{
-      min-height: 38px; border: 1px solid var(--line); border-radius: 10px; padding: 0 12px;
+      min-height:32px; font-size:12px; border: 1px solid var(--line); border-radius: 10px; padding: 0 12px;
       background: color-mix(in srgb, var(--panel) 86%, transparent); color: var(--ink); cursor: pointer;
       font-weight: 700; backdrop-filter: blur(14px); transition: .2s ease;
     }}
@@ -809,7 +794,7 @@ def _render_html(data: dict[str, object]) -> str:
     .map-shell {{
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 14px;
+      border-radius:6px;
       overflow: hidden;
       position: relative;
       min-height: 0;
@@ -1053,20 +1038,25 @@ def _render_html(data: dict[str, object]) -> str:
     body[data-theme="light"] .label {{ fill:#243b4d; stroke:#fbfdff; stroke-width:5px; }}
     body[data-theme="light"] .label-leader {{ stroke:#6f8799; opacity:.72; }}
     body[data-theme="light"] .blocked-label {{ fill:#991b1b; stroke:#fff7f7; }}
-    .topology-timeline {{ flex-shrink:0; padding:10px 14px; border-top:1px solid var(--line); background:var(--panel); }}
-    .topology-time-heading {{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:4px; }}
-    .topology-time-heading strong {{ font-size:14px; }}
-    .topology-time-controls {{ display:flex; align-items:center; gap:12px; }}
-    .topology-time-controls button {{ min-width:44px; min-height:44px; border:1px solid var(--line); border-radius:8px; background:var(--soft); color:var(--ink); cursor:pointer; }}
+    .topology-timeline {{ flex-shrink:0; padding:6px 8px; border-top:1px solid var(--line); background:var(--panel); }}
+    .topology-time-title {{ font-size:12px; line-height:22px; white-space:nowrap; }}
+    .topology-time-controls {{ display:flex; align-items:flex-start; gap:6px; }}
+    .topology-time-controls button {{ width:30px; min-width:30px; height:24px; border:1px solid var(--line); border-radius:6px; background:var(--soft); color:var(--ink); cursor:pointer; }}
+    .topology-timeline .time-slider {{ height:22px; }}
+    .topology-timeline .time-slider-readout {{ top:22px; line-height:18px; font-size:12px; }}
+    .topology-timeline .time-slider-ticks {{ margin-top:18px; font-size:10px; }}
     #topologyTime:focus-visible {{ outline:2px solid var(--blue); outline-offset:3px; border-radius:4px; }}
     .side {{
       background: var(--panel);
       border-left: 1px solid var(--line);
-      padding: 20px;
-      overflow: auto;
-      max-height: calc(100dvh - 54px);
-      position: sticky;
-      top: 0;
+      padding:12px;
+      overflow:auto;
+      width:380px;
+      height:100dvh;
+      max-height:100dvh;
+      position:fixed;
+      top:0;
+      right:0;
       box-shadow: -18px 0 48px rgba(0,0,0,.16);
     }}
     .side-header {{
@@ -1139,10 +1129,14 @@ def _render_html(data: dict[str, object]) -> str:
     }}
     #priceChart {{
       width: 100%;
-      height: 300px;
-      touch-action: pan-y;
+      height:auto;
+      min-height:0;
+      max-height:none;
+      aspect-ratio:360 / 280;
+      touch-action:pan-y;
     }}
     .price-crosshair-hit {{ cursor: crosshair; }}
+    .source:empty {{ display:none; }}
     .source {{
       margin-top: 16px;
       font-size: 12px;
@@ -1168,18 +1162,16 @@ def _render_html(data: dict[str, object]) -> str:
     .empty-list {{ padding: 22px 8px; color: var(--muted); font-size: 13px; text-align: center; }}
     @media (max-width: 920px) {{
       .app {{ grid-template-columns: 1fr; }}
-      .map-pane {{ padding:12px; height:auto; }}
-      .side {{ border-left: 0; border-top: 1px solid var(--line); max-height: none; position: static; }}
+      .map-pane {{ padding:0 2px 2px; height:auto; }}
+      .side {{ border-left: 0; border-top: 1px solid var(--line); max-height:none; position:static; width:auto; height:auto; }}
       svg {{ height: 62vh; min-height: 480px; }}
       #map {{ flex:none; height:auto; aspect-ratio:1500 / 1020; min-height:0; max-height:none; }}
       .map-shell {{ flex:none; min-height:0; }}
       .section-list {{ max-height: 280px; }}
     }}
     @media (max-width: 560px) {{
-      .map-pane {{ padding: 12px; }}
-      .title-row {{ margin:0; align-items:flex-start; }}
-      .title-row {{ flex-direction:column; }}
-      .header-actions {{ width:100%; justify-content:flex-start; }}
+      .map-pane {{ padding:0 2px 2px; }}
+      .header-actions {{ display:contents; }}
       .map-toolbar {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) 114px; gap:6px; }}
       .layer-toggles {{ display:contents; }}
       .zoom-controls {{ grid-column:4; grid-row:1; }}
@@ -1192,34 +1184,28 @@ def _render_html(data: dict[str, object]) -> str:
 </head>
 <body data-theme="light">
   <nav class="analysis-views" aria-label="分析视图">
-    <button type="button" id="showTopology" aria-pressed="true">接线拓扑</button>
-    <button type="button" id="showRegionCurves" aria-pressed="false">区域电价曲线</button>
+    <div class="analysis-switch" data-view="topology" role="group" aria-label="分析视图切换">
+      <button type="button" id="showTopology" aria-pressed="true">潮流分析</button>
+      <button type="button" id="showRegionCurves" aria-pressed="false">区域电价分析</button>
+    </div>
   </nav>
   <div class="app">
     <main class="map-pane">
-      <div class="title-row">
-        <div>
-          <div class="eyebrow">GRID PRICE ANALYTICS</div>
-          <h1>{artifact_title}</h1>
-        </div>
-        <div class="header-actions">
-          <button class="icon-button" id="focusMode" type="button" aria-pressed="false">沉浸地图</button>
-          <button class="icon-button" id="themeToggle" type="button">切换浅色</button>
-        </div>
-      </div>
       <div class="map-shell">
         <div class="map-toolbar">
           <div class="layer-toggles" aria-label="地图图层">
             <input class="node-search" id="nodeSearch" type="search" placeholder="搜索节点，Enter定位" aria-label="搜索节点">
             <button class="toggle" id="focusSelected" type="button">定位所选</button>
-            <button class="toggle" id="toggleTopology" type="button" aria-pressed="true">拓扑</button>
-            <button class="toggle" id="toggleLabels" type="button" aria-pressed="true">标签</button>
             <button class="toggle" id="toggleFlow" type="button" aria-pressed="true">潮流查看</button>
           </div>
         <div class="zoom-controls" aria-label="地图缩放控制">
           <button id="zoomIn" type="button" title="放大">+</button>
           <button id="zoomOut" type="button" title="缩小">−</button>
           <button id="zoomReset" type="button" title="重置">⌂</button>
+        </div>
+        <div class="header-actions">
+          <button class="icon-button" id="focusMode" type="button" aria-pressed="false">沉浸地图</button>
+          <button class="icon-button" id="themeToggle" type="button">切换浅色</button>
         </div>
         </div>
         <svg id="map" viewBox="0 0 {SVG_W} {SVG_H}" role="img" aria-label="{map_label}">
@@ -1241,8 +1227,8 @@ def _render_html(data: dict[str, object]) -> str:
         </svg>
 
         <section class="topology-timeline" aria-label="24小时潮流方向时间轴">
-          <div class="topology-time-heading"><strong title="按节点价差推断方向：低价到高价">24小时潮流方向</strong></div>
           <div class="topology-time-controls">
+            <strong class="topology-time-title" title="24小时潮流方向，按节点价差推断：低价到高价">24小时</strong>
             <button id="topologyTimePrev" type="button" aria-label="前15分钟">‹</button>
             <div class="topology-time-track time-slider-track"><input id="topologyTime" type="range" min="0" max="95" step="1" value="0" aria-label="潮流时点，每格15分钟" class="time-slider">
               <output class="time-slider-readout" id="topologyTimeLabel" for="topologyTime">00:00</output>
@@ -1896,7 +1882,7 @@ def _render_html(data: dict[str, object]) -> str:
       const right = Math.max(...DATA.nodes.map(n => n.x + 12), ...boxes.map(b => b.x + b.width));
       const top = Math.min(...DATA.nodes.map(n => n.y - 12), ...boxes.map(b => b.y));
       const bottom = Math.max(...DATA.nodes.map(n => n.y + 12), ...boxes.map(b => b.y + b.height));
-      const padding = 28;
+      const padding = 12;
       const scale = Math.min(mapCanvas.width / Math.max(1, right - left + padding * 2), mapCanvas.height / Math.max(1, bottom - top + padding * 2));
       view = {{scale, x:mapCanvas.width / 2 - (left + right) / 2 * scale, y:mapCanvas.height / 2 - (top + bottom) / 2 * scale}};
       applyView();
@@ -1983,7 +1969,7 @@ def _render_html(data: dict[str, object]) -> str:
       document.getElementById('detailTitle').innerHTML = `${{edge.edge}} <span class="pill">${{edge.group}}</span>`;
       document.getElementById('detailSubtitle').textContent = edge.is_section
         ? `触发窗口：${{edge.windows || '无'}}`
-        : '完整拓扑线路，未触发断面判定；以下显示两端节点电价。';
+        : '';
       document.getElementById('maxGap').textContent = displayGap.toFixed(2);
       document.getElementById('intervals').textContent = edge.is_section
         ? `${{edge.intervals}} 个`
@@ -2077,15 +2063,6 @@ def _render_html(data: dict[str, object]) -> str:
 
     document.getElementById('sectionSearch').addEventListener('input', renderSectionList);
     document.getElementById('sectionSort').addEventListener('change', renderSectionList);
-    function bindLayerToggle(buttonId, selector) {{
-      document.getElementById(buttonId).addEventListener('click', event => {{
-        const next = event.currentTarget.getAttribute('aria-pressed') !== 'true';
-        event.currentTarget.setAttribute('aria-pressed', String(next));
-        document.querySelectorAll(selector).forEach(element => element.classList.toggle('is-hidden', !next));
-      }});
-    }}
-    bindLayerToggle('toggleTopology', '.edge:not(.section), .edge-hit:not(.section-hit), .flow-arrow.non-section-flow');
-    bindLayerToggle('toggleLabels', '.label, .label-leader');
     document.getElementById('toggleFlow').addEventListener('click', event => {{
       flowVisible = !flowVisible;
       event.currentTarget.setAttribute('aria-pressed', String(flowVisible));
