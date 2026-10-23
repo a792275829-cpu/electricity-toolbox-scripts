@@ -302,7 +302,10 @@ class ToolboxApp(tk.Tk):
 def main() -> int:
     prototype = os.environ.get("TOOLBOX_RENDER_PROTOTYPE") == "1"
     app = ToolboxApp(render_prototype=prototype)
-    if prototype:
+    if os.environ.get("TOOLBOX_SOURCE_DEBUG") == "1":
+        app.title("电力工具箱 · 源码调试版")
+        app.show_page("WPS写入工具")
+    elif prototype:
         app.show_page("出清结果汇总上传")
     app.mainloop()
     return 0
