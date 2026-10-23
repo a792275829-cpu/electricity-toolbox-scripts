@@ -932,21 +932,15 @@ def _render_html(data: dict[str, object]) -> str:
       stroke-width: 20;
       pointer-events: stroke;
     }}
-    .flow-arrow-line {{
-      stroke:#087ca7;
-      stroke-width:2.8;
-      stroke-linecap:round;
-      stroke-dasharray:6 20;
-      animation:flowTravel 1s linear infinite;
-      pointer-events:none;
-      vector-effect:non-scaling-stroke;
-    }}
-    @keyframes flowTravel {{ from {{ stroke-dashoffset:0; }} to {{ stroke-dashoffset:-26; }} }}
-    .flow-arrow:focus-visible .flow-arrow-line,
-    .flow-arrow:hover .flow-arrow-line {{ stroke:#ff8a00; stroke-width:3.6; }}
+    .flow-arrow-line {{ stroke:#087ca7; stroke-width:1.3; opacity:.3; pointer-events:none; vector-effect:non-scaling-stroke; }}
+    .flow-packet {{ color:#0069d8; pointer-events:none; filter:drop-shadow(0 0 2px rgba(255,255,255,.85)); }}
+    .flow-packet path {{ fill:none; stroke:currentColor; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }}
+    .flow-packet .flow-tail {{ opacity:.42; stroke-width:2.4; }}
+    .flow-arrow:hover .flow-packet,.flow-arrow:focus-visible .flow-packet {{ color:#ed6600; }}
     .flow-arrow.context-dimmed {{ opacity:.14; }}
+    @media (prefers-reduced-motion:reduce) {{ .flow-packet {{ opacity:1!important; }} }}
+    body:not([data-theme="light"]) .flow-packet {{ color:#72eeff; filter:drop-shadow(0 0 3px rgba(42,201,255,.7)); }}
     body:not([data-theme="light"]) .flow-arrow-line {{ stroke:#67e8f9; }}
-    .app[hidden] .flow-arrow-line,.is-hidden .flow-arrow-line {{ animation-play-state:paused; }}
     .node {{
       fill: #b9eaff;
       stroke: #62b7d9;
@@ -1491,6 +1485,15 @@ def _render_html(data: dict[str, object]) -> str:
     }});
 
     const flowArrowsG = document.getElementById('flowArrows');
+    const flowMotionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+    function syncFlowMotion() {{
+      const pause = !flowVisible || document.querySelector('.app').hidden || document.hidden || flowMotionPreference.matches;
+      if (pause && !mapSvg.animationsPaused()) mapSvg.pauseAnimations();
+      else if (!pause && mapSvg.animationsPaused()) mapSvg.unpauseAnimations();
+    }}
+    flowMotionPreference.addEventListener('change', syncFlowMotion);
+    document.addEventListener('visibilitychange', syncFlowMotion);
+    document.addEventListener('analysisviewchange', syncFlowMotion);
 
     function flowDirectionLabel(edge) {{
       if (edge.flow_kind === 'bidirectional') return '双向反转';
@@ -1509,6 +1512,18 @@ def _render_html(data: dict[str, object]) -> str:
         element.setAttribute('y1', startY + dy * inset);
         element.setAttribute('x2', endX - dx * inset);
         element.setAttribute('y2', endY - dy * inset);
+      }});
+      const routeLength = Math.max(1, length - inset * 2);
+      const duration = routeLength / 65;
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      item.route.setAttribute('transform', `translate(${{startX + dx * inset}} ${{startY + dy * inset}}) rotate(${{angle}})`);
+      item.packets.forEach((packet, index) => {{
+        packet.motion.setAttribute('to', `${{routeLength}} 0`);
+        [packet.motion, packet.fade].forEach(animation => {{
+          const dur = `${{duration}}s`, begin = `${{-index * duration / item.packets.length}}s`;
+          if (animation.getAttribute('dur') !== dur) animation.setAttribute('dur', dur);
+          if (animation.getAttribute('begin') !== begin) animation.setAttribute('begin', begin);
+        }});
       }});
       item.title.textContent = `${{time}}｜${{direction}}`;
       item.group.dataset.direction = direction;
@@ -1557,7 +1572,26 @@ def _render_html(data: dict[str, object]) -> str:
       hit.setAttribute('class', 'flow-arrow-hit');
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       line.setAttribute('class', 'flow-arrow-line');
-      group.append(title, hit, line);
+      const route = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      route.setAttribute('class', 'flow-route');
+      const count = Math.max(1, Math.min(8, Math.ceil(Math.hypot(edge.x2-edge.x1, edge.y2-edge.y1) / 100)));
+      const packets = Array.from({{length:count}}, () => {{
+        const packet = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        packet.setAttribute('class', 'flow-packet');
+        const tail = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        tail.setAttribute('d', 'M -18 -5 L -12 0 L -18 5');tail.setAttribute('class', 'flow-tail');
+        const head = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        head.setAttribute('d', 'M -7 -5 L 0 0 L -7 5');head.setAttribute('class', 'flow-head');
+        const motion = document.createElementNS('http://www.w3.org/2000/svg', 'animateTransform');
+        motion.setAttribute('attributeName', 'transform');motion.setAttribute('type', 'translate');
+        motion.setAttribute('from', '0 0');motion.setAttribute('repeatCount', 'indefinite');
+        const fade = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
+        fade.setAttribute('attributeName', 'opacity');fade.setAttribute('values', '0;1;1;0');
+        fade.setAttribute('keyTimes', '0;0.12;0.88;1');fade.setAttribute('repeatCount', 'indefinite');
+        packet.append(tail,head,motion,fade);route.append(packet);
+        return {{motion,fade}};
+      }});
+      group.append(title, hit, line, route);
       const activate = event => {{
         event.preventDefault();
         event.stopPropagation();
@@ -1573,7 +1607,7 @@ def _render_html(data: dict[str, object]) -> str:
         if (event.key === 'Enter' || event.key === ' ') activate(event);
       }});
       flowArrowsG.appendChild(group);
-      flowArrowItems.set(edge.edge, {{ group, title, hit, line }});
+      flowArrowItems.set(edge.edge, {{ group, title, hit, line, route, packets }});
       resetFlowArrow(edge);
     }});
 
@@ -2011,6 +2045,7 @@ def _render_html(data: dict[str, object]) -> str:
       event.currentTarget.setAttribute('aria-pressed', String(flowVisible));
       flowArrowsG.classList.toggle('is-hidden', !flowVisible);
       if (flowVisible) resetAllFlowArrows();
+      syncFlowMotion();
     }});
     function setTopologyTime(slot, reveal = true) {{
       topologyTimeSlot = Math.max(0, Math.min(95, Math.round(Number(slot) || 0)));
@@ -2030,6 +2065,7 @@ def _render_html(data: dict[str, object]) -> str:
         flowVisible = true;
         document.getElementById('toggleFlow').setAttribute('aria-pressed', 'true');
         flowArrowsG.classList.remove('is-hidden');
+        syncFlowMotion();
       }}
       resetAllFlowArrows();
     }}
@@ -2037,6 +2073,7 @@ def _render_html(data: dict[str, object]) -> str:
     document.getElementById('topologyTimePrev').addEventListener('click', () => setTopologyTime(topologyTimeSlot - 1));
     document.getElementById('topologyTimeNext').addEventListener('click', () => setTopologyTime(topologyTimeSlot + 1));
     setTopologyTime(0, false);
+    syncFlowMotion();
     const nodeSearch = document.getElementById('nodeSearch');
     function matchingNodes() {{
       const query = nodeSearch.value.trim().toLowerCase();

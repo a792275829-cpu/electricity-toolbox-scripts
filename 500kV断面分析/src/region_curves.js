@@ -127,6 +127,7 @@
     hideTooltip();
     document.querySelector('.analysis-switch').dataset.view=curves ? 'curves' : 'topology';
     panel.hidden = !curves; mapPanel.hidden = curves;
+    document.dispatchEvent(new CustomEvent('analysisviewchange'));
     $('showRegionCurves').setAttribute('aria-pressed',String(curves));
     $('showTopology').setAttribute('aria-pressed',String(!curves));
     if (curves) { save(); draw(); } else {
