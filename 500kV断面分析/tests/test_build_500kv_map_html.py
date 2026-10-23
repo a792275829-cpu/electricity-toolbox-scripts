@@ -213,7 +213,7 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertIn('点击查看电价数据', html)
             self.assertIn('id="toggleFlow"', html)
             self.assertIn('id="flowArrows"', html)
-            self.assertIn('id="flowArrowHead"', html)
+            self.assertNotIn('id="flowArrowHead"', html)
             self.assertIn("flowVisible = !flowVisible;", html)
             self.assertIn("edge.flow_kind === 'bidirectional'", html)
             self.assertIn('id="topologyTime" type="range" min="0" max="95" step="1"', html)
@@ -222,7 +222,7 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertNotIn('断面强度颜色图例', html)
             self.assertIn('resetAllFlowArrows();', html)
             self.assertIn('if (slot >= 0) setTopologyTime(slot, false);', html)
-            self.assertIn('.flow-arrow.non-section-flow .flow-arrow-label { display:none; }', html)
+            self.assertNotIn("label.setAttribute('class', 'flow-arrow-label')", html)
             self.assertNotIn("不代表实际物理潮流", html)
 
     def test_flow_direction_requires_four_consecutive_points_per_direction(self):
