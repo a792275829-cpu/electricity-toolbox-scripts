@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import subprocess
 import sys
 import traceback
@@ -76,7 +77,7 @@ class UnitData:
 
 @dataclass(frozen=True)
 class NumericCell:
-    value: float
+    value: float | None
     number_format: str = "General"
 
 
@@ -195,20 +196,23 @@ def parse_workbook(file_path: Path) -> list[tuple[str, list[NumericCell], list[N
             if time_col is None or energy_col is None or price_col is None:
                 continue
 
-            energy_by_hour = {slot: NumericCell(0.0) for slot in TIME_SLOTS}
-            price_by_hour = {slot: NumericCell(0.0) for slot in TIME_SLOTS}
+            energy_by_hour = {}
+            price_by_hour = {}
             for row in rows:
                 if len(row) < time_col:
                     continue
                 slot = normalize_time(row[time_col - 1].value)
-                if slot not in energy_by_hour:
+                if slot not in TIME_SLOTS:
                     continue
-                energy_by_hour[slot] = (
-                    read_numeric_cell(row[energy_col - 1]) if len(row) >= energy_col else NumericCell(0.0)
-                )
-                price_by_hour[slot] = (
-                    read_numeric_cell(row[price_col - 1]) if len(row) >= price_col else NumericCell(0.0)
-                )
+                try:
+                    energy_by_hour[slot] = read_numeric_cell(row[energy_col - 1])
+                    price_by_hour[slot] = read_numeric_cell(row[price_col - 1])
+                except (IndexError, ValueError, TypeError) as exc:
+                    raise ValueError(f"{file_path.name} / {worksheet.title} / {slot}：电量或电价缺失或无效") from exc
+
+            missing = [slot for slot in TIME_SLOTS if slot not in energy_by_hour]
+            if missing:
+                raise ValueError(f"{file_path.name} / {worksheet.title}：缺少时段 {', '.join(missing)}")
 
             result.append(
                 (
@@ -261,10 +265,15 @@ def to_float(value: object) -> float:
 
 
 def read_numeric_cell(cell) -> NumericCell:
+    if cell.value is None or (isinstance(cell.value, str) and not cell.value.strip()):
+        raise ValueError("数值为空")
     number_format = normalize_number_format(cell.number_format)
     if number_format == "General" and isinstance(cell.value, str):
         number_format = infer_text_number_format(cell.value)
-    return NumericCell(to_float(cell.value), number_format)
+    value = to_float(cell.value)
+    if not math.isfinite(value):
+        raise ValueError("数值必须有限")
+    return NumericCell(value, number_format)
 
 
 def normalize_number_format(value: object) -> str:
@@ -470,7 +479,7 @@ def safe_sheet_title(station_name: str, workbook: Workbook) -> str:
 def get_series(unit: UnitData, market: str, kind: str) -> list[NumericCell]:
     market_values = unit.values.get(market)
     if not market_values:
-        return [NumericCell(0.0) for _ in TIME_SLOTS]
+        return [NumericCell(None) for _ in TIME_SLOTS]
     return market_values[kind]
 
 

@@ -28,7 +28,8 @@ def ensure_stopped():
         raise ValueError("请先退出正在运行的电力工具箱（包括旧系统安装版），再重新安装；不会强制终止任务。")
 
 
-def install(source: Path, destination: Path | None = None) -> Path:
+def install(source: Path, destination: Path | None = None, *, after_install=None) -> Path:
+    """Retain the previous app until optional verification/launch has succeeded."""
     source = source.resolve()
     version = app_info(source)
     target = destination or Path.home() / "Applications" / APP_NAME
@@ -50,9 +51,15 @@ def install(source: Path, destination: Path | None = None) -> Path:
             target.rename(backup)
         try:
             staged.rename(target)
+            if after_install is not None:
+                after_install(target)
         except BaseException:
             if backup.exists():
+                if target.exists():
+                    target.rename(staged)
                 backup.rename(target)
+            elif target.exists():
+                target.rename(staged)
             raise
         if backup.exists():
             shutil.rmtree(backup)
@@ -65,9 +72,9 @@ def install(source: Path, destination: Path | None = None) -> Path:
 
 if __name__ == "__main__":
     try:
-        target = install(Path(sys.argv[1]))
+        target = install(Path(sys.argv[1]), after_install=lambda app:
+            subprocess.run(["/usr/bin/open", "-n", str(app)], check=True))
         print(f"安装完成：{target}\n后续在应用内点击“开始更新”即可自动安装并重启；原配置和数据保留。")
-        subprocess.run(["/usr/bin/open", "-n", str(target)], check=True)
     except Exception as error:
         print(f"安装未完成：{error}", file=sys.stderr)
         sys.exit(1)

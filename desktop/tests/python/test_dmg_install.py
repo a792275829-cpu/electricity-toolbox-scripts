@@ -61,6 +61,24 @@ class DmgInstallTests(unittest.TestCase):
             installer.install(self.source, self.target)
         self.assertEqual(installer.app_info(self.target), (0, 1, 6))
 
+    def test_launch_failure_restores_old_signed_app_before_returning(self):
+        self.bundle(self.target, "0.1.6")
+        def launch(app):
+            self.assertEqual(installer.app_info(app), (0, 1, 7))
+            self.assertEqual(len(list(app.parent.glob(".toolbox-install-*/previous.app"))), 1)
+            raise OSError("launch failed")
+        with self.assertRaisesRegex(OSError, "launch failed"):
+            installer.install(self.source, self.target, after_install=launch)
+        self.assertEqual(installer.app_info(self.target), (0, 1, 6))
+        subprocess.run(["codesign", "--verify", "--deep", "--strict", str(self.target)], check=True, capture_output=True)
+        self.assertEqual(list(self.target.parent.glob(".toolbox-install-*")), [])
+
+    def test_first_install_launch_failure_removes_failed_application(self):
+        with self.assertRaisesRegex(OSError, "launch failed"):
+            installer.install(self.source, self.target, after_install=lambda _: (_ for _ in ()).throw(OSError("launch failed")))
+        self.assertFalse(self.target.exists())
+        self.assertEqual(list(self.target.parent.glob(".toolbox-install-*")), [])
+
     def test_failed_rollback_keeps_recoverable_backup(self):
         self.bundle(self.target, "0.1.6")
         original = Path.rename

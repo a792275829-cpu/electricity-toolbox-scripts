@@ -66,3 +66,21 @@ class WorkbookCommitTests(unittest.TestCase):
             result = subprocess.run(command, cwd=workspace, capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(set(root.iterdir()), {item.original, item.temporary})
+
+    def test_rollback_preserves_external_save_and_original_recovery_copy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            items = (self.prepare(root, "a"), self.prepare(root, "b"))
+            def verify(path, item):
+                if item is items[0]:
+                    path.write_bytes(b"external save A")
+                    items[1].original.write_bytes(b"external save B")
+            with self.assertRaisesRegex(RuntimeError, "工作簿被修改") as raised:
+                commit_workbooks(items, verify, create_backup=False)
+            self.assertEqual(items[0].original.read_bytes(), b"external save A")
+            self.assertEqual(items[1].original.read_bytes(), b"external save B")
+            copies = list(root.glob(".a.*.rollback.xlsx"))
+            self.assertEqual(len(copies), 1)
+            self.assertEqual(copies[0].read_bytes(), b"original")
+            self.assertIn(str(copies[0]), " ".join(raised.exception.__notes__))
+            self.assertFalse(any(item.temporary.exists() for item in items))

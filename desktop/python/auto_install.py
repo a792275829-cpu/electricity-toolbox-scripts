@@ -146,9 +146,10 @@ def run(directory):
                 raise TimeoutError('等待工具箱正常退出超时，原应用未改动')
             time.sleep(.1)
         # Reuse the image's verified installer, including its staging and rollback.
-        target = installer.install(source)
-        verify(target, request['version'])
-        subprocess.run(['/usr/bin/open', '-n', str(target)], check=True)
+        def launch(target):
+            verify(target, request['version'])
+            subprocess.run(['/usr/bin/open', '-n', str(target)], check=True)
+        installer.install(source, after_install=launch)
         write_json(Path(request['result']), dict(version=request['version'], success=True))
     except Exception as exc:
         print(f'自动更新失败：{exc}', flush=True)

@@ -34,7 +34,7 @@ class AutoInstallGuards(unittest.TestCase):
             request = dict(version='0.2.0', old_app=str(old), mount=str(root / 'image'), parents=[], result=str(result))
             (root / 'request.json').write_text(json.dumps(request))
             (root / 'commit.json').write_text('{}')
-            (root / 'installer.py').write_text('def install(source):\n    raise OSError("copy failed")\n')
+            (root / 'installer.py').write_text('def install(source, **kwargs):\n    raise OSError("copy failed")\n')
             with patch('auto_install.verify'), patch('auto_install.subprocess.run') as command, patch('auto_install.os.execv') as detach:
                 run(root)
             self.assertFalse(json.loads(result.read_text())['success'])
@@ -122,6 +122,12 @@ int main(void) { @autoreleasepool {
         subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(app)], check=True, capture_output=True)
 
     def test_dmg_handoff_waits_for_old_process_then_installs_and_relaunches(self):
+        self.exercise_handoff()
+
+    def test_dmg_handoff_launch_failure_restores_and_relaunches_old_app(self):
+        self.exercise_handoff(launch_failure=True)
+
+    def exercise_handoff(self, launch_failure=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             target = root / 'Applications/电力工具箱.app'
@@ -131,8 +137,15 @@ int main(void) { @autoreleasepool {
             # Only ignore unrelated real apps in this temporary installer fixture.
             installer = (ROOT / 'packaging/tauri/install_user_app.py').read_text()
             installer += ('\nensure_stopped = lambda: None\n_original_install = install\n'
-                          'def install(source):\n'
-                          f'    return _original_install(source, Path({str(target)!r}))\n')
+                          'def install(source, **kwargs):\n'
+                          f'    return _original_install(source, Path({str(target)!r}), **kwargs)\n')
+            if launch_failure:
+                installer += ('\n_original_target_install = install\n'
+                              'def install(source, **kwargs):\n'
+                              '    def fail_launch(target):\n'
+                              '        raise OSError("simulated launch failure")\n'
+                              '    kwargs["after_install"] = fail_launch\n'
+                              '    return _original_target_install(source, **kwargs)\n')
             (image / '安装到用户应用程序.py').write_text(installer)
             dmg = root / 'update.dmg'
             subprocess.run(['/usr/bin/hdiutil', 'create', '-ov', '-volname', 'ToolboxAutoUpdateTest',
@@ -157,13 +170,16 @@ int main(void) { @autoreleasepool {
                 old_process.wait(timeout=5)
                 manager.process.wait(timeout=30)
                 result = json.loads((root / 'state/update-result.json').read_text())
-                self.assertTrue(result['success'], (result, (manager.directory / 'install.log').read_text()))
-                self.assertEqual(app_version(target), '0.2.0')
-                marker = image / '0.2.0.launched'
+                self.assertEqual(result['success'], not launch_failure, (result, (manager.directory / 'install.log').read_text()))
+                version = '0.1.0' if launch_failure else '0.2.0'
+                self.assertEqual(app_version(target), version)
+                if launch_failure:
+                    self.assertIn('simulated launch failure', result['error'])
+                marker = (target.parent if launch_failure else image) / f'{version}.launched'
                 deadline = time.monotonic() + 5
                 while not marker.exists() and time.monotonic() < deadline:
                     time.sleep(.05)
-                self.assertEqual(marker.read_text(), '0.2.0')
+                self.assertEqual(marker.read_text(), version)
                 self.assertEqual((data / 'config.json').read_text(), 'business sentinel')
                 self.assertEqual(list(target.parent.glob('.toolbox-install-*')), [])
                 self.assertEqual(manager.process.returncode, 0, (manager.directory / 'install.log').read_text())

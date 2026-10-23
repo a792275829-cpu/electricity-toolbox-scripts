@@ -79,6 +79,7 @@ def _commit_locked(prepared, verify, *, create_backup):
     rollbacks: dict[Path, Path] = {}
     backups: dict[Path, Path | None] = {}
     replaced: list[T] = []
+    installed_fingerprints: dict[Path, FileFingerprint] = {}
     preserve: set[Path] = set()
     try:
         if len({item.original.resolve() for item in prepared}) != len(prepared):
@@ -101,6 +102,7 @@ def _commit_locked(prepared, verify, *, create_backup):
                 shutil.copy2(item.original, backup)
             backups[item.original] = backup
         for item in prepared:
+            installed_fingerprints[item.original] = workbook_fingerprint(item.temporary)
             assert_workbook_unchanged(item.original, item.source_fingerprint)
             os.replace(item.temporary, item.original)
             # Register immediately: verification can fail after replacement.
@@ -110,6 +112,12 @@ def _commit_locked(prepared, verify, *, create_backup):
         for item in reversed(replaced):
             rollback = rollbacks[item.original]
             try:
+                current = workbook_fingerprint(item.original)
+                expected = installed_fingerprints[item.original]
+                # Rename changes ctime; all other identity fields and content
+                # must still match the file we installed, including after verify.
+                if current[:4] != expected[:4] or current[5] != expected[5]:
+                    raise RuntimeError("提交后工作簿已被外部修改，保留当前文件")
                 os.replace(rollback, item.original)
             except Exception as restore_error:
                 preserve.add(rollback)

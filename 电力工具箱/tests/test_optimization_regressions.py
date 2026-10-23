@@ -35,6 +35,8 @@ class OptimizationRegressionTests(unittest.TestCase):
             sheet.append([None, None, None])
             sheet.append(["01:00", 2, 200])
             sheet.append(["01:00", 3, 250])
+            for hour in range(2, 24):
+                sheet.append([f"{hour:02d}:00", 0, 0])
             workbook.create_sheet("说明")["A1"] = "无匹配字段"
             workbook.save(path)
             parsed = module.parse_workbook(path)
