@@ -272,6 +272,7 @@
     $('curveTime').value=String(currentIndex);
     $('curveTime').parentElement.style.setProperty('--time-progress',String(currentIndex/Math.max(1,times.length-1)));
     $('curveTimeLabel').textContent=times[currentIndex] || '无时点';
+    syncTimeAxisLabels($('curveTime'), $('curveTimeLabel'), currentIndex);
     $('curveTime').setAttribute('aria-valuetext',times[currentIndex] || '无时点');
     if (guide && chartX) { guide.setAttribute('x1',chartX(currentIndex)); guide.setAttribute('x2',chartX(currentIndex)); }
     if (markerLayer && chartY) {
@@ -300,7 +301,7 @@
     svg.hidden=!all.length; $('curveExport').disabled=!all.length;
     $('curveTime').max=String(Math.max(0,times.length-1)); $('curveTime').disabled=!all.length;
     $('curveTimeTicks').replaceChildren(...[...new Set([0,Math.round(times.length/4),Math.round(times.length/2),Math.round(times.length*3/4),times.length-1])].filter(i => i>=0 && i<times.length).map(i => {
-      const tick=document.createElement('span');tick.textContent=times[i];return tick;
+      const tick=document.createElement('span');tick.dataset.index=String(i);tick.textContent=times[i];return tick;
     }));
     if (!all.length) { showTime(currentIndex); return; }
     const width=Math.max(340,Math.round(svg.parentElement.clientWidth-36)), height=360;

@@ -962,6 +962,10 @@ def _render_html(data: dict[str, object]) -> str:
     @media (prefers-reduced-motion:reduce) {{ .flow-packet {{ opacity:1!important; }} }}
     body:not([data-theme="light"]) .flow-packet {{ color:#72eeff; }}
     body:not([data-theme="light"]) .flow-arrow-line {{ stroke:#67e8f9; }}
+    .flow-arrow.section-flow .flow-packet {{ color:#d92335; }}
+    .flow-arrow.section-flow .flow-arrow-line {{ stroke:#d92335; }}
+    body:not([data-theme="light"]) .flow-arrow.section-flow .flow-packet {{ color:#ff667b; }}
+    body:not([data-theme="light"]) .flow-arrow.section-flow .flow-arrow-line {{ stroke:#ff667b; }}
     .node {{
       fill: #b9eaff;
       stroke: #62b7d9;
@@ -1035,8 +1039,7 @@ def _render_html(data: dict[str, object]) -> str:
     .topology-time-controls {{ display:flex; align-items:flex-start; gap:6px; }}
     .topology-time-controls button {{ width:30px; min-width:30px; height:24px; border:1px solid var(--line); border-radius:6px; background:var(--soft); color:var(--ink); cursor:pointer; }}
     .topology-timeline .time-slider {{ height:22px; }}
-    .topology-timeline .time-slider-readout {{ top:22px; line-height:18px; font-size:12px; }}
-    .topology-timeline .time-slider-ticks {{ margin-top:18px; font-size:10px; }}
+    .topology-timeline .time-slider-track {{ --time-row-top:22px; --time-label-size:10px; min-height:38px; }}
     #topologyTime:focus-visible {{ outline:2px solid var(--blue); outline-offset:3px; border-radius:4px; }}
     .side {{
       background: var(--panel);
@@ -1194,7 +1197,7 @@ def _render_html(data: dict[str, object]) -> str:
             <button id="topologyTimePrev" type="button" aria-label="前15分钟">‹</button>
             <div class="topology-time-track time-slider-track"><input id="topologyTime" type="range" min="0" max="95" step="1" value="0" aria-label="潮流时点，每格15分钟" class="time-slider">
               <output class="time-slider-readout" id="topologyTimeLabel" for="topologyTime">00:00</output>
-              <div class="topology-time-ticks time-slider-ticks" aria-hidden="true"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:45</span></div></div>
+              <div class="topology-time-ticks time-slider-ticks" aria-hidden="true"><span data-index="0">00:00</span><span data-index="24">06:00</span><span data-index="48">12:00</span><span data-index="72">18:00</span><span data-index="95">23:45</span></div></div>
             <button id="topologyTimeNext" type="button" aria-label="后15分钟">›</button>
           </div>
         </section>
@@ -1263,6 +1266,30 @@ def _render_html(data: dict[str, object]) -> str:
       }});
       DATA.metadata.layout_canvas_width = {SVG_W};
       DATA.metadata.layout_canvas_height = {SVG_H};
+    }}
+    const timeAxisWidths = new WeakMap(), observedTimeAxes = new WeakSet();
+    const timeAxisResizeObserver = new ResizeObserver(entries => {{
+      entries.forEach(entry => {{
+        timeAxisWidths.set(entry.target, entry.contentRect.width);
+        syncTimeAxisLabels(entry.target, entry.target.parentElement.querySelector('output'), Number(entry.target.value));
+      }});
+    }});
+    function syncTimeAxisLabels(slider, output, index) {{
+      if (!observedTimeAxes.has(slider)) {{
+        observedTimeAxes.add(slider);timeAxisWidths.set(slider, slider.clientWidth);timeAxisResizeObserver.observe(slider);
+      }}
+      const maximum = Math.max(1, Number(slider.max));
+      const ticks = [...slider.parentElement.querySelectorAll('.time-slider-ticks span')];
+      const exact = ticks.some(tick => Number(tick.dataset.index) === index);
+      output.hidden = exact;
+      const width = Math.max(1, (timeAxisWidths.get(slider) || 1) - 18);
+      ticks.forEach(tick => {{
+        const at = Number(tick.dataset.index);
+        if (tick.dataset.positionMax !== String(maximum)) {{
+          tick.style.setProperty('--tick-progress', String(at / maximum));tick.dataset.positionMax = String(maximum);
+        }}
+        tick.style.visibility = !exact && Math.abs(at-index) / maximum * width < 34 ? 'hidden' : '';
+      }});
     }}
     const nodeByName = new Map(DATA.nodes.map(d => [d.name, d]));
     const regionData = DATA.regions || [];
@@ -2038,6 +2065,7 @@ def _render_html(data: dict[str, object]) -> str:
       slider.parentElement.style.setProperty('--time-progress', String(topologyTimeSlot / 95));
       slider.setAttribute('aria-valuetext', time);
       document.getElementById('topologyTimeLabel').textContent = time;
+      syncTimeAxisLabels(slider, document.getElementById('topologyTimeLabel'), topologyTimeSlot);
       if (nodePriceHover) {{
         const {{node, element, clientX, clientY}} = nodePriceHover;
         showNodePriceTooltip(node, element, clientX, clientY);
