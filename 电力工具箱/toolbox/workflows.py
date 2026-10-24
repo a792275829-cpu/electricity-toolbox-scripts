@@ -202,7 +202,7 @@ def execute(paths, tool_id, action, p):
             if not all(Path(v).is_file() for v in outputs):
                 raise RuntimeError("分析进程已结束，但部分分析网页未生成，请核对日志")
         directories = {
-            "online-energy": data_path(paths.online_energy_dir / "输出"),
+            "online-energy": paths.online_energy_output_dir if tool_id == "online-energy" else None,
             "wind-forecast": paths.wind_forecast_output_dir,
             "report": data_path(paths.report_root / "输出"),
             "market-report": paths.market_report_output_dir,

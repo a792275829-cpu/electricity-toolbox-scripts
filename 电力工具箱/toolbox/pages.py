@@ -91,7 +91,7 @@ class OnlineEnergyPage(ToolPage):
         ttk.Button(
             actions,
             text="打开输出目录",
-            command=lambda: _open_directory(data_path(self.paths.online_energy_dir / "输出")),
+            command=lambda: _open_directory(self.paths.online_energy_output_dir),
         ).pack(side="left", padx=(8, 0))
         self.register_busy_widgets(self.export_button)
         self.append_log("请选择日期后开始导出。")

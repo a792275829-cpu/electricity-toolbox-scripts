@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from toolbox_storage import data_path
+from toolbox_storage import data_path, online_energy_output_dir
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -32,6 +32,13 @@ class ToolPaths:
     @property
     def online_energy_dir(self) -> Path:
         return self.online_energy.parent
+
+    @property
+    def online_energy_output_dir(self) -> Path:
+        from toolbox_credentials import read_json
+
+        config = read_json(data_path(self.online_energy_dir / "config.json"))
+        return online_energy_output_dir(config.get("outputDir"))
 
     @property
     def wind_forecast(self) -> Path:

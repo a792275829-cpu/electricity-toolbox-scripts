@@ -5,6 +5,7 @@
   "unitIdsMode": "all",
   "skipExisting": true,
   "requestDelaySeconds": 1,
+  "outputDir": "~/Downloads/上网电量",
   "exportTimeoutSeconds": 60,
   "downloadDir": "~/Desktop/downloads"
 }

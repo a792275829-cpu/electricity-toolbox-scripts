@@ -32,13 +32,13 @@ BASE_URL = "https://xhxt.chng.com.cn"
 FIRE_APP_URL = f"{BASE_URL}/gdfire/PrivateDataManage/PowerSituationReport"
 ENERGY_APP_URL = f"{BASE_URL}/gdfire/PrivateDataManageCE/PowerSituationReport"
 LOGIN_URL = f"{BASE_URL}/usercenter/#/login"
-from toolbox_storage import data_path
+from toolbox_storage import data_path, online_energy_output_dir
 
 PROFILE_DIR = data_path(SCRIPT_DIR / ".browser-profile")
 AUTH_STATE_PATH = data_path(SCRIPT_DIR / "auth_state.json")
 AUTH_LOCK_PATH = Path(str(AUTH_STATE_PATH) + ".lock")
 CONFIG_PATH = data_path(SCRIPT_DIR / "config.json")
-OUTPUT_DIR = data_path(APP_ROOT / "\u8f93\u51fa")
+OUTPUT_DIR = online_energy_output_dir()
 
 FALLBACK_COMPANIES = [
     {"tenantId": "e4e6eb5c80731ac70180fab1ba2f0559", "name": "汕头电厂"},
@@ -167,7 +167,7 @@ def load_config() -> Config:
         password=str(raw.get("password", "") or ""),
         headless=bool(raw.get("headless", True)),
         request_delay_seconds=float(raw.get("requestDelaySeconds", 1.0)),
-        output_dir=data_path(Path(raw.get("outputDir", str(OUTPUT_DIR))).expanduser()),
+        output_dir=data_path(Path(raw.get("outputDir") or OUTPUT_DIR).expanduser()),
     )
 
 
