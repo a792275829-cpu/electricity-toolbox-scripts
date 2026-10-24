@@ -981,7 +981,9 @@ def _render_html(data: dict[str, object]) -> str:
     .node-group.neighbor .node {{ opacity:1; stroke:#7fe4ff!important; stroke-width:2.1; }}
     .node-group.context-dimmed {{ opacity:.24; }}
     .node-group.search-dimmed {{ opacity:.10; }}
-    .node-group.search-match .node {{ opacity:1; stroke:#ffe66d!important; stroke-width:3.2; filter:drop-shadow(0 0 8px rgba(255,230,109,.75)); }}
+    .node-group.search-match {{ opacity:1!important; }}
+    body[data-theme="light"] .node-group.search-match .node {{ opacity:1; fill:#116149!important; stroke:#064e3b!important; stroke-width:3.2; }}
+    #nodeLabels .label.search-match {{ fill:#064e3b!important; opacity:1!important; font-weight:800; }}
     .node.blocked {{
       fill: #ffe5e8;
       stroke: #ff3158;
@@ -1067,7 +1069,8 @@ def _render_html(data: dict[str, object]) -> str:
       padding: 0 12px; color: var(--ink); background: var(--soft); outline: none;
     }}
     .search:focus {{ border-color: #88ace8; box-shadow: 0 0 0 3px rgba(31,99,211,.11); }}
-    .list-head {{ display: flex; align-items: center; justify-content: space-between; margin: 14px 0 8px; }}
+    .section-controls {{ display:flex; align-items:center; gap:8px; }}
+    #sectionSearch {{ margin-bottom:10px; }}
     .sort-select {{ border: 0; color: var(--blue); background: transparent; font-size: 12px; }}
     .section-list {{ display:grid; align-content:start; gap:7px; flex:1; min-height:100px; max-height:none; overflow:auto; padding-right:3px; }}
     .section-item {{
@@ -1167,8 +1170,7 @@ def _render_html(data: dict[str, object]) -> str:
       <div class="map-shell">
         <div class="map-toolbar">
           <div class="layer-toggles" aria-label="地图图层">
-            <input class="node-search" id="nodeSearch" type="search" placeholder="搜索节点，Enter定位" aria-label="搜索节点">
-            <button class="toggle" id="focusSelected" type="button">定位所选</button>
+            <input class="node-search" id="nodeSearch" type="search" placeholder="搜索节点，回车或移开焦点定位" aria-label="搜索节点">
             <button class="toggle" id="toggleFlow" type="button" aria-pressed="true">潮流查看</button>
           </div>
         <div class="zoom-controls" aria-label="地图缩放控制">
@@ -1209,22 +1211,18 @@ def _render_html(data: dict[str, object]) -> str:
       <section id="selectionDetails" hidden aria-label="所选节点或线路电价">
       <p class="panel-title" id="detailTitle"></p>
       <div class="chart-wrap">
-        <div class="chart-title" id="chartTitle">24小时节点电价曲线</div>
         <svg id="priceChart" viewBox="0 0 360 280" role="img" aria-label="两端节点24小时电价曲线"></svg>
       </div>
       <div class="source" id="sourceText"></div>
       <hr class="detail-divider">
       </section>
-      <div class="side-header"><span class="side-label">断面导航</span><span class="pill" id="visibleCount">0 条</span></div>
-      <input class="search" id="sectionSearch" type="search" placeholder="搜索节点、片区或方向" aria-label="搜索断面">
-      <div class="list-head">
-        <strong>断面列表</strong>
+      <div class="side-header"><span class="side-label">断面导航</span><div class="section-controls"><span class="pill" id="visibleCount">0 条</span>
         <select class="sort-select" id="sectionSort" aria-label="断面排序">
           <option value="severity">按严重度</option>
           <option value="gap">按最大价差</option>
           <option value="duration">按累计时点</option>
-        </select>
-      </div>
+        </select></div></div>
+      <input class="search" id="sectionSearch" type="search" placeholder="搜索节点、片区或方向" aria-label="搜索断面">
       <div class="section-list" id="sectionList"></div>
     </aside>
   </div>
@@ -1972,8 +1970,7 @@ def _render_html(data: dict[str, object]) -> str:
       document.querySelectorAll('.section-item').forEach(item => item.classList.toggle('active', item.dataset.edge === edge.edge));
       const a = nodeByName.get(edge.a);
       const b = nodeByName.get(edge.b);
-      document.getElementById('detailTitle').innerHTML = `${{escapeHtml(edge.edge)}} <span class="pill">${{escapeHtml(edge.city_label || '未分类')}}</span>`;
-      document.getElementById('chartTitle').textContent = `${{edge.a}} / ${{edge.b}} 24小时节点电价曲线`;
+      document.getElementById('detailTitle').innerHTML = `<span style="color:#1261d1">${{escapeHtml(edge.a)}}</span>-<span style="color:#e02020">${{escapeHtml(edge.b)}}</span> <span class="pill">${{escapeHtml(edge.city_label || '未分类')}}</span>`;
       drawChart(a, b, edge);
     }}
 
@@ -2002,8 +1999,7 @@ def _render_html(data: dict[str, object]) -> str:
       selectedEdgeName = '';
       selectedNodeName = node.name;
       document.querySelectorAll('.section-item').forEach(item => item.classList.remove('active'));
-      document.getElementById('detailTitle').innerHTML = `${{escapeHtml(node.name)}} <span class="pill">${{escapeHtml(node.city || '未分类')}}</span>`;
-      document.getElementById('chartTitle').textContent = `${{node.name}} 24小时节点电价曲线`;
+      document.getElementById('detailTitle').innerHTML = `<span style="color:#168ac0">${{escapeHtml(node.name)}}</span> <span class="pill">${{escapeHtml(node.city || '未分类')}}</span>`;
       drawNodeChart(node);
       if (window.innerWidth <= 920) document.getElementById('detailTitle').scrollIntoView({{ behavior:'smooth', block:'start' }});
     }}
@@ -2100,41 +2096,32 @@ def _render_html(data: dict[str, object]) -> str:
       const query = nodeSearch.value.trim().toLowerCase();
       return query ? DATA.nodes.filter(node => [node.name, node.region].join(' ').toLowerCase().includes(query)) : [];
     }}
-    nodeSearch.addEventListener('input', () => {{
-      const matches = new Set(matchingNodes().map(node => node.name));
-      const hasQuery = Boolean(nodeSearch.value.trim());
+    let committedNodeQuery = '';
+    function commitNodeSearch(force = false) {{
+      const query = nodeSearch.value.trim().toLowerCase();
+      if (!force && query === committedNodeQuery) return;
+      committedNodeQuery = query;
+      const matches = matchingNodes(), names = new Set(matches.map(node => node.name));
       nodeGroups.forEach((group, name) => {{
-        group.classList.toggle('search-match', matches.has(name));
-        group.classList.toggle('search-dimmed', hasQuery && !matches.has(name));
+        group.classList.toggle('search-match', names.has(name));
+        group.classList.toggle('search-dimmed', Boolean(query) && !names.has(name));
       }});
-    }});
-    nodeSearch.addEventListener('keydown', event => {{
-      if (event.key !== 'Enter') return;
-      const node = matchingNodes()[0];
-      const group = node ? nodeGroups.get(node.name) : null;
+      nodeLabelItems.forEach(item => item.label.classList.toggle('search-match', names.has(item.node.name)));
+      const node = matches[0], group = node ? nodeGroups.get(node.name) : null;
       if (!node || !group) return;
-      event.preventDefault();
       selectNode(node, group);
       autoFitMap = false;
       view.scale = 2.6;
       view.x = mapCanvas.width / 2 - node.x * view.scale;
       view.y = mapCanvas.height / 2 - node.y * view.scale;
       applyView();
-    }});
-    document.getElementById('focusSelected').addEventListener('click', () => {{
-      const edge = sectionEdges.find(item => item.edge === selectedEdgeName);
-      const node = nodeByName.get(selectedNodeName);
-      if (!edge && !node) return;
-      const centerX = node ? node.x : (edge.x1 + edge.x2) / 2;
-      const centerY = node ? node.y : (edge.y1 + edge.y2) / 2;
-      autoFitMap = false;
-      view.scale = 2.6;
-      view.x = mapCanvas.width / 2 - centerX * view.scale;
-      view.y = mapCanvas.height / 2 - centerY * view.scale;
-      applyView();
-      const target = node ? nodeGroups.get(node.name) : edgeLines.get(edge.edge);
-      target?.classList.add('pulse');
-      setTimeout(() => target?.classList.remove('pulse'), 2600);
+    }}
+    nodeSearch.addEventListener('input', () => {{ if (!nodeSearch.value.trim()) commitNodeSearch(); }});
+    nodeSearch.addEventListener('blur', () => commitNodeSearch());
+    nodeSearch.addEventListener('keydown', event => {{
+      if (event.key !== 'Enter' || event.isComposing) return;
+      event.preventDefault();
+      commitNodeSearch(true);
     }});
     document.getElementById('focusMode').addEventListener('click', event => {{
       const active = !document.body.classList.contains('focus-mode');
@@ -2288,14 +2275,14 @@ def _render_html(data: dict[str, object]) -> str:
       const areaPath = points.map((point, index) => `${{index ? 'L' : 'M'}} ${{x(point.index).toFixed(1)}} ${{y(point.value).toFixed(1)}}`).join(' ');
       const fillPath = `${{areaPath}} L ${{x(points.at(-1).index).toFixed(1)}} ${{height-margin.bottom}} L ${{x(points[0].index).toFixed(1)}} ${{height-margin.bottom}} Z`;
       svg.appendChild(make('path', {{ d:fillPath, fill:'rgba(52,183,255,.13)' }}));
-      svg.appendChild(make('path', {{ d:areaPath, fill:'none', stroke:'#34b7ff', 'stroke-width':2.8, 'stroke-linejoin':'round' }}));
+      svg.appendChild(make('path', {{ d:areaPath, fill:'none', stroke:'#168ac0', 'stroke-width':2.8, 'stroke-linejoin':'round' }}));
       const tickIndices = [0, Math.round((count-1)/4), Math.round((count-1)/2), Math.round((count-1)*3/4), count-1];
       tickIndices.forEach(index => {{
         const label = make('text', {{ x:x(index), y:height-11, 'text-anchor':'middle', 'font-size':9, fill:'#8296ad' }});
         label.textContent = DATA.time_headers[index] || String(index + 1); svg.appendChild(label);
       }});
       const last = points.at(-1);
-      svg.appendChild(make('circle', {{ cx:x(last.index), cy:y(last.value), r:4, fill:'#38d6ff', stroke:'#07111f', 'stroke-width':2 }}));
+      svg.appendChild(make('circle', {{ cx:x(last.index), cy:y(last.value), r:4, fill:'#168ac0', stroke:'#07111f', 'stroke-width':2 }}));
       attachPriceCrosshair(svg, {{
         series: [{{ name: node.name, color: '#168ac0', prices: node.prices }}],
         x, y, count, margin, width, height, make
@@ -2354,13 +2341,6 @@ def _render_html(data: dict[str, object]) -> str:
         text.textContent = Math.round(val);
         svg.appendChild(text);
       }});
-
-      const legendA = make('text', {{ x: margin.left, y: 12, 'font-size': 11, fill: '#2467c9' }});
-      legendA.textContent = a.name;
-      svg.appendChild(legendA);
-      const legendB = make('text', {{ x: margin.left + 82, y: 12, 'font-size': 11, fill: '#d62f2f' }});
-      legendB.textContent = b.name;
-      svg.appendChild(legendB);
 
       attachPriceCrosshair(svg, {{
         series: [
