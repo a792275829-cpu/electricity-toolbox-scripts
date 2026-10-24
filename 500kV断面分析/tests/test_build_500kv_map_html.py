@@ -202,7 +202,7 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertNotIn('class="metric-grid"', html)
             self.assertIn('function clearSelection()', html)
             self.assertIn("element.classList.remove('active', 'neighbor', 'context-dimmed')", html)
-            self.assertIn('点击节点或线路查看电价曲线', html)
+            self.assertIn('id="selectionDetails" hidden', html)
             self.assertIn('function drawNodeChart(node)', html)
             self.assertIn('function attachPriceCrosshair(svg, options)', html)
             self.assertIn("hit.addEventListener('pointermove', showFromPointer);", html)

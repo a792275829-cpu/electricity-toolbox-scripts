@@ -1201,13 +1201,15 @@ def _render_html(data: dict[str, object]) -> str:
       </div>
     </main>
     <aside class="side">
-      <p class="panel-title" id="detailTitle">点击任意节点查看电价数据</p>
+      <section id="selectionDetails" hidden aria-label="所选节点或线路电价">
+      <p class="panel-title" id="detailTitle"></p>
       <div class="chart-wrap">
         <div class="chart-title" id="chartTitle">24小时节点电价曲线</div>
         <svg id="priceChart" viewBox="0 0 360 280" role="img" aria-label="两端节点24小时电价曲线"></svg>
       </div>
       <div class="source" id="sourceText"></div>
       <hr class="detail-divider">
+      </section>
       <div class="side-header"><span class="side-label">断面导航</span><span class="pill" id="visibleCount">0 条</span></div>
       <input class="search" id="sectionSearch" type="search" placeholder="搜索节点、片区或方向" aria-label="搜索断面">
       <div class="list-head">
@@ -1893,6 +1895,20 @@ def _render_html(data: dict[str, object]) -> str:
     fitMap();
     if (document.fonts?.ready) document.fonts.ready.then(() => {{ layoutNodeLabels(); if (autoFitMap) fitMap(); }});
 
+    let detailsAnimation = null;
+    function showSelectionDetails() {{
+      const details = document.getElementById('selectionDetails');
+      if (!details.hidden) return;
+      details.hidden = false;
+      detailsAnimation?.cancel();
+      if (!flowMotionPreference.matches) {{
+        detailsAnimation = details.animate([
+          {{opacity:0, transform:'translateY(6px)'}},
+          {{opacity:1, transform:'translateY(0)'}}
+        ], {{duration:180, easing:'ease-out'}});
+      }}
+    }}
+
     function clearSelection() {{
       resetAllFlowArrows();
       document.querySelectorAll('.flow-arrow').forEach(element => element.classList.remove('context-dimmed'));
@@ -1905,21 +1921,16 @@ def _render_html(data: dict[str, object]) -> str:
       document.querySelectorAll('.section-item').forEach(item => item.classList.remove('active'));
       selectedEdgeName = '';
       selectedNodeName = '';
-      document.getElementById('detailTitle').textContent = '未选择节点或线路';
-      document.getElementById('chartTitle').textContent = '24小时节点电价曲线';
-      const chart = document.getElementById('priceChart');
-      chart.innerHTML = '';
-      const message = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      message.setAttribute('x', '180');
-      message.setAttribute('y', '140');
-      message.setAttribute('text-anchor', 'middle');
-      message.setAttribute('fill', '#8296ad');
-      message.textContent = '点击节点或线路查看电价曲线';
-      chart.appendChild(message);
+      detailsAnimation?.cancel();
+      detailsAnimation = null;
+      document.getElementById('selectionDetails').hidden = true;
+      document.getElementById('detailTitle').textContent = '';
+      document.getElementById('priceChart').replaceChildren();
       document.getElementById('sourceText').textContent = '';
     }}
 
     function selectEdge(edge, line) {{
+      showSelectionDetails();
       resetAllFlowArrows();
       document.querySelectorAll('.flow-arrow').forEach(element => element.classList.remove('context-dimmed'));
       document.querySelectorAll('.edge.active').forEach(el => el.classList.remove('active'));
@@ -1939,6 +1950,7 @@ def _render_html(data: dict[str, object]) -> str:
     }}
 
     function selectNode(node, group) {{
+      showSelectionDetails();
       resetAllFlowArrows();
       document.querySelectorAll('.edge.active').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.node-group').forEach(el => el.classList.remove('active', 'neighbor', 'context-dimmed'));
@@ -2354,11 +2366,7 @@ def _render_html(data: dict[str, object]) -> str:
       return String(text).replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch]));
     }}
 
-    if (sectionEdges.length) {{
-      const strongest = [...sectionEdges].sort((a, b) => b.severity_score - a.severity_score)[0];
-      const line = edgeLines.get(strongest.edge);
-      if (line) selectEdge(strongest, line);
-    }}
+    clearSelection();
   </script>
   {VIEW_HTML}
   <script>{curve_js}</script>
