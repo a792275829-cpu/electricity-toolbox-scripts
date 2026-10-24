@@ -36,11 +36,11 @@ class CredentialsPanel(ttk.Frame):
         self.password_entry = ttk.Entry(fields, textvariable=self.password_var, width=22)
         self.password_entry.grid(row=1, column=1, sticky="ew")
         actions = ttk.Frame(self)
-        actions.pack(fill="x", pady=(2, 4))
+        actions.pack(fill="x", pady=(2, 0))
         SettingCheckbutton(actions, text="显示密码", variable=self.show_password_var, command=self._toggle_password).pack(side="left")
         ttk.Button(actions, text="保存", command=self.save).pack(side="right")
-        ttk.Label(self, textvariable=self.status_var, style="Muted.TLabel", wraplength=250).pack(fill="x")
-        ttk.Label(self, text="默认自动保存，供各模块下次登录使用。", style="Muted.TLabel", wraplength=250).pack(fill="x", pady=(2, 0))
+        self.status_label = ttk.Label(self, textvariable=self.status_var, style="Muted.TLabel", wraplength=250)
+        self._status_trace = self.status_var.trace_add("write", self._update_status_visibility)
         try:
             saved = self.store.load()
             self.username_var.set(saved.get("username", ""))
@@ -55,6 +55,13 @@ class CredentialsPanel(ttk.Frame):
         for entry in (self.username_entry, self.password_entry):
             entry.bind("<FocusOut>", lambda _event: self.save())
             entry.bind("<Return>", lambda _event: self.save())
+
+    def _update_status_visibility(self, *_args) -> None:
+        # Routine save messages take no space; keep actionable failures visible.
+        if any(word in self.status_var.get() for word in ("失败", "异常", "尚未保存")):
+            self.status_label.pack(fill="x", pady=(4, 0))
+        else:
+            self.status_label.pack_forget()
 
     def _toggle_password(self) -> None:
         self.password_entry.configure(show="" if self.show_password_var.get() else "•")
@@ -88,6 +95,7 @@ class CredentialsPanel(ttk.Frame):
     def destroy(self) -> None:
         if self._save_id is not None:
             self.after_cancel(self._save_id)
+        self.status_var.trace_remove("write", self._status_trace)
         for variable, trace in self._traces:
             variable.trace_remove("write", trace)
         super().destroy()
