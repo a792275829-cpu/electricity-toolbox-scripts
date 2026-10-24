@@ -19,17 +19,15 @@
 }
 .region-price button { cursor:pointer; }
 .region-price { padding:18px; max-width:1700px; margin:auto; }
-.region-price h1 { margin:0; font-size:25px; }
 .region-price p { line-height:1.6; }
-.curve-heading { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:18px; }
-.curve-heading > div { min-width:0; }
 .curve-popup-toggle { display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap; min-height:36px; cursor:pointer; }
 .curve-layout { display:grid; grid-template-columns:310px minmax(0,1fr); gap:18px; }
 .curve-picker,.curve-main { padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--panel); min-width:0; }
 .curve-picker { max-height:calc(100vh - 185px); overflow:auto; }
-.curve-picker input[type=search] { width:100%; margin-top:8px; }
-.curve-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
-.curve-actions button { font-size:12px; padding:8px; }
+ .curve-search-box { position:relative; }
+.region-price .curve-search-box svg { position:absolute; left:11px; top:50%; transform:translateY(-50%); width:18px; height:18px; min-height:0; border:0; border-radius:0; background:transparent; fill:none; stroke:var(--muted); stroke-width:1.8; pointer-events:none; }
+.curve-picker .curve-search-box input[type=search] { width:100%; margin:0; padding-left:36px; }
+.curve-search-match { color:#064e3b; font-weight:700; }
 #curveSelection { color:var(--muted); font-size:13px; }
 .region-price details { margin:6px 0; }
 .region-price summary { cursor:pointer; padding:8px 0; }
@@ -39,6 +37,7 @@
 .curve-node input { flex:0 0 auto; }
 .curve-unavailable { color:var(--muted); font-size:12px; }
 .curve-controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.curve-controls .curve-popup-toggle { margin-left:auto; }
 .curve-controls select { flex:1; min-width:170px; max-width:380px; }
 .region-price #regionPriceChart { display:block; width:100%; height:auto; min-height:0; max-height:none; touch-action:pan-y; }
 .curve-time { display:flex; align-items:flex-start; gap:10px; margin:10px 0 16px; }
@@ -54,7 +53,7 @@
   padding:12px 15px; border:1px solid rgba(145,163,188,.24); border-radius:10px;
   background:rgba(255,255,255,.62); color:#172033; backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
   box-shadow:0 6px 22px rgba(28,44,66,.10); font-size:13px; }
-body[data-theme=dark] .curve-tooltip { background:rgba(12,23,38,.62); color:#e9f3ff; }
+#curveTooltip { background:transparent; border:0; box-shadow:none; backdrop-filter:none; -webkit-backdrop-filter:none; }
 .curve-tooltip h3 { margin:0 0 9px; font-size:13px; font-weight:600; }
 .curve-tooltip-row { display:flex; justify-content:space-between; gap:20px; margin:5px 0; }
 .curve-tooltip-row span { max-width:210px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

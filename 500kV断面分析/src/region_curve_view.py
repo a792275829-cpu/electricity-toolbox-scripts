@@ -11,15 +11,10 @@ def view_assets():
 
 VIEW_HTML = """
 <section id="regionCurveView" class="region-price" hidden aria-label="区域电价曲线">
-  <header class="curve-heading"><div><h1>区域电价分析</h1></div>
-    <label class="curve-popup-toggle"><input id="curvePopupEnabled" type="checkbox" checked> 显示弹框</label></header>
   <div class="curve-layout">
     <aside class="curve-picker" aria-label="大区市节点选择">
-      <label for="curveSearch">搜索大区、市或节点</label>
-      <input id="curveSearch" type="search" placeholder="例如：汕尾、铜鼓" autocomplete="off">
-      <div class="curve-actions"><button type="button" id="curveAll">全选</button>
-        <button type="button" id="curveClear">清空</button>
-        <button type="button" id="curveMatches">勾选搜索结果</button></div>
+      <div class="curve-search-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+        <input id="curveSearch" type="search" aria-label="搜索大区、市或节点" placeholder="搜索大区、市或节点" autocomplete="off"></div>
       <p id="curveSelection" role="status" aria-live="polite"></p>
       <div id="curveTree"></div>
     </aside>
@@ -28,7 +23,8 @@ VIEW_HTML = """
         <select id="curveMode"><option value="nodes">各节点曲线</option>
           <option value="city">按市汇总（已选节点等权均价）</option>
           <option value="region">按大区汇总（已选节点等权均价）</option></select>
-        <button type="button" id="curveExport">导出当前曲线 CSV</button></div>
+        <button type="button" id="curveExport">导出当前曲线 CSV</button>
+        <label class="curve-popup-toggle"><input id="curvePopupEnabled" type="checkbox" checked> 显示弹框</label></div>
       <div class="curve-legend-tools"><span id="curveVisibleCount"></span>
         <button type="button" id="curveShowAll">显示全部曲线</button>
         <button type="button" id="curveHideAll">隐藏全部曲线</button></div>

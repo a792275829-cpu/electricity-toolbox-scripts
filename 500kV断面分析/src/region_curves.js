@@ -166,7 +166,7 @@
         details.append(title);
         city.nodes.forEach(name => {
           matches++;
-          const label=document.createElement('label'); label.className='curve-node';
+          const label=document.createElement('label'); label.className=term ? 'curve-node curve-search-match' : 'curve-node';
           label.append(checkbox([name],name),document.createTextNode(name));
           if (!available(name)) {
             const note=document.createElement('span'); note.className='curve-unavailable'; note.textContent='暂无电价'; label.append(note);
@@ -344,19 +344,17 @@
     showTime(currentIndex);
   }
   function update() { syncChecks(); save(); draw(); }
-  $('curveSearch').addEventListener('input',renderTree);
+  $('curveSearch').addEventListener('input',() => { if (!$('curveSearch').value.trim()) renderTree(); });
+  $('curveSearch').addEventListener('blur',renderTree);
+  $('curveSearch').addEventListener('keydown',event => {
+    if (event.key==='Enter' && !event.isComposing) {event.preventDefault();renderTree();}
+  });
   $('curveMode').addEventListener('change',update);
   $('curveRankReverse').addEventListener('click',() => {rankAscending=!rankAscending;save();renderRankings();});
   $('curvePopupEnabled').addEventListener('change',() => {hideTooltip();save();});
   $('curveShowAll').addEventListener('click',() => {series.forEach(s => hiddenSeries.delete(seriesKey(s.name)));save();draw();});
   $('curveHideAll').addEventListener('click',() => {series.forEach(s => hiddenSeries.add(seriesKey(s.name)));save();draw();});
   $('curveTime').addEventListener('input',event => showTime(Number(event.target.value)));
-  $('curveAll').addEventListener('click',() => { nodes.forEach(n => selected.add(n.name)); update(); });
-  $('curveClear').addEventListener('click',() => { selected.clear();update(); });
-  $('curveMatches').addEventListener('click',() => {
-    const term=searchKey($('curveSearch').value);
-    nodes.filter(n => searchKey(`${n.region} ${n.city} ${n.name}`).includes(term)).forEach(n => selected.add(n.name));update();
-  });
   document.querySelector('.analysis-switch').addEventListener('keydown',event => {
     if (!['ArrowLeft','ArrowRight'].includes(event.key)) return;
     event.preventDefault();
