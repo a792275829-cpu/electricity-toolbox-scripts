@@ -21,10 +21,8 @@ VIEW_HTML = """
       <p id="curveEmpty" role="status" hidden></p>
       <svg id="regionPriceChart" role="img" aria-label="所选节点分时电价曲线"></svg>
       <section class="curve-rankings" aria-label="节点日均价排序">
-        <div class="curve-ranking-grid"><section><div class="curve-rank-heading"><h2 id="curveRankHighTitle">节点日均价前10</h2><button type="button" id="curveRankReverse" aria-pressed="false">切换倒序</button></div>
-          <div class="curve-rank-columns" aria-hidden="true"><span>节点</span><span>日均价（元/MWh）</span></div><ol id="curveRankHigh"></ol></section>
-          <section><div class="curve-rank-heading"><h2 id="curveRankLowTitle">节点日均价倒数前10</h2></div>
-          <div class="curve-rank-columns" aria-hidden="true"><span>节点</span><span>日均价（元/MWh）</span></div><ol id="curveRankLow"></ol></section></div>
+        <div class="curve-rank-heading"><h2 id="curveRankTitle">节点日均价前10（元/MWh）</h2><button type="button" id="curveRankReverse" aria-pressed="false">切换倒序</button></div>
+        <div class="curve-rank-scroll"><ol id="curveRankList" aria-label="从左到右按名次排列"></ol></div>
       </section>
       </div>
     </main>

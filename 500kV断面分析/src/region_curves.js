@@ -245,27 +245,23 @@
     if (focus) [...legend.querySelectorAll('button')].find(b => b.dataset.series===focus)?.focus({preventScroll:true});
   }
   function renderRankings() {
-    const high=rankNodes(nodes,selected,!rankAscending),low=rankNodes(nodes,selected,rankAscending);
-    $('curveRankHighTitle').textContent=rankAscending ? '节点日均价倒数前10' : '节点日均价前10';
-    $('curveRankLowTitle').textContent=rankAscending ? '节点日均价前10' : '节点日均价倒数前10';
+    const items=rankNodes(nodes,selected,!rankAscending);
+    $('curveRankTitle').textContent=rankAscending ? '节点日均价倒数前10（元/MWh）' : '节点日均价前10（元/MWh）';
     $('curveRankReverse').textContent=rankAscending ? '恢复正序' : '切换倒序';
     $('curveRankReverse').setAttribute('aria-pressed',String(rankAscending));
-    const scale=rankingScale(high.concat(low).map(n => n.mean));
-    [[high,'curveRankHigh'],[low,'curveRankLow']].forEach(([items,id]) => {
-      const list=$(id);list.replaceChildren();
-      if (!items.length) {const empty=document.createElement('li');empty.textContent='所选节点暂无有效电价';list.append(empty);}
-      items.forEach((item,index) => {
-        const row=document.createElement('li');row.className='curve-rank-row';row.dataset.node=item.name;
-        const label=document.createElement('div');label.className='curve-rank-label';
-        const name=document.createElement('span');name.textContent=`${index+1}. ${item.name}`;
-        const value=document.createElement('b');value.textContent=item.mean.toFixed(4);
-        label.append(name,value);
-        const track=document.createElement('div'),bar=document.createElement('span');
-        track.className='curve-rank-track';bar.className=`curve-rank-bar${item.mean<0 ? ' is-negative' : ''}`;
-        const geometry=scale.bar(item.mean);bar.style.width=`${geometry.width}%`;bar.style.left=`${geometry.left}%`;
-        track.style.setProperty('--rank-zero',`${scale.zero}%`);track.classList.toggle('has-zero',scale.mixed);
-        track.append(bar);row.append(label,track);list.append(row);
-      });
+    const scale=rankingScale(items.map(n => n.mean));
+    const list=$('curveRankList');list.replaceChildren();
+    if (!items.length) {const empty=document.createElement('li');empty.className='curve-rank-empty';empty.textContent='所选节点暂无有效电价';list.append(empty);}
+    items.forEach((item,index) => {
+      const row=document.createElement('li');row.className='curve-rank-row';row.dataset.node=item.name;
+      const rank=document.createElement('span');rank.className='curve-rank-number';rank.textContent=String(index+1);
+      const name=document.createElement('span');name.className='curve-rank-name';name.textContent=item.name;name.title=item.name;
+      const value=document.createElement('b');value.textContent=item.mean.toFixed(4);
+      const track=document.createElement('div'),bar=document.createElement('span');
+      track.className='curve-rank-track';bar.className=`curve-rank-bar${item.mean<0 ? ' is-negative' : ''}`;
+      const geometry=scale.bar(item.mean);bar.style.width=`${geometry.width}%`;bar.style.left=`${geometry.left}%`;
+      track.style.setProperty('--rank-zero',`${scale.zero}%`);track.classList.toggle('has-zero',scale.mixed);
+      track.append(bar);row.append(rank,name,value,track);list.append(row);
     });
   }
   function showTime(index) {
