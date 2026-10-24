@@ -8,17 +8,17 @@
 .time-slider-ticks { position:absolute; top:var(--time-row-top,28px); left:14px; right:14px; height:16px; color:var(--muted); font-family:inherit; font-size:var(--time-label-size,11px); font-weight:400; line-height:16px; font-variant-numeric:tabular-nums; }
 .time-slider-ticks span { position:absolute; left:calc(9px + (100% - 18px) * var(--tick-progress,0)); transform:translateX(-50%); white-space:nowrap; }
 [hidden] { display:none !important; }
-.analysis-views { display:flex; align-items:center; height:42px; padding:3px 8px; }
+.analysis-views { flex-shrink:0; display:flex; align-items:center; height:42px; padding:3px 8px; }
 .analysis-switch { position:relative; display:grid; grid-template-columns:repeat(2,1fr); width:286px; height:34px; padding:3px; border:1px solid var(--line); border-radius:999px; background:var(--soft); }
 .analysis-switch::before { content:''; position:absolute; left:3px; top:3px; width:calc(50% - 3px); height:calc(100% - 6px); border-radius:999px; background:var(--navy); transition:transform .18s ease; }
 .analysis-switch[data-view=curves]::before { transform:translateX(100%); }
 .analysis-views button { position:relative; z-index:1; border:0; background:transparent; color:var(--muted); border-radius:999px; padding:0 10px; font:inherit; font-size:13px; cursor:pointer; }
 .analysis-views button[aria-pressed=true] { color:var(--panel); }
-.region-price button,.region-price select,.region-price input[type=search] {
+.region-price button:not(.view-button),.region-price select,.region-price input[type=search] {
   font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:9px 12px;
 }
 .region-price button { cursor:pointer; }
-.region-price { padding:4px 0 6px 6px; width:100%; height:calc(100dvh - 42px); }
+.region-price { padding:4px 0 6px 6px; width:100%; height:100dvh; }
 .region-price p { line-height:1.6; }
 .curve-popup-toggle { display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap; min-height:36px; cursor:pointer; }
 .curve-layout { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:8px; height:100%; min-height:0; }
@@ -78,7 +78,7 @@
 .curve-swatch { width:18px; display:inline-block; border-top:3px solid; margin-right:6px; vertical-align:middle; }
 .region-price :focus-visible,.analysis-views :focus-visible { outline:3px solid var(--blue); outline-offset:3px; }
 @media(max-width:920px) {
-  .region-price { padding:4px; height:auto; min-height:calc(100dvh - 42px); }
+  .region-price { padding:4px; height:auto; min-height:100dvh; }
   .curve-heading { gap:10px; }
   .curve-layout { grid-template-columns:1fr; height:auto; }
   .curve-picker { position:static; width:auto; height:auto; min-height:280px; max-height:380px; border:1px solid var(--line); border-radius:12px; box-shadow:none; }

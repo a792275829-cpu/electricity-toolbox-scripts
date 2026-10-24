@@ -760,14 +760,14 @@ def _render_html(data: dict[str, object]) -> str:
     }}
     body[data-theme="light"] {{ background: #f2f5f9; }}
     .app {{
-      min-height: calc(100dvh - 42px);
+      min-height:100dvh;
       display: grid;
       grid-template-columns: minmax(0, 1fr) 380px;
     }}
     .map-pane {{
       padding:0 2px 2px;
       min-width: 0;
-      height:calc(100dvh - 42px);
+      height:100dvh;
       display:flex;
       flex-direction:column;
       gap:0;
@@ -790,8 +790,8 @@ def _render_html(data: dict[str, object]) -> str:
       min-height: 48px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+      justify-content:flex-end;
+      gap:12px;
       padding: 8px 10px;
       flex-wrap:wrap;
       flex-shrink:0;
@@ -837,6 +837,7 @@ def _render_html(data: dict[str, object]) -> str:
       cursor: pointer;
       line-height: 1;
     }}
+    .zoom-controls #toggleFlow {{ width:auto; padding:6px 9px; font-size:12px; font-weight:400; }}
     .zoom-controls button:hover {{
       background: color-mix(in srgb, var(--blue) 18%, var(--soft));
     }}
@@ -1146,39 +1147,36 @@ def _render_html(data: dict[str, object]) -> str:
     @media (max-width: 560px) {{
       .map-pane {{ padding:0 2px 2px; }}
       .header-actions {{ display:contents; }}
-      .map-toolbar {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) 114px; gap:6px; }}
+      .map-toolbar {{ display:flex; gap:6px; }}
       .layer-toggles {{ display:contents; }}
-      .zoom-controls {{ grid-column:4; grid-row:1; }}
+      .zoom-controls {{ flex-wrap:wrap; }}
       .map-toolbar .toggle {{ min-width:0; padding:6px 4px; }}
-      .node-search {{ grid-column:1 / 4; width:100%; min-width:0; }}
+      .node-search {{ flex-basis:100%; width:100%; min-width:0; }}
       svg {{ height:78vw; min-height:300px; max-height:390px; }}
     }}
   </style>
   <style>{curve_css}</style>
 </head>
 <body data-theme="light">
-  <nav class="analysis-views" aria-label="分析视图">
-    <div class="analysis-switch" data-view="topology" role="group" aria-label="分析视图切换">
-      <button type="button" id="showTopology" aria-pressed="true">潮流分析</button>
-      <button type="button" id="showRegionCurves" aria-pressed="false">区域电价分析</button>
-    </div>
-  </nav>
   <div class="app">
     <main class="map-pane">
       <div class="map-shell">
+  <nav class="analysis-views" aria-label="分析视图">
+    <div class="analysis-switch" data-view="topology" role="group" aria-label="分析视图切换">
+      <button type="button" class="view-button" id="showTopology" aria-pressed="true">潮流分析</button>
+      <button type="button" class="view-button" id="showRegionCurves" aria-pressed="false">区域电价分析</button>
+    </div>
+  </nav>
+
         <div class="map-toolbar">
-          <div class="layer-toggles" aria-label="地图图层">
-            <input class="node-search" id="nodeSearch" type="search" placeholder="搜索节点，回车或移开焦点定位" aria-label="搜索节点">
-            <button class="toggle" id="toggleFlow" type="button" aria-pressed="true">潮流查看</button>
-          </div>
-        <div class="zoom-controls" aria-label="地图缩放控制">
+        <div class="zoom-controls" aria-label="地图操作">
+          <button class="toggle" id="toggleFlow" type="button" aria-pressed="true">潮流查看</button>
           <button id="zoomIn" type="button" title="放大">+</button>
           <button id="zoomOut" type="button" title="缩小">−</button>
           <button id="zoomReset" type="button" title="重置">⌂</button>
-        </div>
-        <div class="header-actions">
           <button class="icon-button" id="focusMode" type="button" aria-pressed="false" aria-label="全屏地图" title="全屏地图"><svg class="fullscreen-icon" viewBox="0 0 24 24" aria-hidden="true"><path class="expand-corners" d="M8 3H3V8 M16 3H21V8 M3 16V21H8 M21 16V21H16"/><path class="collapse-corners" d="M3 8H8V3 M21 8H16V3 M8 21V16H3 M16 21V16H21"/></svg></button>
         </div>
+        <input class="node-search" id="nodeSearch" type="search" placeholder="搜索节点，回车或移开焦点定位" aria-label="搜索节点">
         </div>
         <svg id="map" viewBox="0 0 {SVG_W} {SVG_H}" role="img" aria-label="{map_label}">
           <g id="mapBackground">{substrate if diagram_mode else ''}</g>
