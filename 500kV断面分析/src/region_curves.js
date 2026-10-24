@@ -82,7 +82,7 @@
     region:model.regions.map(r => r.name)
   };
   const color = name => customColors.get(seriesKey(name)) || automaticColors.get(name);
-  const seriesKey = name => `${$('curveMode').value}:${name}`;
+  const seriesKey = name => `nodes:${name}`;
   const visibleSeries = () => series.filter(item => !hiddenSeries.has(seriesKey(item.name)));
   const available = name => (byName.get(name)?.prices || []).some(finite);
   const make = (tag, attributes={}, text='') => {
@@ -97,7 +97,6 @@
     const names = params.has('nodes') ? params.get('nodes').split('|') :
       (model.regions[0]?.cities[0]?.nodes || []).filter(available);
     names.filter(name => byName.has(name)).forEach(name => selected.add(name));
-    $('curveMode').value = ['nodes','city','region'].includes(params.get('mode')) ? params.get('mode') : 'nodes';
     rankAscending=params.get('rankAsc')==='1';
     customColors.clear();
     try {
@@ -119,7 +118,7 @@
     return hash.startsWith('curves');
   }
   function save() {
-    const params = new URLSearchParams({mode:$('curveMode').value,nodes:[...selected].join('|'),
+    const params = new URLSearchParams({mode:'nodes',nodes:[...selected].join('|'),
       rankAsc:rankAscending ? '1' : '0',colors:JSON.stringify(Object.fromEntries(customColors)),popup:$('curvePopupEnabled').checked ? '1' : '0',hidden:JSON.stringify([...hiddenSeries])});
     try { history.replaceState(null,'',`#curves?${params}`); } catch (_) { /* File viewers may restrict history. */ }
   }
@@ -203,7 +202,7 @@
         const row=document.createElement('div');row.className='curve-tooltip-row';
         const label=document.createElement('span'),swatch=document.createElement('i');
         swatch.className='curve-swatch';swatch.style.borderColor=color(item.name);
-        const name=$('curveMode').value==='nodes' ? item.name : `${item.name}（${item.counts[currentIndex]}/${item.total} 节点有效）`;
+        const name=item.name;
         label.append(swatch,document.createTextNode(name));
         const value=document.createElement('b'),price=item.prices[currentIndex];
         value.textContent=finite(price) ? price.toFixed(4) : '暂无数据';row.append(label,value);tooltip.append(row);
@@ -239,7 +238,6 @@
       });
       legend.append(entry);
     });
-    $('curveVisibleCount').textContent=`显示 ${visibleSeries().length} / ${series.length} 条曲线`;
     if (focus) [...legend.querySelectorAll('button')].find(b => b.dataset.series===focus)?.focus({preventScroll:true});
   }
   function renderRankings() {
@@ -289,7 +287,7 @@
     if (panel.hidden) return;
     hideTooltip();
     const svg=$('regionPriceChart'); svg.replaceChildren(); guide=null;markerLayer=null;
-    series=aggregateSeries(nodes,selected,$('curveMode').value,times.length);
+    series=aggregateSeries(nodes,selected,'nodes',times.length);
     const palette=seriesPalette(series.length);
     automaticColors=new Map(series.map((item,index) => [item.name,palette[index]]));
     renderLegend();renderRankings();
@@ -349,11 +347,8 @@
   $('curveSearch').addEventListener('keydown',event => {
     if (event.key==='Enter' && !event.isComposing) {event.preventDefault();renderTree();}
   });
-  $('curveMode').addEventListener('change',update);
   $('curveRankReverse').addEventListener('click',() => {rankAscending=!rankAscending;save();renderRankings();});
   $('curvePopupEnabled').addEventListener('change',() => {hideTooltip();save();});
-  $('curveShowAll').addEventListener('click',() => {series.forEach(s => hiddenSeries.delete(seriesKey(s.name)));save();draw();});
-  $('curveHideAll').addEventListener('click',() => {series.forEach(s => hiddenSeries.add(seriesKey(s.name)));save();draw();});
   $('curveTime').addEventListener('input',event => showTime(Number(event.target.value)));
   document.querySelector('.analysis-switch').addEventListener('keydown',event => {
     if (!['ArrowLeft','ArrowRight'].includes(event.key)) return;

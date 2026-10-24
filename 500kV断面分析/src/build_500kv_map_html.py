@@ -1037,9 +1037,7 @@ def _render_html(data: dict[str, object]) -> str:
     body[data-theme="light"] .label-leader {{ stroke:#6f8799; opacity:.72; }}
     body[data-theme="light"] .blocked-label {{ fill:#991b1b; stroke:#fff7f7; }}
     .topology-timeline {{ flex-shrink:0; padding:6px 8px; border-top:1px solid var(--line); background:var(--panel); }}
-    .topology-time-title {{ font-size:12px; line-height:22px; white-space:nowrap; }}
     .topology-time-controls {{ display:flex; align-items:flex-start; gap:6px; }}
-    .topology-time-controls button {{ width:30px; min-width:30px; height:24px; border:1px solid var(--line); border-radius:6px; background:var(--soft); color:var(--ink); cursor:pointer; }}
     .topology-timeline .time-slider {{ height:22px; }}
     .topology-timeline .time-slider-track {{ --time-row-top:22px; --time-label-size:10px; min-height:38px; }}
     #topologyTime:focus-visible {{ outline:2px solid var(--blue); outline-offset:3px; border-radius:4px; }}
@@ -1197,12 +1195,9 @@ def _render_html(data: dict[str, object]) -> str:
 
         <section class="topology-timeline" aria-label="24小时潮流方向时间轴">
           <div class="topology-time-controls">
-            <strong class="topology-time-title" title="24小时潮流方向，按节点价差推断：低价到高价">24小时</strong>
-            <button id="topologyTimePrev" type="button" aria-label="前15分钟">‹</button>
             <div class="topology-time-track time-slider-track"><input id="topologyTime" type="range" min="0" max="95" step="1" value="0" aria-label="潮流时点，每格15分钟" class="time-slider">
               <output class="time-slider-readout" id="topologyTimeLabel" for="topologyTime">00:00</output>
               <div class="topology-time-ticks time-slider-ticks" aria-hidden="true"><span data-index="0">00:00</span><span data-index="24">06:00</span><span data-index="48">12:00</span><span data-index="72">18:00</span><span data-index="95">23:45</span></div></div>
-            <button id="topologyTimeNext" type="button" aria-label="后15分钟">›</button>
           </div>
         </section>
       </div>
@@ -2068,8 +2063,6 @@ def _render_html(data: dict[str, object]) -> str:
         const {{node, element, clientX, clientY}} = nodePriceHover;
         showNodePriceTooltip(node, element, clientX, clientY);
       }}
-      document.getElementById('topologyTimePrev').disabled = topologyTimeSlot === 0;
-      document.getElementById('topologyTimeNext').disabled = topologyTimeSlot === 95;
       if (reveal) {{
         flowVisible = true;
         document.getElementById('toggleFlow').setAttribute('aria-pressed', 'true');
@@ -2087,8 +2080,6 @@ def _render_html(data: dict[str, object]) -> str:
         setTopologyTime(pendingTopologySlot);
       }});
     }});
-    document.getElementById('topologyTimePrev').addEventListener('click', () => setTopologyTime(topologyTimeSlot - 1));
-    document.getElementById('topologyTimeNext').addEventListener('click', () => setTopologyTime(topologyTimeSlot + 1));
     setTopologyTime(0, false);
     syncFlowMotion();
     const nodeSearch = document.getElementById('nodeSearch');
