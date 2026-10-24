@@ -203,7 +203,7 @@ def execute(paths, tool_id, action, p):
                 raise RuntimeError("分析进程已结束，但部分分析网页未生成，请核对日志")
         directories = {
             "online-energy": paths.online_energy_output_dir if tool_id == "online-energy" else None,
-            "wind-forecast": paths.wind_forecast_output_dir,
+            "wind-forecast": paths.wind_forecast_output_dir if tool_id == "wind-forecast" else None,
             "report": data_path(paths.report_root / "输出"),
             "market-report": paths.market_report_output_dir,
         }

@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from toolbox_storage import data_path, online_energy_output_dir
+from toolbox_storage import data_path, online_energy_output_dir, wind_forecast_output_dir
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -50,7 +50,10 @@ class ToolPaths:
 
     @property
     def wind_forecast_output_dir(self) -> Path:
-        return data_path(self.wind_forecast_dir / "输出")
+        from toolbox_credentials import read_json
+
+        config = read_json(data_path(self.wind_forecast_dir / "config.json"))
+        return wind_forecast_output_dir(config.get("outputDir"), script_dir=self.wind_forecast_dir)
 
     @property
     def spot_price_update(self) -> Path:

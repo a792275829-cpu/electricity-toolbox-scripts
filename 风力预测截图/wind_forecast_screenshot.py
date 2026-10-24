@@ -26,14 +26,14 @@ from toolbox_dates import normalize_date_input
 BASE_URL = "https://xhxt.chng.com.cn"
 APP_URL = f"{BASE_URL}/gdfire/PrivateDataManageCE/SpotBasicInfoSubmit"
 API_URL = f"{BASE_URL}/gdfire/api/data/personal/newEnergy/basic/query/v1"
-from toolbox_storage import data_path
+from toolbox_storage import data_path, wind_forecast_output_dir
 
 PROFILE_DIR = data_path(SCRIPT_DIR / ".browser-profile")
 AUTH_STATE_PATH = data_path(SCRIPT_DIR / "auth_state.json")
 AUTH_LOCK_PATH = Path(str(AUTH_STATE_PATH) + ".lock")
 CONFIG_PATH = data_path(SCRIPT_DIR / "config.json")
 FALLBACK_CONFIG_PATH = data_path(WORKSPACE_DIR / "上网电量抓取" / "config.json")
-OUTPUT_DIR = data_path(SCRIPT_DIR / "输出")
+OUTPUT_DIR = wind_forecast_output_dir()
 
 DEFAULT_ORG_ID = "e4c88ecc8ec18540018eeb6d767241fe"
 DEFAULT_ORG_NAME = "华能广东汕头海上风电有限责任公司"
@@ -86,9 +86,9 @@ def load_config() -> Config:
     fallback = _load_json(FALLBACK_CONFIG_PATH)
     own = _load_json(CONFIG_PATH)
     raw = apply_credentials({**fallback, **own})
-    output_dir = Path(raw.get("outputDir") or OUTPUT_DIR).expanduser()
-    if not output_dir.is_absolute():
-        output_dir = data_path(SCRIPT_DIR / output_dir)
+    # Only the wind tool's own output setting applies; the login fallback may
+    # contain another tool's export directory.
+    output_dir = wind_forecast_output_dir(own.get("outputDir"), script_dir=SCRIPT_DIR)
     return Config(
         username=str(raw.get("username") or ""),
         password=str(raw.get("password") or ""),

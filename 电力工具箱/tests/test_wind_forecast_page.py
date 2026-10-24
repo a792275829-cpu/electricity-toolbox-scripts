@@ -32,7 +32,12 @@ class WindForecastPageTests(unittest.TestCase):
         page = WindForecastPage(self.root, paths, TaskRegistry())
         command = page.build_generate_command("2026-08-21")
         self.assertEqual(command[-2:], [str(paths.wind_forecast), "2026-08-21"])
-        self.assertEqual(paths.wind_forecast_output_dir, workspace / "风力预测截图" / "输出")
+        self.assertEqual(paths.wind_forecast_output_dir, Path.home() / "Downloads" / "风力预测截图")
+        with patch("toolbox.wind_forecast_page.open_directory") as open_output:
+            button = next(widget for widget in page.actions.winfo_children()
+                          if widget.cget("text") == "打开输出目录")
+            button.invoke()
+            open_output.assert_called_once_with(paths.wind_forecast_output_dir)
         page.destroy()
 
     def test_first_navigation_creates_only_wind_page_and_reuses_it(self) -> None:
