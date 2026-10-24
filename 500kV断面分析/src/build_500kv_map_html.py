@@ -1483,7 +1483,7 @@ def _render_html(data: dict[str, object]) -> str:
         const box = item.bounds;
         if (box[0]*view.scale+view.x > mapCanvas.width || box[2]*view.scale+view.x < 0 ||
             box[1]*view.scale+view.y > mapCanvas.height || box[3]*view.scale+view.y < 0) return;
-        const phase = flowClock * .065 / item.routeLength;
+        const phase = flowClock * item.speed / item.routeLength;
         item.packets.forEach((packet,index) => {{
           const offset = ((phase + index/item.packets.length) % 1) * item.routeLength;
           packet.element.setAttribute('transform', `translate(${{offset.toFixed(2)}} 0)`);
@@ -1621,7 +1621,7 @@ def _render_html(data: dict[str, object]) -> str:
         if (event.key === 'Enter' || event.key === ' ') activate(event);
       }});
       flowArrowsG.appendChild(group);
-      flowArrowItems.set(edge.edge, {{ group, title, hit, line, route, packets, bounds:[Math.min(edge.x1,edge.x2),Math.min(edge.y1,edge.y2),Math.max(edge.x1,edge.x2),Math.max(edge.y1,edge.y2)] }});
+      flowArrowItems.set(edge.edge, {{ group, title, hit, line, route, packets, speed:.065 * (edge.is_section ? .5 : .8), bounds:[Math.min(edge.x1,edge.x2),Math.min(edge.y1,edge.y2),Math.max(edge.x1,edge.x2),Math.max(edge.y1,edge.y2)] }});
       resetFlowArrow(edge);
     }});
 
@@ -2236,6 +2236,7 @@ def _render_html(data: dict[str, object]) -> str:
     }}
 
     function drawNodeChart(node) {{
+      document.getElementById('sourceText').textContent = '';
       const svg = document.getElementById('priceChart');
       svg.innerHTML = '';
       const width = 360, height = 280;
@@ -2246,7 +2247,6 @@ def _render_html(data: dict[str, object]) -> str:
         message.setAttribute('x', width / 2); message.setAttribute('y', height / 2);
         message.setAttribute('text-anchor', 'middle'); message.setAttribute('fill', '#8296ad');
         message.textContent = '该节点缺少电价数据'; svg.appendChild(message);
-        document.getElementById('sourceText').textContent = `节点 ${{node.name}} 暂无可用分时电价。`;
         return;
       }}
       const values = points.map(point => point.value);
@@ -2281,10 +2281,7 @@ def _render_html(data: dict[str, object]) -> str:
         series: [{{ name: node.name, color: '#168ac0', prices: node.prices }}],
         x, y, count, margin, width, height, make
       }});
-      document.getElementById('sourceText').innerHTML = `
-        节点：${{escapeHtml(node.name)}}；片区：${{escapeHtml(node.region || '未分片')}}。<br>
-        坐标精度：${{escapeHtml(node.location_accuracy)}}；来源：${{escapeHtml(node.location_source)}}。<br>
-        有效电价时点：${{points.length}} / ${{node.prices.length}}。`;
+
     }}
 
     function drawChart(a, b, edge) {{
