@@ -18,12 +18,13 @@
   font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:9px 12px;
 }
 .region-price button { cursor:pointer; }
-.region-price { padding:4px 6px 6px; width:100%; height:calc(100dvh - 42px); }
+.region-price { padding:4px 0 6px 6px; width:100%; height:calc(100dvh - 42px); }
 .region-price p { line-height:1.6; }
 .curve-popup-toggle { display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap; min-height:36px; cursor:pointer; }
-.curve-layout { display:grid; grid-template-columns:minmax(0,1fr) clamp(260px,22vw,340px); gap:8px; height:100%; min-height:0; }
+.curve-layout { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:8px; height:100%; min-height:0; }
 .curve-picker,.curve-main { padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--panel); min-width:0; }
 .curve-picker,.curve-main { height:100%; min-height:0; overflow:auto; }
+.curve-picker { position:fixed; top:0; right:0; width:380px; height:100dvh; max-height:100dvh; border:0; border-left:1px solid var(--line); border-radius:0; box-shadow:-18px 0 48px rgba(0,0,0,.16); }
 #curveTree { margin-top:12px; }
  .curve-search-box { position:relative; }
 .region-price .curve-search-box svg { position:absolute; left:11px; top:50%; transform:translateY(-50%); width:18px; height:18px; min-height:0; border:0; border-radius:0; background:transparent; fill:none; stroke:var(--muted); stroke-width:1.8; pointer-events:none; }
@@ -76,11 +77,11 @@
 .curve-rank-bar.is-negative { background:#bd4934; }
 .curve-swatch { width:18px; display:inline-block; border-top:3px solid; margin-right:6px; vertical-align:middle; }
 .region-price :focus-visible,.analysis-views :focus-visible { outline:3px solid var(--blue); outline-offset:3px; }
-@media(max-width:800px) {
+@media(max-width:920px) {
   .region-price { padding:4px; height:auto; min-height:calc(100dvh - 42px); }
   .curve-heading { gap:10px; }
   .curve-layout { grid-template-columns:1fr; height:auto; }
-  .curve-picker { height:auto; min-height:280px; max-height:380px; }
+  .curve-picker { position:static; width:auto; height:auto; min-height:280px; max-height:380px; border:1px solid var(--line); border-radius:12px; box-shadow:none; }
   .curve-main { height:auto; overflow:visible; }
   .curve-picker,.curve-main { padding:10px; }
   .curve-controls { align-items:stretch; }
