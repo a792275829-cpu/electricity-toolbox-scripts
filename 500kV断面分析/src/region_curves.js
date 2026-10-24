@@ -185,8 +185,6 @@
       input.checked=names.length>0 && count===names.length;
       input.indeterminate=count>0 && count<names.length;
     });
-    const valid=[...selected].filter(available).length;
-    $('curveSelection').textContent=`已选 ${selected.size} / ${nodes.length} 个节点，其中 ${valid} 个有电价`;
   }
   function hideTooltip() { $('curveTooltip').hidden=true; lastPointer=null; tooltipKey=null; }
   function showTooltip(clientX, clientY) {
@@ -255,8 +253,7 @@
         const label=document.createElement('div');label.className='curve-rank-label';
         const name=document.createElement('span');name.textContent=`${index+1}. ${item.name}`;
         const value=document.createElement('b');value.textContent=item.mean.toFixed(4);
-        const count=document.createElement('small');count.textContent=`${item.count}/${item.total} 时点`;
-        label.append(name,value,count);
+        label.append(name,value);
         const track=document.createElement('div'),bar=document.createElement('span');
         track.className='curve-rank-track';bar.className=`curve-rank-bar${item.mean<0 ? ' is-negative' : ''}`;
         const geometry=scale.bar(item.mean);bar.style.width=`${geometry.width}%`;bar.style.left=`${geometry.left}%`;
@@ -267,11 +264,6 @@
   }
   function showTime(index) {
     currentIndex=Math.max(0,Math.min(times.length-1,index));
-    $('curveTime').value=String(currentIndex);
-    $('curveTime').parentElement.style.setProperty('--time-progress',String(currentIndex/Math.max(1,times.length-1)));
-    $('curveTimeLabel').textContent=times[currentIndex] || '无时点';
-    syncTimeAxisLabels($('curveTime'), $('curveTimeLabel'), currentIndex);
-    $('curveTime').setAttribute('aria-valuetext',times[currentIndex] || '无时点');
     if (guide && chartX) { guide.setAttribute('x1',chartX(currentIndex)); guide.setAttribute('x2',chartX(currentIndex)); }
     if (markerLayer && chartY) {
       markerLayer.replaceChildren();
@@ -297,12 +289,8 @@
     $('curveEmpty').textContent=!selected.size ? '请从左侧勾选大区、市或节点。' : !visible.length ?
       '所有曲线已隐藏，可点击图例或“显示全部曲线”恢复。' : '所选节点在这份数据中暂无有效电价，请更换节点或数据文件。';
     svg.hidden=!all.length; $('curveExport').disabled=!all.length;
-    $('curveTime').max=String(Math.max(0,times.length-1)); $('curveTime').disabled=!all.length;
-    $('curveTimeTicks').replaceChildren(...[...new Set([0,Math.round(times.length/4),Math.round(times.length/2),Math.round(times.length*3/4),times.length-1])].filter(i => i>=0 && i<times.length).map(i => {
-      const tick=document.createElement('span');tick.dataset.index=String(i);tick.textContent=times[i];return tick;
-    }));
     if (!all.length) { showTime(currentIndex); return; }
-    const width=Math.max(340,Math.round(svg.parentElement.clientWidth-36)), height=360;
+    const width=Math.max(280,Math.round(svg.clientWidth)), height=Math.max(260,Math.min(520,Math.round(window.innerHeight*.43)));
     svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
     const margin={left:62,right:18,top:26,bottom:38};
     const lo=Math.min(...all),hi=Math.max(...all),pad=Math.max((hi-lo)*.08,1);
@@ -349,7 +337,6 @@
   });
   $('curveRankReverse').addEventListener('click',() => {rankAscending=!rankAscending;save();renderRankings();});
   $('curvePopupEnabled').addEventListener('change',() => {hideTooltip();save();});
-  $('curveTime').addEventListener('input',event => showTime(Number(event.target.value)));
   document.querySelector('.analysis-switch').addEventListener('keydown',event => {
     if (!['ArrowLeft','ArrowRight'].includes(event.key)) return;
     event.preventDefault();
