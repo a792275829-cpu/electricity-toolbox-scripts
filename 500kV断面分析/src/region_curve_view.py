@@ -16,6 +16,7 @@ VIEW_HTML = """
       <div class="curve-controls">
         <label class="curve-popup-toggle"><input id="curvePopupEnabled" type="checkbox" checked> 显示弹框</label>
         <button type="button" id="curveExport">导出当前曲线</button></div>
+      <div class="curve-content">
       <div id="curveLegend" class="curve-legend" aria-label="点击图例显示或隐藏曲线"></div>
       <p id="curveEmpty" role="status" hidden></p>
       <svg id="regionPriceChart" role="img" aria-label="所选节点分时电价曲线"></svg>
@@ -25,6 +26,7 @@ VIEW_HTML = """
           <section><div class="curve-rank-heading"><h2 id="curveRankLowTitle">节点日均价倒数前10</h2></div>
           <div class="curve-rank-columns" aria-hidden="true"><span>节点</span><span>日均价（元/MWh）</span></div><ol id="curveRankLow"></ol></section></div>
       </section>
+      </div>
     </main>
     <aside class="curve-picker" aria-label="大区市节点选择">
       <div class="curve-search-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>

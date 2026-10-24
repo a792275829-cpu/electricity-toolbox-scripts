@@ -18,13 +18,15 @@
   font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:9px 12px;
 }
 .region-price button { cursor:pointer; }
-.region-price { padding:4px 0 6px 6px; width:100%; height:100dvh; }
+.region-price { padding:0 2px 2px; width:100%; height:100dvh; }
 .region-price p { line-height:1.6; }
-.curve-popup-toggle { display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap; min-height:36px; cursor:pointer; }
-.curve-layout { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:8px; height:100%; min-height:0; }
-.curve-picker,.curve-main { padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--panel); min-width:0; }
+.curve-popup-toggle { display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap; min-height:34px; cursor:pointer; }
+.curve-layout { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:0; height:100%; min-height:0; }
+.curve-picker,.curve-main { padding:12px; border:1px solid var(--line); border-radius:6px; background:var(--panel); min-width:0; }
 .curve-picker,.curve-main { height:100%; min-height:0; overflow:auto; }
 .curve-picker { position:fixed; top:0; right:0; width:380px; height:100dvh; max-height:100dvh; border:0; border-left:1px solid var(--line); border-radius:0; box-shadow:-18px 0 48px rgba(0,0,0,.16); }
+.curve-main { display:flex; flex-direction:column; padding:0; overflow:hidden; box-shadow:var(--shadow); }
+.curve-content { flex:1; min-height:0; overflow:auto; padding:12px; }
 #curveTree { margin-top:12px; }
  .curve-search-box { position:relative; }
 .region-price .curve-search-box svg { position:absolute; left:11px; top:50%; transform:translateY(-50%); width:18px; height:18px; min-height:0; border:0; border-radius:0; background:transparent; fill:none; stroke:var(--muted); stroke-width:1.8; pointer-events:none; }
@@ -37,7 +39,7 @@
 .curve-node { display:flex; align-items:center; gap:8px; min-height:34px; margin-left:22px; cursor:pointer; font-size:13px; }
 .curve-node input { flex:0 0 auto; }
 .curve-unavailable { color:var(--muted); font-size:12px; }
-.curve-controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.curve-controls { display:flex; gap:10px; align-items:center; justify-content:flex-end; flex-wrap:wrap; flex-shrink:0; min-height:51px; padding:8px 10px; border-bottom:1px solid var(--line); }
 .curve-controls .curve-popup-toggle { margin-left:auto; }
 .region-price #regionPriceChart { display:block; width:100%; height:auto; min-height:0; max-height:none; touch-action:pan-y; }
 
@@ -78,15 +80,36 @@
 .curve-swatch { width:18px; display:inline-block; border-top:3px solid; margin-right:6px; vertical-align:middle; }
 .region-price :focus-visible,.analysis-views :focus-visible { outline:3px solid var(--blue); outline-offset:3px; }
 @media(max-width:920px) {
-  .region-price { padding:4px; height:auto; min-height:100dvh; }
+  .region-price { padding:0 2px 2px; height:auto; min-height:100dvh; }
   .curve-heading { gap:10px; }
   .curve-layout { grid-template-columns:1fr; height:auto; }
   .curve-picker { position:static; width:auto; height:auto; min-height:280px; max-height:380px; border:1px solid var(--line); border-radius:12px; box-shadow:none; }
-  .curve-main { height:auto; overflow:visible; }
-  .curve-picker,.curve-main { padding:10px; }
+  .curve-main { height:auto; overflow:visible; padding:0; }
+  .curve-content { overflow:visible; padding:10px; }
+  .curve-picker { padding:12px; }
   .curve-controls { align-items:stretch; }
   .curve-ranking-grid { grid-template-columns:1fr; gap:8px; }
 }
 
 #nodePriceTooltip { padding:6px 9px; background:rgba(255,255,255,.25); border-color:rgba(145,163,188,.12); backdrop-filter:blur(1px); -webkit-backdrop-filter:blur(1px); box-shadow:0 2px 8px rgba(28,44,66,.06); font-variant-numeric:tabular-nums; }
 body[data-theme=dark] #nodePriceTooltip { background:rgba(12,23,38,.25); }
+
+/* Shared typography for both analysis views. Map labels retain their drawing scale. */
+:root { --font-ui:12px; --font-body:13px; --font-heading:14px; --font-title:16px; --font-note:11px; }
+body { font-size:var(--font-body); line-height:1.5; }
+button,input,select,output,svg text { font-family:inherit; }
+.analysis-views button,.toggle,.icon-button,.sort-select,.region-price button:not(.view-button),.curve-popup-toggle { font-size:var(--font-ui); font-weight:400; line-height:1.5; }
+.analysis-views button[aria-pressed=true] { font-weight:600; }
+.region-price .curve-controls button { padding:0 12px; min-height:34px; }
+.node-search,.search,.region-price input[type=search] { font-size:var(--font-body); font-weight:400; line-height:1.5; }
+.curve-picker .curve-search-box input[type=search] { height:42px; }
+.side-label,.curve-ranking-grid h2 { font-size:var(--font-heading); font-weight:600; letter-spacing:normal; }
+.panel-title { font-size:var(--font-title); font-weight:600; line-height:1.5; }
+.item-top,.curve-node,.region-price summary,.curve-rank-label { font-size:var(--font-body); line-height:1.5; }
+.item-top { font-weight:600; }
+.pill,.curve-unavailable,.curve-rank-columns { font-size:var(--font-note); }
+.curve-rank-label b,.curve-tooltip-row b { font-weight:600; }
+.region-price .curve-legend button,.region-price .curve-rank-heading button,.curve-tooltip,.curve-tooltip h3 { font-size:var(--font-ui); }
+#regionPriceChart text,#priceChart text { font-size:var(--font-note); }
+
+.zoom-controls #toggleFlow { line-height:1.5; }
