@@ -59,7 +59,7 @@
 .curve-rank-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:32px; margin-bottom:10px; }
 .curve-rank-heading h2 { margin:0; font-size:var(--font-heading); font-weight:600; }
 .curve-rank-scroll { overflow-x:auto; padding-bottom:2px; }
-#curveRankList { display:grid; grid-template-columns:repeat(10,minmax(88px,1fr)); gap:6px; list-style:none; padding:0; margin:0; }
+#curveRankList { display:grid; grid-template-columns:repeat(5,minmax(88px,1fr)); gap:6px; list-style:none; padding:0; margin:0; }
 .curve-rank-row { min-width:0; display:flex; flex-direction:column; gap:6px; padding:9px 7px; border:1px solid var(--line); border-radius:8px; background:var(--soft); }
 .curve-rank-number { font-size:var(--font-note); color:var(--muted); font-variant-numeric:tabular-nums; }
 .curve-rank-name { font-size:var(--font-body); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

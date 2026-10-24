@@ -22,7 +22,7 @@ VIEW_HTML = """
       <svg id="regionPriceChart" role="img" aria-label="所选节点分时电价曲线"></svg>
       <section class="curve-rankings" aria-label="节点日均价排序">
         <div class="curve-rank-heading"><h2 id="curveRankTitle">节点日均价前10（元/MWh）</h2><button type="button" id="curveRankReverse" aria-pressed="false">切换倒序</button></div>
-        <div class="curve-rank-scroll"><ol id="curveRankList" aria-label="从左到右按名次排列"></ol></div>
+        <div class="curve-rank-scroll"><ol id="curveRankList" aria-label="两排展示，第一排1至5名，第二排6至10名，每排从左到右排列"></ol></div>
       </section>
       </div>
     </main>
