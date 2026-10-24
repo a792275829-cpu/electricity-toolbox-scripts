@@ -1411,8 +1411,30 @@ class PageAdapterTests(unittest.TestCase):
             (folder / "广东-能销数据-20260705.xlsx").write_text("x", encoding="utf-8")
             (folder / "广东-省内数据-没有日期.xlsx").write_text("x", encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "实际看到的 Excel 文件"):
+            with (
+                mock.patch.object(module, "BUILTIN_PROVINCE_TEMPLATE", folder / "missing-template.xlsx"),
+                self.assertRaisesRegex(ValueError, "实际看到的 Excel 文件"),
+            ):
                 module.find_province_template(folder, "2026-07-05")
+
+    def test_group_upload_page_accepts_energy_without_nearby_province_file(self) -> None:
+        from toolbox.pages import GroupUploadPage
+        from toolbox.runtime import load_module
+
+        module = load_module("group_upload_builtin_page_test", self.paths.group_upload)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            energy = folder / "广东-能销数据-20261023.xlsx"
+            energy.write_bytes(b"energy")
+            paths = type("Paths", (), {
+                "group_upload": self.paths.group_upload, "group_upload_dir": folder,
+            })()
+            page = GroupUploadPage(self.root, paths, self.registry, today=date(2026, 10, 25))
+            self.assertEqual(page.selected_paths, [module.BUILTIN_PROVINCE_TEMPLATE, energy.resolve()])
+            self.assertIn("2026-10-23", page.summary_var.get())
+            self.assertIn("省内数据模板.xlsx", page.selection_var.get())
+            _, uploads = module.prepare_upload_files(page.selected_paths)
+            self.assertTrue(uploads[0].builtin_template)
 
     def test_group_upload_auto_template_prefers_nearest_province_date(self) -> None:
         from toolbox.runtime import load_module

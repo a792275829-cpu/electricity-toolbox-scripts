@@ -46,6 +46,7 @@ REQUIRED_RUNTIME_ASSETS = tuple(map(Path, (
     "每日生产经营情况汇报自动生成工具/模板/每日生产经营情况汇报（自动）.docx",
     "每日生产经营情况汇报自动生成工具/scripts/load_compare_subject_map.json",
     "wps自动/wps_excel_to_kdocs_config.defaults.json",
+    "集团每日上传/templates/省内数据模板.xlsx",
     "广东运行日报PDF解析/gd_pdf_tool/recognize_image_labels.js",
     "南方分公司电力市场日报/gd_power_report/templates/legacy_print_report.css",
     "南方分公司电力市场日报/gd_power_report/templates/legacy_concise_report.css",

@@ -53,6 +53,7 @@ AUTH_STATE_PATH = data_path(SCRIPT_DIR / "auth_state.json")
 AUTH_LOCK_PATH = Path(str(AUTH_STATE_PATH) + ".lock")
 CONFIG_PATH = data_path(SCRIPT_DIR / "config.json")
 FALLBACK_CONFIG_PATH = data_path(LOGIN_SOURCE_DIR / "config.json")
+BUILTIN_PROVINCE_TEMPLATE = SCRIPT_DIR / "templates" / "省内数据模板.xlsx"
 
 UPLOAD_TYPES = {
     "省内": {
@@ -83,6 +84,7 @@ class UploadFile:
     kind: str
     date: str
     auto_template: bool = False
+    builtin_template: bool = False
 
 
 LOG_SINK: Callable[[str], None] | None = None
@@ -291,9 +293,16 @@ def find_province_template(folder: Path, target_date: str) -> UploadFile:
         except ValueError:
             continue
     if not candidates:
+        if BUILTIN_PROVINCE_TEMPLATE.is_file():
+            log("同目录未找到可用省内数据，使用内置省内模板。")
+            return UploadFile(
+                path=BUILTIN_PROVINCE_TEMPLATE.resolve(), kind="省内",
+                date=target_date, auto_template=True, builtin_template=True,
+            )
         visible = "、".join(sorted(visible_excel_files)) or "无"
         raise ValueError(
             f"没有在 {folder} 找到可作为模板的省内数据 .xlsx 文件。"
+            f"内置省内模板也不存在：{BUILTIN_PROVINCE_TEMPLATE}。"
             f"实际看到的 Excel 文件：{visible}"
         )
     target_day = datetime.strptime(target_date, "%Y-%m-%d").date()
@@ -323,12 +332,16 @@ def prepare_upload_files(paths: list[Path]) -> tuple[str, list[UploadFile]]:
         if kind in seen:
             raise ValueError(f"同一类型文件只能选一个，重复类型：{UPLOAD_TYPES[kind]['name']}")
         seen.add(kind)
-        uploads.append(UploadFile(path=path, kind=kind, date=extract_date_from_name(path)))
+        builtin = path == BUILTIN_PROVINCE_TEMPLATE.resolve()
+        uploads.append(UploadFile(
+            path=path, kind=kind, date="" if builtin else extract_date_from_name(path),
+            auto_template=builtin, builtin_template=builtin,
+        ))
 
     if len(uploads) == 1:
         only_upload = uploads[0]
         if only_upload.kind != "能销":
-            raise ValueError("只选择一个文件时必须选择能销数据文件，省内数据会自动从同目录模板生成。")
+            raise ValueError("只选择一个文件时必须选择能销数据文件，省内数据会自动从同目录或内置模板生成。")
         uploads.append(find_province_template(only_upload.path.parent, only_upload.date))
         seen.add("省内")
 
@@ -339,6 +352,9 @@ def prepare_upload_files(paths: list[Path]) -> tuple[str, list[UploadFile]]:
 
     ordered = sorted(uploads, key=lambda item: 0 if item.kind == "省内" else 1)
     energy_upload = next(item for item in ordered if item.kind == "能销")
+    for item in ordered:
+        if item.builtin_template:
+            item.date = energy_upload.date
     return energy_upload.date, ordered
 
 
@@ -1301,7 +1317,7 @@ def fetch_startup_max(context, run_date: str, province_area_id: str) -> int:
     return final_value
 
 
-def province_output_path(source_path: Path, run_date: str) -> Path:
+def province_output_path(source_path: Path, run_date: str, *, output_dir: Path | None = None) -> Path:
     compact_date = run_date.replace("-", "")
     name = source_path.name
     new_name, replacements = re.subn(r"(20\d{2})([01]\d)([0-3]\d)", compact_date, name, count=1)
@@ -1315,7 +1331,11 @@ def province_output_path(source_path: Path, run_date: str) -> Path:
     if replacements == 0:
         new_name = f"{source_path.stem}-{compact_date}{source_path.suffix}"
 
-    target_path = source_path.with_name(new_name)
+    if source_path.resolve() == BUILTIN_PROVINCE_TEMPLATE.resolve():
+        if output_dir is None:
+            raise ValueError("使用内置省内模板时必须指定输出目录。")
+        new_name = f"广东-省内数据-{compact_date}.xlsx"
+    target_path = (output_dir or source_path.parent) / new_name
     lock_path = target_path.with_name(f"~${target_path.name}")
     if lock_path.exists():
         raise RuntimeError(f"省内数据目标文件正在被 Excel 打开，请先关闭：{target_path.name}")
@@ -1386,7 +1406,10 @@ def update_province_excel_for_upload(
     capacity_average = fetch_capacity_average(context, run_date, province_area_id)
     log(f"市场化运行容量公式替换值：{format_formula_number(capacity_average)}")
 
-    target_path = province_output_path(province_upload.path, run_date)
+    target_path = province_output_path(
+        province_upload.path, run_date,
+        output_dir=energy_upload.path.parent if province_upload.builtin_template else None,
+    )
     workbook = load_workbook(province_upload.path, data_only=False)
     try:
         worksheet = workbook["省内数据"] if "省内数据" in workbook.sheetnames else workbook.active
@@ -1586,7 +1609,7 @@ def run_gui() -> None:
     selected_paths: list[Path] = []
     log_events: queue.Queue[tuple[str, str]] = queue.Queue()
     force_var = tk.BooleanVar(value=False)
-    summary_var = tk.StringVar(value="请选择能销数据 Excel；省内数据会自动从同目录模板生成")
+    summary_var = tk.StringVar(value="请选择能销数据 Excel；省内数据缺省时使用内置模板")
     file_lines_var = tk.StringVar(value="未选择文件")
 
     def gui_log(message: str) -> None:
@@ -1601,7 +1624,7 @@ def run_gui() -> None:
     def refresh_selection_text() -> None:
         if not selected_paths:
             file_lines_var.set("未选择文件")
-            summary_var.set("请选择能销数据 Excel；省内数据会自动从同目录模板生成")
+            summary_var.set("请选择能销数据 Excel；省内数据缺省时使用内置模板")
             return
         try:
             target_date, uploads = prepare_upload_files(selected_paths)
