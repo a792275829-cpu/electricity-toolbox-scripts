@@ -195,7 +195,12 @@
     if (tooltipKey!==key || tooltip.hidden) {
       tooltip.replaceChildren();
       const title=document.createElement('h3'); title.textContent=`${times[currentIndex] || '无时点'} · 电价（元/MWh）`; tooltip.append(title);
-      const items=visibleSeries();
+      const items=visibleSeries().sort((a,b) => {
+        const left=a.prices[currentIndex],right=b.prices[currentIndex];
+        if (!finite(left)) return finite(right) ? 1 : 0;
+        if (!finite(right)) return -1;
+        return right-left;
+      });
       const limit=Math.max(1,Math.min(12,Math.floor((innerHeight-100)/24)));
       items.slice(0,limit).forEach(item => {
         const row=document.createElement('div');row.className='curve-tooltip-row';
