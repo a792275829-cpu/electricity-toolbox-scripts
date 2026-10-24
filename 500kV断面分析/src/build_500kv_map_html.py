@@ -1123,6 +1123,10 @@ def _render_html(data: dict[str, object]) -> str:
       font-weight: 600;
       margin-left: 6px;
     }}
+    #focusMode {{ display:inline-flex; align-items:center; justify-content:center; width:34px; padding:6px; }}
+    #focusMode .fullscreen-icon {{ display:block; width:20px; height:20px; min-height:0; background:transparent; border:0; border-radius:0; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }}
+    #focusMode .collapse-corners, #focusMode[aria-pressed="true"] .expand-corners {{ display:none; }}
+    #focusMode[aria-pressed="true"] .collapse-corners {{ display:block; }}
     .focus-mode .app {{ grid-template-columns: 1fr; }}
     .focus-mode .side {{ display:none; }}
     .pulse {{ animation:pulse 1.5s ease-in-out infinite; }}
@@ -1173,7 +1177,7 @@ def _render_html(data: dict[str, object]) -> str:
           <button id="zoomReset" type="button" title="重置">⌂</button>
         </div>
         <div class="header-actions">
-          <button class="icon-button" id="focusMode" type="button" aria-pressed="false">沉浸地图</button>
+          <button class="icon-button" id="focusMode" type="button" aria-pressed="false" aria-label="全屏地图" title="全屏地图"><svg class="fullscreen-icon" viewBox="0 0 24 24" aria-hidden="true"><path class="expand-corners" d="M8 3H3V8 M16 3H21V8 M3 16V21H8 M21 16V21H16"/><path class="collapse-corners" d="M3 8H8V3 M21 8H16V3 M8 21V16H3 M16 21V16H21"/></svg></button>
         </div>
         </div>
         <svg id="map" viewBox="0 0 {SVG_W} {SVG_H}" role="img" aria-label="{map_label}">
@@ -1645,7 +1649,7 @@ def _render_html(data: dict[str, object]) -> str:
         if (event.key === 'Enter' || event.key === ' ') activate(event);
       }});
       flowArrowsG.appendChild(group);
-      flowArrowItems.set(edge.edge, {{ group, title, hit, line, route, packets, speed:.065 * (edge.is_section ? .5 : .8), bounds:[Math.min(edge.x1,edge.x2),Math.min(edge.y1,edge.y2),Math.max(edge.x1,edge.x2),Math.max(edge.y1,edge.y2)] }});
+      flowArrowItems.set(edge.edge, {{ group, title, hit, line, route, packets, speed:.065 * (edge.is_section ? .4 : .8), bounds:[Math.min(edge.x1,edge.x2),Math.min(edge.y1,edge.y2),Math.max(edge.x1,edge.x2),Math.max(edge.y1,edge.y2)] }});
       resetFlowArrow(edge);
     }});
 
@@ -2030,9 +2034,9 @@ def _render_html(data: dict[str, object]) -> str:
         button.className = `section-item${{edge.edge === selectedEdgeName ? ' active' : ''}}`;
         button.dataset.edge = edge.edge;
         const metric = sort === 'gap' ? edge.max_abs_diff.toFixed(2) + ' 元/MWh'
-          : sort === 'duration' ? edge.intervals + ' 个时点' : edge.severity_score.toFixed(0);
+          : sort === 'duration' ? edge.intervals + ' 个时点' : '';
         const metricLabel = sort === 'gap' ? '最大价差' : sort === 'duration' ? '累计时点' : '严重度';
-        button.innerHTML = `<div class="item-top"><span>${{escapeHtml(edge.edge)}}</span><span class="item-gap" title="${{metricLabel}}">${{metric}}</span></div>`;
+        button.innerHTML = `<div class="item-top"><span>${{escapeHtml(edge.edge)}}</span>${{metric ? `<span class="item-gap" title="${{metricLabel}}">${{metric}}</span>` : ''}}</div>`;
         button.addEventListener('click', () => {{
           const line = edgeLines.get(edge.edge);
           if (line) selectEdge(edge, line);
@@ -2136,7 +2140,8 @@ def _render_html(data: dict[str, object]) -> str:
       const active = !document.body.classList.contains('focus-mode');
       document.body.classList.toggle('focus-mode', active);
       event.currentTarget.setAttribute('aria-pressed', String(active));
-      event.currentTarget.textContent = active ? '退出沉浸' : '沉浸地图';
+      event.currentTarget.setAttribute('aria-label', active ? '退出全屏地图' : '全屏地图');
+      event.currentTarget.title = active ? '退出全屏地图' : '全屏地图';
       autoFitMap = true;
       requestAnimationFrame(fitMap);
     }});
