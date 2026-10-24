@@ -1078,7 +1078,6 @@ def _render_html(data: dict[str, object]) -> str:
     .section-item.active {{ border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); box-shadow: inset 3px 0 0 var(--accent), 0 0 18px rgba(255,77,109,.09); }}
     .item-top {{ display: flex; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 750; }}
     .item-gap {{ color: var(--accent); white-space: nowrap; }}
-    .item-meta {{ margin-top: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
     .detail-divider {{ border: 0; border-top: 1px solid var(--line); margin: 18px 0; }}
     .panel-title {{
       font-size: 19px;
@@ -1175,7 +1174,6 @@ def _render_html(data: dict[str, object]) -> str:
         </div>
         <div class="header-actions">
           <button class="icon-button" id="focusMode" type="button" aria-pressed="false">沉浸地图</button>
-          <button class="icon-button" id="themeToggle" type="button">切换浅色</button>
         </div>
         </div>
         <svg id="map" viewBox="0 0 {SVG_W} {SVG_H}" role="img" aria-label="{map_label}">
@@ -1221,7 +1219,6 @@ def _render_html(data: dict[str, object]) -> str:
           <option value="severity">按严重度</option>
           <option value="gap">按最大价差</option>
           <option value="duration">按累计时点</option>
-          <option value="name">按名称</option>
         </select>
       </div>
       <div class="section-list" id="sectionList"></div>
@@ -2016,7 +2013,6 @@ def _render_html(data: dict[str, object]) -> str:
       sectionEdgeLines.forEach((line, name) => line.style.display = visibleSectionNames.has(name) ? '' : 'none');
       resetAllFlowArrows();
       filtered.sort((a, b) => {{
-        if (sort === 'name') return a.edge.localeCompare(b.edge, 'zh-CN');
         if (sort === 'gap') return b.max_abs_diff - a.max_abs_diff;
         if (sort === 'duration') return b.intervals - a.intervals;
         return b.severity_score - a.severity_score;
@@ -2033,8 +2029,10 @@ def _render_html(data: dict[str, object]) -> str:
         button.type = 'button';
         button.className = `section-item${{edge.edge === selectedEdgeName ? ' active' : ''}}`;
         button.dataset.edge = edge.edge;
-        button.innerHTML = `<div class="item-top"><span>${{escapeHtml(edge.edge)}}</span><span class="item-gap">${{edge.max_abs_diff.toFixed(0)}}</span></div>
-          <div class="item-meta">${{escapeHtml(edge.city_label || '未分类')}} · ${{edge.intervals}} 个时点 · ${{escapeHtml(flowDirectionLabel(edge))}}</div>`;
+        const metric = sort === 'gap' ? edge.max_abs_diff.toFixed(2) + ' 元/MWh'
+          : sort === 'duration' ? edge.intervals + ' 个时点' : edge.severity_score.toFixed(0);
+        const metricLabel = sort === 'gap' ? '最大价差' : sort === 'duration' ? '累计时点' : '严重度';
+        button.innerHTML = `<div class="item-top"><span>${{escapeHtml(edge.edge)}}</span><span class="item-gap" title="${{metricLabel}}">${{metric}}</span></div>`;
         button.addEventListener('click', () => {{
           const line = edgeLines.get(edge.edge);
           if (line) selectEdge(edge, line);
@@ -2144,18 +2142,6 @@ def _render_html(data: dict[str, object]) -> str:
     }});
     document.addEventListener('keydown', event => {{
       if (event.key === 'Escape' && document.body.classList.contains('focus-mode')) document.getElementById('focusMode').click();
-    }});
-    const themeStorageKey = '500kv-map-theme-v2';
-    const savedTheme = localStorage.getItem(themeStorageKey);
-    if (savedTheme === 'light' || savedTheme === 'dark') document.body.dataset.theme = savedTheme;
-    function syncThemeLabel() {{
-      document.getElementById('themeToggle').textContent = document.body.dataset.theme === 'dark' ? '切换浅色' : '切换深色';
-    }}
-    syncThemeLabel();
-    document.getElementById('themeToggle').addEventListener('click', () => {{
-      document.body.dataset.theme = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
-      localStorage.setItem(themeStorageKey, document.body.dataset.theme);
-      syncThemeLabel();
     }});
     renderSectionList();
 
