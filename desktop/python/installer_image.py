@@ -18,7 +18,7 @@ def build(app: Path, output: Path, installer: Path) -> Path:
     with tempfile.TemporaryDirectory(prefix="toolbox-dmg-") as folder:
         root = Path(folder) / "image"
         root.mkdir()
-        subprocess.run(["/usr/bin/ditto", "--norsrc", "--noextattr", "--noqtn", str(app), str(root / "电力工具箱.app")], check=True)
+        subprocess.run(["/usr/bin/ditto", "--norsrc", "--noextattr", "--noqtn", str(app), str(root / "电力工具箱.app")], check=True, capture_output=True)
         shutil.copy2(installer, root / "安装到用户应用程序.py")
         command = root / "安装到我的应用程序.command"
         command.write_text('''#!/bin/zsh
@@ -37,7 +37,10 @@ image_root=${0:A:h}
             "已有 PKG 版需这样迁移一次；配置与业务数据继续使用原用户目录。\n"
             "旧 /Applications 应用不会自动删除，请确认新版正常后手动删除旧副本、更新 Dock 图标。\n"
             "首次打开若被 macOS 拦截，请按系统“隐私与安全性”提示允许。\n", encoding="utf-8")
-        subprocess.run(["/usr/bin/hdiutil", "create", "-ov", "-volname", "电力工具箱", "-srcfolder", str(root), "-format", "UDZO", str(package)], check=True)
+        # stdout is the desktop service's JSON-lines transport. Reassigning
+        # sys.stdout does not redirect the OS descriptor inherited by children;
+        # hdiutil's unterminated "created:" output can swallow the next reply.
+        subprocess.run(["/usr/bin/hdiutil", "create", "-ov", "-volname", "电力工具箱", "-srcfolder", str(root), "-format", "UDZO", str(package)], check=True, capture_output=True)
     with package.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     package.with_suffix(".dmg.sha256").write_text(f"{digest}  {package.name}\n")
