@@ -53,15 +53,36 @@ class ToolPageTaskTests(unittest.TestCase):
         self.assertTrue(lines[-1].endswith("line-9999"))
 
     def test_process_output_uses_engine_and_page_recovers(self) -> None:
+        self.page._poll_queues()
+        self.assertIsNone(self.page._poll_after_id)
         self.page.run_process(
             [sys.executable, "-c", "print('hello')"],
             cwd=Path.cwd(),
             status="运行测试",
         )
+        self.assertIsNotNone(self.page._poll_after_id)
         self.assertTrue(self.wait_for(lambda: not self.page.busy))
         self.page._drain_log_queue()
         self.assertIn("hello", self.page.log_text.get("1.0", "end"))
         self.assertEqual("已完成", self.page.status_var.get())
+        self.assertIsNone(self.page._poll_after_id)
+
+    def test_busy_page_has_only_one_poller_and_destroy_cancels_it(self) -> None:
+        from toolbox.widgets import ToolPage
+
+        page = ToolPage(self.root, registry=self.registry)
+        release = threading.Event()
+        page._poll_queues()
+        page.run_in_thread(lambda: release.wait(3), status="后台测试")
+        callback = page._poll_after_id
+        try:
+            page._schedule_poll()
+            page._schedule_poll()
+            self.assertEqual(callback, page._poll_after_id)
+            page.destroy()
+            self.assertNotIn(callback, self.root.tk.call("after", "info"))
+        finally:
+            release.set()
 
     def test_log_backlog_yields_and_completion_waits_for_remaining_output(self) -> None:
         from toolbox.tasks import TaskSnapshot, TaskState

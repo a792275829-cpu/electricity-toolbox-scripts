@@ -123,6 +123,7 @@ class ToolPage(ttk.Frame):
             except tk.TclError:
                 pass
         if busy:
+            self._schedule_poll()
             self.progress.grid()
             self._sync_progress_animation()
         else:
@@ -153,6 +154,12 @@ class ToolPage(ttk.Frame):
         if self._poll_after_id is None:
             self._poll_after_id = self.after(50, self._poll_queues)
 
+    def _has_pending_work(self) -> bool:
+        # Cached pages must keep servicing hidden tasks, but an idle page needs
+        # no timer. Otherwise visiting more modules adds permanent UI wakeups.
+        return (self.busy or self.current_task_id is not None
+                or not self._log_queue.empty() or not self._completion_queue.empty())
+
     def _poll_queues(self) -> None:
         if self._poll_after_id is not None:
             self.after_cancel(self._poll_after_id)
@@ -165,7 +172,8 @@ class ToolPage(ttk.Frame):
             except queue.Empty:
                 break
             self._finish_snapshot(snapshot, callback)
-        self._schedule_poll()
+        if self._has_pending_work():
+            self._schedule_poll()
 
     def _drain_log_queue(self, *, limit: int | None = None, render: bool = True) -> None:
         chunks: list[str] = []

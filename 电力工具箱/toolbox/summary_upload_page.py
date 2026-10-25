@@ -111,6 +111,10 @@ class SummaryUploadPage(ToolPage):
         self._apply_default_input()
         super()._poll_queues()
 
+    def _has_pending_work(self) -> bool:
+        return (super()._has_pending_work() or self._defaults_thread.is_alive()
+                or not self._default_input_results.empty())
+
     def _apply_default_input(self) -> None:
         try:
             folder, error = self._default_input_results.get_nowait()

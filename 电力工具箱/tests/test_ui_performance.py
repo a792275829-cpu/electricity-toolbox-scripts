@@ -122,6 +122,38 @@ class UiRefreshTests(unittest.TestCase):
             self.assertEqual("2026-10-10", user_input.get())
             self.assertEqual("", app.pages[second].winfo_manager())
 
+    def test_repeated_navigation_does_not_keep_idle_page_pollers(self) -> None:
+        from toolbox.app import PAGE_NAMES, ToolboxApp
+        from toolbox.widgets import ToolPage
+
+        self.root.destroy()
+        app = ToolboxApp(
+            page_factories={name: (lambda parent, _paths, registry: ToolPage(parent, registry=registry))
+                            for name in PAGE_NAMES},
+            lazy_pages=True,
+        )
+        self.root = app
+        app.withdraw()
+        for _ in range(20):
+            for name in PAGE_NAMES:
+                app.show_page(name)
+                app.update()
+        app.after(100, app.quit)
+        app.mainloop()
+        self.assertEqual(len(PAGE_NAMES), len(app.pages))
+        self.assertTrue(all(page._poll_after_id is None for page in app.pages.values()))
+        # Starting a task on an idle, hidden page must restart its one poller.
+        page = app.pages[PAGE_NAMES[0]]
+        completed = []
+        page.run_in_thread(lambda: 42, status="后台测试", on_success=completed.append)
+        deadline = time.monotonic() + 3
+        while page.busy and time.monotonic() < deadline:
+            app.update()
+            time.sleep(.01)
+        self.assertEqual([42], completed)
+        self.assertIsNone(page._poll_after_id)
+        self.assertEqual("", page.winfo_manager())
+
     def test_wps_import_does_not_block_navigation_and_builds_widgets_on_main_thread(self) -> None:
         from toolbox.app import PAGE_NAMES, ToolboxApp
         from toolbox.pages import WpsWriterPage

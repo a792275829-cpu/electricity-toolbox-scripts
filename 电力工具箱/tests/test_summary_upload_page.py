@@ -92,6 +92,34 @@ class SummaryUploadPageTests(unittest.TestCase):
         finally:
             page.destroy()
 
+    def test_hidden_default_scan_keeps_polling_until_result_is_applied(self) -> None:
+        release = threading.Event()
+
+        def slow_scan(*_args):
+            release.wait(3)
+            return self.folder
+
+        with mock.patch("toolbox.summary_upload_page.default_review_folder_for_date", side_effect=slow_scan):
+            page = SummaryUploadPage(
+                self.root, self.page.paths, TaskRegistry(),
+                today=date(2026, 10, 10), review_root=self.folder.parent,
+            )
+            try:
+                self.root.after(100, self.root.quit)
+                self.root.mainloop()
+                self.assertIsNotNone(page._poll_after_id)
+                release.set()
+                page._defaults_thread.join(2)
+                self.root.after(100, self.root.quit)
+                self.root.mainloop()
+                self.assertEqual(Path(page.input_dir.get()), self.folder)
+                self.assertEqual(Path(page.output_file.get()), self.folder / "10-10_汇总.xlsx")
+                self.assertIsNone(page._poll_after_id)
+            finally:
+                release.set()
+                page._defaults_thread.join(2)
+                page.destroy()
+
     def test_directory_scan_failure_leaves_page_usable(self) -> None:
         with mock.patch("toolbox.summary_upload_page.default_review_folder_for_date", side_effect=OSError("目录不可读")):
             page = SummaryUploadPage(
