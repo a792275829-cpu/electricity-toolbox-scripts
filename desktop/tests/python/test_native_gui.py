@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -184,9 +185,18 @@ class NativeLifecycleTests(unittest.TestCase):
                 load.assert_not_called()
                 self.assertIsNone(page._writer_load_after_id)
                 self.service.call("abort_update", {})
-                app.after(200, app.quit)
-                app.mainloop()
+                # Import completion and macOS window mapping are asynchronous.
+                # A fixed quit timer may fire before Tk's geometry/redraw idle
+                # handlers, even when the writer was constructed successfully.
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    app.update()
+                    if (page._writer_load_done and hasattr(page, "writer_frame")
+                            and page.writer_frame.winfo_ismapped()):
+                        break
+                    time.sleep(.01)
                 self.assertTrue(page._writer_load_done)
+                self.assertTrue(hasattr(page, "writer_frame"), "WPS frame was not created")
                 self.assertTrue(page.writer_frame.winfo_ismapped())
                 self.assertFalse(any(str(tag).startswith("ToolboxUpdateLock")
                                      for tag in page.writer_frame.bindtags()))
