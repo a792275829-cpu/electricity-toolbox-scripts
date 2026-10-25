@@ -1077,6 +1077,8 @@ class WpsWriterPage(ToolPage):
         self.actions.grid_remove()
         self._writer_load_after_id: str | None = None
         self._writer_load_queue: queue.Queue = queue.Queue()
+        self._navigation_paused = False
+        self._writer_load_done = False
 
         if not self.paths.wps_writer.is_file():
             self._show_load_error(f"找不到写入工具脚本：\n{self.paths.wps_writer}")
@@ -1103,30 +1105,49 @@ class WpsWriterPage(ToolPage):
         self._writer_load_after_id = self.after(50, self._start_writer_load)
 
     def _start_writer_load(self) -> None:
-        if self._writer_loader.ident is not None:
-            return
         if self._writer_load_after_id is not None:
             self.after_cancel(self._writer_load_after_id)
         self._writer_load_after_id = None
-        self._writer_loader.start()
+        if self._navigation_paused or self._writer_load_done:
+            return
+        if self._writer_loader.ident is None:
+            self._writer_loader.start()
         self._writer_load_after_id = self.after(20, self._finish_writer_load)
+
+    def on_navigation_hidden(self) -> None:
+        self._navigation_paused = True
+        if self._writer_load_after_id is not None:
+            self.after_cancel(self._writer_load_after_id)
+            self._writer_load_after_id = None
+
+    def on_navigation_shown(self) -> None:
+        self._navigation_paused = False
+        if hasattr(self, "writer_frame") and not self.writer_frame.winfo_manager():
+            self.writer_frame.grid()
+        if not self._writer_load_done and self._writer_load_after_id is None:
+            self._writer_load_after_id = self.after(20, self._start_writer_load)
 
     def _finish_writer_load(self) -> None:
         if self._writer_load_after_id is not None:
             self.after_cancel(self._writer_load_after_id)
         self._writer_load_after_id = None
+        if self._navigation_paused or self._writer_load_done:
+            return
         try:
             frame_class, error = self._writer_load_queue.get_nowait()
         except queue.Empty:
             self._writer_load_after_id = self.after(20, self._finish_writer_load)
             return
         self.loading_label.destroy()
+        self._writer_load_done = True
         if error is not None:
             self._show_load_error(str(error))
             return
         try:
             self.writer_frame = frame_class(self.content, task_registry=self.registry)
             self.writer_frame.grid(row=0, column=0, sticky="nsew")
+            if self._navigation_paused:
+                self.writer_frame.grid_remove()
         except Exception as exc:
             self._show_load_error(str(exc))
 
@@ -1137,6 +1158,7 @@ class WpsWriterPage(ToolPage):
         super().destroy()
 
     def _show_load_error(self, message: str) -> None:
+        self._writer_load_done = True
         self.actions.grid()
         panel = ttk.LabelFrame(self.content, text="写入工具加载失败", padding=12)
         panel.grid(row=0, column=0, sticky="nsew")

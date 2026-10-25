@@ -66,10 +66,16 @@ def main() -> None:
 
         app.report_callback_exception = callback_error
 
+        def loading(name):
+            page = app.pages.get(name)
+            return (getattr(app, "_pending_page", None) == name
+                    or getattr(app, "_constructing_page", None) == name
+                    or (page is not None and not getattr(page, "_writer_load_done", True)))
+
         if args.interactive:
             app.title("电力工具箱 · 模块切换诊断")
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            request = app.show_page
+            request = getattr(app, "request_page", app.show_page)
             sequence = 0
             finish_after_id = None
             run_id = time.time_ns()
@@ -107,6 +113,9 @@ def main() -> None:
                 def finish():
                     nonlocal finish_after_id, max_loop_lag
                     finish_after_id = None
+                    if sequence == number and loading(name):
+                        finish_after_id = app.after(5, finish)
+                        return
                     # Include pending layout, map events and Aqua drawing, not
                     # only the Python page-dispatch function's return time.
                     try:
@@ -135,7 +144,10 @@ def main() -> None:
 
                 finish_after_id = app.after(0, finish)
 
-            app.show_page = trace_request
+            if hasattr(app, "request_page"):
+                app.request_page = trace_request
+            else:
+                app.show_page = trace_request
             try:
                 app.mainloop()
                 if failures:
@@ -162,9 +174,15 @@ def main() -> None:
                 button.event_generate("<ButtonRelease-1>", x=20, y=10)
                 requested.append(name)
                 clicks += 1
+            finish_sample(requested[-1], before, started)
+
+        def finish_sample(target, before, started):
+            if loading(target):
+                app.after(5, lambda: finish_sample(target, before, started))
+                return
             app.update()
             rows.append({
-                "clicks": clicks, "target": requested[-1],
+                "clicks": clicks, "target": target,
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
                 "dispatches": len(remaps) - before,
                 "pages": len(app.pages), "timers": len(app.tk.call("after", "info")),
@@ -173,7 +191,7 @@ def main() -> None:
                 "peak_rss_mib": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss /
                                       (1024 ** 2 if sys.platform == "darwin" else 1024), 2),
             })
-            if app.current_page != requested[-1]:
+            if app.current_page != target:
                 raise AssertionError("Navigation did not finish at the last requested module")
             if clicks < args.switches:
                 app.after(args.interval_ms, sample)

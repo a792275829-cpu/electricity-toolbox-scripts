@@ -35,6 +35,7 @@ PageFactory = Callable[[tk.Misc, ToolPaths, TaskRegistry], tk.Frame]
 DEFAULT_WINDOW_WIDTH = 1440
 DEFAULT_WINDOW_HEIGHT = 820
 SCREEN_EDGE_MARGIN = 80
+PAGE_LOAD_DELAY_MS = 35
 
 
 def default_workspace() -> Path:
@@ -76,6 +77,14 @@ class ToolboxApp(tk.Tk):
         self.pages: dict[str, tk.Frame] = {}
         self.nav_buttons: dict[str, ttk.Button] = {}
         self.current_page = ""
+        self._visible_page = None
+        self._selected_nav = ""
+        self._pending_page = None
+        self._page_load_after_id = None
+        self._loading_frame = None
+        self._navigation_generation = 0
+        self._constructing_page = None
+        self._page_loading_suspended = False
         self.status_var = tk.StringVar(master=self, value="就绪")
         injected = page_factories is not None
         self._factories = dict(page_factories or catalog_factories())
@@ -141,7 +150,7 @@ class ToolboxApp(tk.Tk):
                 label.pack(anchor="w", padx=10, pady=(12, 4))
                 self._nav_groups.append((label, []))
                 last_category = category
-            button = ttk.Button(self.navigation, text=name, style="Nav.TButton", command=lambda value=name: self.show_page(value), width=22)
+            button = ttk.Button(self.navigation, text=name, style="Nav.TButton", command=lambda value=name: self.request_page(value), width=22)
             button.pack(fill="x", pady=1)
             self.nav_buttons[name] = button
             self._nav_groups[-1][1].append((descriptor, button))
@@ -154,7 +163,7 @@ class ToolboxApp(tk.Tk):
         self.page_host.grid(row=0, column=1, sticky="nsew")
         self.page_host.rowconfigure(0, weight=1)
         self.page_host.columnconfigure(0, weight=1)
-        self.dashboard = DashboardPage(self.page_host, self.registry, self.show_page, self.paths)
+        self.dashboard = DashboardPage(self.page_host, self.registry, self.request_page, self.paths)
         self.dashboard.grid(row=0, column=0, sticky="nsew")
         self.dashboard.grid_remove()
 
@@ -240,7 +249,18 @@ class ToolboxApp(tk.Tk):
     def _create_page(self, name: str) -> tk.Frame:
         page = self.pages.get(name)
         if page is None:
-            page = self._factories[name](self.page_host, self.paths, self.registry)
+            previous_children = set(self.page_host.winfo_children())
+            previous_construction = self._constructing_page
+            self._constructing_page = name
+            try:
+                page = self._factories[name](self.page_host, self.paths, self.registry)
+            except Exception:
+                protected = set(self.pages.values()) | {self._loading_frame}
+                for child in set(self.page_host.winfo_children()) - previous_children - protected:
+                    child.destroy()
+                raise
+            finally:
+                self._constructing_page = previous_construction
             page.grid(row=0, column=0, sticky="nsew")
             page.grid_remove()
             self.pages[name] = page
@@ -248,29 +268,120 @@ class ToolboxApp(tk.Tk):
                 self.surface_cache.track_tree(page)
         return page
 
-    def show_page(self, name: str) -> None:
-        if name and name == self.current_page:
+    def _select_navigation(self, name: str) -> None:
+        if self._selected_nav == name:
             return
+        if self._selected_nav in self.nav_buttons:
+            self._set_nav_style(self._selected_nav, "Nav.TButton")
+        if name in self.nav_buttons:
+            self._set_nav_style(name, "NavSelected.TButton")
+        self._selected_nav = name
+
+    def _map_page(self, page) -> None:
+        if self._visible_page is page:
+            return
+        if self._visible_page is not None:
+            hide = getattr(self._visible_page, "on_navigation_hidden", None)
+            if hide is not None:
+                hide()
+            self._visible_page.grid_remove()
+        page.grid()
+        page.tkraise()
+        self._visible_page = page
+        show = getattr(page, "on_navigation_shown", None)
+        if show is not None:
+            show()
+
+    def _cancel_page_load(self) -> None:
+        self._navigation_generation += 1
+        if self._page_load_after_id is not None:
+            self.after_cancel(self._page_load_after_id)
+            self._page_load_after_id = None
+        self._pending_page = None
+
+    def request_page(self, name: str) -> None:
+        """Cancel obsolete cold loads; cached pages keep the synchronous path."""
+        if name != "今日概览" and name not in self._factories:
+            raise KeyError(f"未知页面：{name}")
+        if self._page_loading_suspended:
+            return
+        if name == "今日概览" or name in self.pages:
+            self.show_page(name)
+            return
+        if self._pending_page == name:
+            return
+        self._cancel_page_load()
+        self._pending_page = name
+        if self._loading_frame is None:
+            self._loading_frame = ttk.Frame(self.page_host, padding=18)
+            self._loading_frame.grid(row=0, column=0, sticky="nsew")
+            self._loading_frame.grid_remove()
+            self._loading_title = ttk.Label(self._loading_frame, style="PageTitle.TLabel")
+            self._loading_title.pack(anchor="w")
+            self._loading_message = ttk.Label(self._loading_frame, style="Muted.TLabel")
+            self._loading_message.pack(anchor="w", pady=(10, 0))
+        self._loading_title.configure(text=name)
+        self._loading_message.configure(text="正在加载模块…")
+        self._map_page(self._loading_frame)
+        self._select_navigation(name)
+        self.status_var.set(f"正在加载：{name}")
+        # Give another click a cancellation point before allocating its widget
+        # tree. Never defer cached pages or run Tk constructors in a worker.
+        self._page_load_after_id = self.after(PAGE_LOAD_DELAY_MS, self._finish_page_load)
+
+    def suspend_page_loading(self) -> None:
+        # Update input locking must not race a timer that creates new controls.
+        if self._pending_page is not None or self._constructing_page is not None:
+            self.show_page(self.current_page)
+        self._page_loading_suspended = True
+        hide = getattr(self._visible_page, "on_navigation_hidden", None)
+        if hide is not None:
+            hide()
+
+    def resume_page_loading(self) -> None:
+        self._page_loading_suspended = False
+        show = getattr(self._visible_page, "on_navigation_shown", None)
+        if show is not None:
+            show()
+
+    def _finish_page_load(self) -> None:
+        self._page_load_after_id = None
+        name = self._pending_page
+        if name is None:
+            return
+        if self._constructing_page is not None:
+            self._page_load_after_id = self.after(10, self._finish_page_load)
+            return
+        try:
+            self.show_page(name)
+        except Exception as exc:
+            if self._selected_nav == name and self._visible_page is self._loading_frame:
+                self._loading_message.configure(text="模块加载失败，点击左侧模块可重试。")
+                self.status_var.set(f"加载失败：{name}")
+            self.report_callback_exception(type(exc), exc, exc.__traceback__)
+
+    def show_page(self, name: str) -> None:
+        self._cancel_page_load()
+        generation = self._navigation_generation
         if name == "今日概览":
             page = self.dashboard
         elif name in self._factories:
             page = self._create_page(name)
         else:
             raise KeyError(f"未知页面：{name}")
-        previous = self.current_page
-        previous_page = self.dashboard if previous == "今日概览" else self.pages.get(previous)
-        if previous_page is not None:
-            previous_page.grid_remove()
+        if generation != self._navigation_generation:
+            hide = getattr(page, "on_navigation_hidden", None)
+            if hide is not None:
+                hide()
+            return
+        if self.current_page == name and self._visible_page is page:
+            return
         # Retain each page and its background task, but only map the visible
         # page. Stacked mapped pages otherwise repaint together on macOS.
-        page.grid()
-        page.tkraise()
+        self._map_page(page)
         self.current_page = name
         self.status_var.set(f"当前功能：{name}")
-        if previous in self.nav_buttons:
-            self._set_nav_style(previous, "Nav.TButton")
-        if name in self.nav_buttons:
-            self._set_nav_style(name, "NavSelected.TButton")
+        self._select_navigation(name)
 
     def _set_nav_style(self, name: str, style: str) -> None:
         if self.surface_cache is not None:
@@ -294,6 +405,7 @@ class ToolboxApp(tk.Tk):
         self.destroy()
 
     def destroy(self) -> None:
+        self._cancel_page_load()
         if self.surface_cache is not None:
             self.surface_cache.close()
         super().destroy()

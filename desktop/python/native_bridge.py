@@ -98,6 +98,7 @@ class NativeService:
             if app.credentials_panel.dirty and not app.credentials_panel.save():
                 raise ValueError(app.credentials_panel.status_var.get())
             self.maintenance = True
+            app.suspend_page_loading()
             # Keep the footer visible while blocking business input.
             self._lock_inputs(True)
             return True
@@ -105,6 +106,7 @@ class NativeService:
             if self.maintenance:
                 self.maintenance = False
                 self._lock_inputs(False)
+                app.resume_page_loading()
                 app.deiconify()
                 app.lift()
             return True

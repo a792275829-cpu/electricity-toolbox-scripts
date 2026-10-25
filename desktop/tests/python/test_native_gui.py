@@ -9,6 +9,8 @@ import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
+from tkinter import ttk
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT), str(ROOT / "电力工具箱"), str(ROOT / "desktop/python")]
@@ -137,6 +139,60 @@ class NativeLifecycleTests(unittest.TestCase):
         finally:
             release.set()
             self.app.registry.shutdown(timeout=2)
+
+    def test_update_lock_cancels_pending_page_creation_before_locking_inputs(self):
+        app = self.app
+        previous = app.current_page
+        target = "市场表更新"
+        with patch.dict(app._factories, {target: lambda *_: self.fail("Locked app built a new page")}):
+            app.request_page(target)
+            try:
+                self.service.call("prepare_update", {})
+                app.after(100, app.quit)
+                app.mainloop()
+                self.assertIsNone(app._pending_page)
+                self.assertNotIn(target, app.pages)
+                self.assertEqual(previous, app.current_page)
+                app.request_page(target)
+                self.assertIsNone(app._pending_page)
+            finally:
+                self.service.call("abort_update", {})
+
+    def test_update_lock_pauses_and_resumes_wps_interface_loading(self):
+        from toolbox.pages import WpsWriterPage
+        from toolbox.runtime import ToolPaths
+
+        app = self.app
+        previous = app.current_page
+        target = "WPS写入工具"
+        factory = lambda parent, _paths, registry: WpsWriterPage(parent, ToolPaths(ROOT), registry)
+
+        def writer_frame(parent, **_kwargs):
+            frame = ttk.Frame(parent)
+            ttk.Label(frame, text="写入设置").pack()
+            return frame
+
+        with (patch.dict(app._factories, {target: factory}),
+              patch("toolbox.pages.load_module", return_value=SimpleNamespace(
+                  WpsWriterFrame=writer_frame)) as load):
+            app.show_page(target)
+            page = app.pages[target]
+            try:
+                self.service.call("prepare_update", {})
+                app.after(100, app.quit)
+                app.mainloop()
+                load.assert_not_called()
+                self.assertIsNone(page._writer_load_after_id)
+                self.service.call("abort_update", {})
+                app.after(200, app.quit)
+                app.mainloop()
+                self.assertTrue(page._writer_load_done)
+                self.assertTrue(page.writer_frame.winfo_ismapped())
+                self.assertFalse(any(str(tag).startswith("ToolboxUpdateLock")
+                                     for tag in page.writer_frame.bindtags()))
+            finally:
+                self.service.call("abort_update", {})
+                app.show_page(previous)
 
 
 class NativeProtocolTests(unittest.TestCase):

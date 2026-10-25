@@ -106,7 +106,11 @@ class UiRefreshTests(unittest.TestCase):
             page = app.pages[first]
             user_input = tk.StringVar(page, "2026-10-10")
             page.run_in_thread(lambda: release.wait(1), status="后台测试")
-            app.show_page(second)
+            app.request_page(second)
+            app.request_page(first)
+            self.assertTrue(page.busy)
+            app.request_page(second)
+            self._settle_navigation(app)
             self.assertEqual("", page.winfo_manager())
             self.assertEqual("grid", app.pages[second].winfo_manager())
             release.set()
@@ -202,12 +206,170 @@ class UiRefreshTests(unittest.TestCase):
                 release.set()
                 page._writer_loader.join(2)
             page._finish_writer_load()
-        self.assertEqual([threading.main_thread()], build_threads)
-        self.assertIs(page.writer_frame.task_registry, app.registry)
+        self.assertEqual([], build_threads)
+        self.assertFalse(hasattr(page, "writer_frame"))
+        self.assertIsNone(page._writer_load_after_id)
         self.assertEqual("", page.winfo_manager())
         app.show_page("WPS写入工具")
+        deadline = time.monotonic() + 1
+        while not hasattr(page, "writer_frame") and time.monotonic() < deadline:
+            app.update()
+            time.sleep(.005)
+        self.assertEqual([threading.main_thread()], build_threads)
+        self.assertIs(page.writer_frame.task_registry, app.registry)
         self.assertIs(page, app.pages["WPS写入工具"])
         self.assertEqual("grid", page.winfo_manager())
+
+    def _navigation_app(self):
+        from toolbox.app import PAGE_NAMES, ToolboxApp
+
+        self.root.destroy()
+        with patch("toolbox.ui.credentials_panel.CredentialStore.load", return_value={}):
+            app = ToolboxApp(page_factories={name: (lambda parent, _paths, _registry: ttk.Frame(parent))
+                                            for name in PAGE_NAMES}, lazy_pages=True)
+        self.root = app
+        return app, list(app.nav_buttons)
+
+    def _settle_navigation(self, app):
+        deadline = time.monotonic() + 2
+        while app._pending_page is not None and time.monotonic() < deadline:
+            app.update()
+            time.sleep(.005)
+        app.update()
+        self.assertIsNone(app._pending_page)
+
+    def test_switching_cancels_obsolete_cold_page_before_its_factory_runs(self):
+        app, names = self._navigation_app()
+        with patch.dict(app._factories, {names[1]: lambda *_: self.fail("Cancelled module was built")}):
+            app.nav_buttons[names[1]].invoke()
+            app.update_idletasks()
+            self.assertTrue(app._loading_frame.winfo_ismapped())
+            for _ in range(50):
+                app.nav_buttons[names[1]].invoke()
+                app.nav_buttons[names[2]].invoke()
+            self._settle_navigation(app)
+        self.assertEqual(names[2], app.current_page)
+        self.assertNotIn(names[1], app.pages)
+        self.assertEqual({names[0], names[2]}, set(app.pages))
+
+    def test_cached_page_returns_immediately_and_cancels_pending_build(self):
+        app, names = self._navigation_app()
+        original = app.pages[names[0]]
+        value = tk.StringVar(original, "2026-10-25")
+        app.nav_buttons[names[1]].invoke()
+        callback = app._page_load_after_id
+        app.nav_buttons[names[0]].invoke()
+        self.assertIs(original, app._visible_page)
+        self.assertIsNone(app._page_load_after_id)
+        self.assertNotIn(callback, app.tk.call("after", "info"))
+        self.assertEqual("2026-10-25", value.get())
+        self.assertNotIn(names[1], app.pages)
+
+    def test_repeated_click_on_same_loading_page_keeps_one_preparation(self):
+        app, names = self._navigation_app()
+        app.nav_buttons[names[1]].invoke()
+        callback = app._page_load_after_id
+        for _ in range(50):
+            app.nav_buttons[names[1]].invoke()
+            self.assertEqual(callback, app._page_load_after_id)
+        self._settle_navigation(app)
+        self.assertEqual(names[1], app.current_page)
+        self.assertEqual({names[0], names[1]}, set(app.pages))
+
+    def test_cold_load_does_not_steal_focus_after_reentrant_navigation(self):
+        app, names = self._navigation_app()
+
+        def slow_factory(parent, _paths, _registry):
+            app.after(0, lambda: app.request_page(names[0]))
+            app.update()
+            return ttk.Frame(parent)
+
+        app._factories[names[1]] = slow_factory
+        app.request_page(names[1])
+        self._settle_navigation(app)
+        self.assertEqual(names[0], app.current_page)
+        self.assertIs(app.pages[names[0]], app._visible_page)
+        self.assertEqual("", app.pages[names[1]].winfo_manager())
+
+    def test_failed_cold_constructor_is_cleaned_up_and_can_be_retried(self):
+        app, names = self._navigation_app()
+
+        def broken(parent, *_args):
+            ttk.Frame(parent)
+            raise RuntimeError("页面创建测试失败")
+
+        app._factories[names[1]] = broken
+        with patch.object(app, "report_callback_exception") as error:
+            app.request_page(names[1])
+            self._settle_navigation(app)
+        error.assert_called_once()
+        self.assertNotIn(names[1], app.pages)
+        self.assertEqual({app.dashboard, app.pages[names[0]], app._loading_frame},
+                         set(app.page_host.winfo_children()))
+        app._factories[names[1]] = lambda parent, *_: ttk.Frame(parent)
+        app.request_page(names[1])
+        self._settle_navigation(app)
+        self.assertEqual(names[1], app.current_page)
+
+    def test_close_cancels_pending_page_constructor(self):
+        app, names = self._navigation_app()
+        app.request_page(names[1])
+        callback = app._page_load_after_id
+        app.destroy()
+        self.assertNotIn(callback, app.tk.call("after", "info"))
+        self.assertNotIn(names[1], app.pages)
+        self.root = tk.Tk()
+        self.root.withdraw()
+
+    def test_failed_obsolete_constructor_does_not_destroy_or_relabel_new_page(self):
+        app, names = self._navigation_app()
+
+        def broken(parent, *_args):
+            ttk.Frame(parent)
+            app.show_page(names[2])
+            raise RuntimeError("过时页面创建失败")
+
+        app._factories[names[1]] = broken
+        with patch.object(app, "report_callback_exception") as error:
+            app.request_page(names[1])
+            self._settle_navigation(app)
+        error.assert_called_once()
+        self.assertEqual(names[2], app.current_page)
+        self.assertTrue(app.pages[names[2]].winfo_exists())
+        self.assertEqual(f"当前功能：{names[2]}", app.status_var.get())
+
+    def test_leaving_wps_before_import_pauses_loading_and_return_imports_only_once(self):
+        from toolbox.pages import WpsWriterPage
+
+        app, names = self._navigation_app()
+        app._factories["WPS写入工具"] = WpsWriterPage
+        builds = []
+
+        def frame(parent, **_kwargs):
+            builds.append(1)
+            return ttk.Frame(parent)
+
+        with patch("toolbox.pages.load_module", return_value=SimpleNamespace(WpsWriterFrame=frame)) as load:
+            app.show_page("WPS写入工具")
+            page = app.pages["WPS写入工具"]
+            app.request_page(names[0])
+            app.after(100, app.quit)
+            app.mainloop()
+            load.assert_not_called()
+            self.assertIsNone(page._writer_loader.ident)
+            self.assertIsNone(page._writer_load_after_id)
+            app.request_page("WPS写入工具")
+            deadline = time.monotonic() + 2
+            while not page._writer_load_done and time.monotonic() < deadline:
+                app.update()
+                time.sleep(.005)
+            self.assertTrue(page._writer_load_done)
+            for _ in range(20):
+                app.request_page(names[0])
+                app.request_page("WPS写入工具")
+            load.assert_called_once()
+            self.assertEqual([1], builds)
+            self.assertIsNone(page._writer_load_after_id)
 
     def test_startup_opens_first_tool_and_creates_wps_only_on_first_visit(self) -> None:
         from toolbox.app import PAGE_NAMES, ToolboxApp
