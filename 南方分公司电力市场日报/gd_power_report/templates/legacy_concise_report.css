@@ -87,8 +87,8 @@ h3 { margin:11px 0 7px; color:var(--navy); font-size:18.5px; line-height:1.35; }
 .appendix-table tbody tr:not(.subtable-header):has(td[data-tall-cell="true"]) { height:31px !important; }
 .balanced-wrap { display:block; width:100%; text-align:center; }
 .balanced-wrap > span { display:block; white-space:nowrap; }
-.source-notes { margin:4px 0 0; color:#405d82; font-size:8.5pt; line-height:1.35; }
-.source-notes p { margin:1px 0; }
+.source-notes { margin:4px 0 0; color:#405d82; font-size:8.5pt; line-height:1.5; }
+.source-notes p { margin:3px 0; }
 .legacy-table-block.legacy-table-block--day-recap tbody tr.day-recap-group--shantou td { background:#eaf3fc !important; }
 .legacy-table-block.legacy-table-block--day-recap tbody tr.day-recap-group--haimen td { background:#edf7f1 !important; }
 .legacy-table-block.legacy-table-block--day-recap tbody tr.day-recap-group--dongguan td { background:#f3eefa !important; }

@@ -1,4 +1,4 @@
-//! Bulk XLSX transport. Business rules and Decimal arithmetic stay in Python.
+//! Bulk XLSX transport and scoped native kernels; existing Decimal rules stay in Python.
 use calamine::{open_workbook, Data, Reader, Xlsx};
 use rust_xlsxwriter::Workbook;
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,7 @@ mod cells;
 mod compute;
 mod frame;
 mod wps;
+mod market;
 
 #[derive(Deserialize)]
 struct Request {
@@ -48,8 +49,9 @@ fn execute(request: Request) -> Result<Value, Box<dyn std::error::Error>> {
     }
     match request.operation.as_str() {
         "capabilities" => Ok(
-            serde_json::json!({"protocol":1,"stream":true,"operations":["unmix","sheet_data","read_frame","write_frame","wps_url_choices"]}),
+            serde_json::json!({"protocol":1,"stream":true,"operations":["unmix","sheet_data","read_frame","write_frame","wps_url_choices","market_manual"]}),
         ),
+        "market_manual" => market::execute(&request.payload).map_err(Into::into),
         "wps_url_choices" => wps::url_choices(&request.payload),
         "unmix" => compute::unmix(&request.payload),
         "sheet_data" => compute::sheet_data(&request.payload),

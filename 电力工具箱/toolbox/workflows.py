@@ -136,6 +136,10 @@ def plan(paths, tool_id, action, p):
             command.extend(("--dongguan-operation", str(p["dongguan_operation"]).strip()))
         if str(p["realtime_maintenance"]).strip():
             command.extend(("--realtime-maintenance", str(number(p["realtime_maintenance"], "实时检修容量"))))
+        if str(p.get("manual_market", "")).strip():
+            from .market_editor import market_module
+            data = market_module().normalize_manual_market(json.loads(p["manual_market"]), day("report_date"))
+            command.extend(("--manual-market", json.dumps(data, ensure_ascii=False)))
         return [(command, paths.market_report_dir)]
     elif tool_id == "report":
         command_list = []

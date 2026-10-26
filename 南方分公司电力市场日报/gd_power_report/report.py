@@ -573,7 +573,7 @@ def _prepare_appendix_for_display(
             if note:
                 notes.append(note)
             continue
-        if re.match(r"^\d+、", combined):
+        if re.match(r"^(?:\d+、|注\s*[:：])", combined):
             notes.append(combined)
             continue
         visible_rows.append(row)

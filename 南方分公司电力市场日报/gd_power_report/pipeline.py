@@ -20,6 +20,7 @@ from gd_power_report.legacy_concise_report import (
 )
 from gd_power_report.legacy_print_report import export_print_pdf, render_print_report
 from gd_power_report.market_analysis import summarize_realtime_units
+from gd_power_report.manual_market import normalize_manual_market, merge_manual_market
 from gd_power_report.realtime_unit_xlsx import parse_realtime_unit_workbook
 from gd_power_report.pdf_export import pdf_browser
 from gd_power_report.output_commit import publish_pdf_pair
@@ -66,6 +67,7 @@ def _merge_market_text_cards(
     merged: list[dict[str, Any]] = []
     for website_card in website_cards:
         card = dict(website_card)
+        card.setdefault("source_kind", "website")
         label = str(card.get("label") or "")
         workbook_card = workbook_by_label.get(label) or workbook_by_label.get(
             aliases.get(label, "")
@@ -78,6 +80,7 @@ def _merge_market_text_cards(
             and workbook_card.get("delta") is not None
         ):
             card["delta"] = workbook_card["delta"]
+            card["comparison_source_kind"] = "workbook"
             for key in ("delta_prefix", "delta_unit"):
                 if workbook_card.get(key) is not None:
                     card[key] = workbook_card[key]
@@ -86,7 +89,7 @@ def _merge_market_text_cards(
     for card in workbook_cards:
         label = str(card.get("label") or "")
         if label in labels and label not in existing:
-            merged.append(card)
+            merged.append({**card, "source_kind": "workbook"})
             existing.add(label)
     return merged
 
@@ -214,9 +217,17 @@ def _adopt_realtime_detail_source(
         for source in report.get("market", {}).get("realtime", []):
             market_card = dict(source)
             if market_card.get("label") == "全省实时均价":
+                if (market_card.get("value_source_kind", market_card.get("source_kind")) == "website"
+                        and isinstance(market_card.get("value"), (int, float))
+                        and not isinstance(market_card["value"], bool)
+                        and isfinite(market_card["value"]) and not market_card.get("pending")):
+                    updated_market_cards.append(market_card)
+                    continue
                 market_card.update(detail_realtime_price)
+                market_card.update(source_kind="workbook", value_source_kind="workbook", comparison_source_kind="workbook")
                 market_card["pending"] = False
                 if detail_day_price is not None:
+                    market_card["comparison_value"] = float(detail_day_price["value"])
                     market_card["delta"] = (
                         realtime_price_value - float(detail_day_price["value"])
                     )
@@ -304,6 +315,7 @@ def run_pipeline(
     realtime_maintenance_capacity: float | None = None,
     realtime_detail_xlsx_path: str | Path | None = None,
     dongguan_operation_override: str | None = None,
+    manual_market: dict[str, Any] | None = None,
 ) -> RunResult:
     if not comparison_clearing_xlsx_path:
         raise ValueError("请选择上一日对比出清情况表。")
@@ -346,6 +358,7 @@ def run_pipeline(
         progress(f"工作簿日期为 {workbook_date.isoformat()}，报告按该日期生成。")
         analysis_date = workbook_date
 
+    manual_market = normalize_manual_market(manual_market, analysis_date)
     comparison_date = analysis_date - timedelta(days=1)
     if comparison_clearing_xlsx_path:
         progress(f"解析 {comparison_date.isoformat()}（D）日前对比表")
@@ -422,12 +435,25 @@ def run_pipeline(
             for label in labels
         ]
     try:
-        raw = collect_realtime_market_comparison(
-            config,
-            realtime_market_date,
-            progress,
-            day_ahead_date=analysis_date,
-        )
+        try:
+            raw = collect_realtime_market_comparison(
+                config, realtime_market_date, progress, day_ahead_date=analysis_date,
+                **({"allow_partial_market": True} if manual_market else {}),
+            )
+        except Exception as exc:
+            if not manual_market:
+                raise
+            progress(f"网站读取失败，保留可用输入并检查手动补值：{exc}")
+            raw = {"errors": {"website_unavailable": str(exc)}}
+        if manual_market:
+            for period, workbook_cards, price_label in (
+                ("day_ahead", workbook_day_ahead_market, "全省日前均价"),
+                ("realtime", workbook_realtime_market, "全省实时均价"),
+            ):
+                cards = _merge_market_text_cards(raw.get(f"market_{period}_cards") or [], workbook_cards, {price_label})
+                merged = merge_manual_market(cards, period, manual_market, analysis_date)
+                raw[f"market_{period}_cards"] = merged["cards"]
+                progress(f"{'日前' if period == 'day_ahead' else '实时'}市场：手动补齐 {merged['used']} 个数值，网站有效值优先。")
         errors = raw.get("errors") or {}
         for topic, error in errors.items():
             progress(f"网站数据提示：{topic}：{error}")
@@ -445,7 +471,7 @@ def run_pipeline(
             breakdown = thermal.get("thermal_breakdown") or {}
             missing = [name for fuel, name in (("coal", "煤机"), ("gas", "气机"))
                        if breakdown.get(f"{fuel}_delta") is None]
-            if missing:
+            if missing and not manual_market:
                 baseline = "前一日日前" if period == "day_ahead" else "同日日前"
                 raise RuntimeError(
                     f"{current_date} {label}煤机、气机台数读取不完整："
@@ -469,7 +495,7 @@ def run_pipeline(
         progress(message)
         raise RuntimeError(message) from exc
 
-    if realtime_maintenance_capacity is not None:
+    if realtime_maintenance_capacity is not None and not manual_market.get("realtime", {}).get("maintenance"):
         report["market"]["realtime"] = _override_market_card_value(
             report["market"]["realtime"],
             "检修容量",
@@ -485,6 +511,13 @@ def run_pipeline(
         detail_report,
         unit_rows,
     )
+    if manual_market:
+        for period in ("day_ahead", "realtime"):
+            merged = merge_manual_market(report["market"][period], period, manual_market, analysis_date)
+            if merged["missing"]:
+                name = "日前" if period == "day_ahead" else "实时"
+                raise ValueError(f"{name}市场数据尚未完整，请补充手动输入或检查自动读取：{'、'.join(merged['missing'])}")
+            report["market"][period] = merged["cards"]
     report["realtime_date"] = realtime_market_date.isoformat()
     report["realtime_energy_comparison_source_path"] = parsed_units["source_path"]
     report["realtime_energy_comparison_date"] = realtime_market_date.isoformat()

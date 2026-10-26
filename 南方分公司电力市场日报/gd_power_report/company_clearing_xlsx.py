@@ -1213,12 +1213,13 @@ def _strategy_lines(value: Any) -> list[dict[str, str]]:
         text = text.split("各厂报价策略与收益", 1)[1]
     # Regional headings can be numbered or explicit colon headings. Plant names
     # in ordinary body sentences are not section boundaries.
-    regional_title = r"粤东(?:区域运行策略(?:研究)?|策略(?:研究)?)"
-    if re.search(rf"(?m)^[ \t]*(?:\d+[ \t]*[.、][ \t]*)?{regional_title}[ \t]*[:：]", text):
+    regional_title = r"粤东(?:区域(?:运行策略(?:研究)?)?|策略(?:研究)?)"
+    title_end = r"(?=[ \t]*(?:[:：]|\r?$))"
+    if re.search(rf"(?m)^[ \t]*(?:\d+[ \t]*[.、][ \t]*)?{regional_title}{title_end}", text):
         sections = list(re.finditer(
             rf"(?m)^[ \t]*(?P<numbered>\d+[ \t]*[.、][ \t]*)?"
-            rf"(?P<plant>{regional_title}|东莞(?:电厂|厂)?)[ \t]*"
-            r"(?(numbered)[:：]?|[:：])[ \t]*", text,
+            rf"(?P<plant>{regional_title}{title_end}|东莞(?:电厂|厂)?)[ \t]*"
+            r"(?(numbered)[:：]?|(?:[:：]|(?=\r?$)))[ \t]*", text,
         ))
         result = []
         for index, section in enumerate(sections):
@@ -1244,6 +1245,7 @@ def _strategy_lines(value: Any) -> list[dict[str, str]]:
         if content:
             strategies.append({"plant": f"{match.group('plant')}厂", "text": content})
     return strategies
+
 
 
 def _sync_strategy_profits(

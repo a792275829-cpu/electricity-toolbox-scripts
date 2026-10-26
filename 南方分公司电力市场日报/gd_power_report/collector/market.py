@@ -76,10 +76,14 @@ def _date_text(value: Any) -> str:
 
 
 def _number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
-        return float(value)
+        number = float(value)
+        return number if isfinite(number) else None
     except (TypeError, ValueError):
         return None
+
 
 
 def _period_for_date(periods: Any, target_date: date) -> dict[str, Any] | None:
@@ -94,6 +98,8 @@ def _period_for_date(periods: Any, target_date: date) -> dict[str, Any] | None:
 
 
 def _period_metric(period: dict[str, Any], field: str) -> float | None:
+    if period is None:
+        return None
     value = _number(period.get(field))
     if value is not None:
         return value
@@ -114,6 +120,7 @@ def _period_metric(period: dict[str, Any], field: str) -> float | None:
         # 96 点数据每点代表 15 分钟；MW·h 换算为亿千瓦时。
         return sum(values) * 0.25 / 100_000
     return None
+
 
 
 def _missing_west_history_dates(
@@ -191,7 +198,7 @@ def _retry_pause(attempt: int) -> None:
     time.sleep(attempt)
 
 
-def _fetch_thermal_payload(context, base_url, target, groups, data_type, label, progress):
+def _fetch_thermal_payload(context, base_url, target, groups, data_type, label, progress, *, allow_partial=False):
     """Retry transient business/transport errors; require dated complete count series."""
     first_error = None
     last_error = None
@@ -204,6 +211,11 @@ def _fetch_thermal_payload(context, base_url, target, groups, data_type, label, 
                       "startDate": target, "endDate": target}, timeout=60000,
             )
             payload = _json(response, label)
+            if allow_partial:
+                matching = [row for row in (payload.get("data") or []) if _date_text(row.get("date")) == target]
+                scoped = {**payload, "data": matching}
+                if any(_thermal_unit_series(scoped, (group,), data_type) is not None for group in groups):
+                    return scoped
             if _thermal_unit_series(payload, groups, data_type) is None:
                 raise RuntimeError(f"{label}缺少完整有效的24小时机组台数")
             for group in groups:
@@ -236,14 +248,18 @@ def _thermal_unit_counts(
     return [sum(values) for values in zip(*series)] if series else None
 
 
-def _thermal_count_breakdown(payload, groups, data_type):
+def _thermal_count_breakdown(payload, groups, data_type, *, allow_partial=False):
     """Use coal mode (first occurrence on ties) and the 19:00 gas count."""
     result = {"basis": "coal_mode_gas_1900", "coal_basis": "mode", "gas_basis": "19:00", "tie_breaker": "earliest_occurrence",
               "coal": None, "gas": None}
     series = _thermal_unit_series(payload, groups, data_type)
-    if series is None:
+    if series is None and not allow_partial:
         return result
-    for fuel, values in zip(("coal", "gas"), series):
+    for index, fuel in enumerate(("coal", "gas")):
+        one = _thermal_unit_series(payload, (groups[index],), data_type) if series is None else None
+        values = series[index] if series is not None else one[0] if one else None
+        if values is None:
+            continue
         if fuel == "gas":
             result[fuel] = values[19]
             result["gas_hour_index"] = 19
@@ -257,6 +273,7 @@ def _thermal_count_breakdown(payload, groups, data_type):
         result[f"{fuel}_mode_candidates"] = candidates
         result[f"{fuel}_mode_hours"] = [i for i, value in enumerate(values) if value == selected]
     return result
+
 
 
 def _compare_thermal_breakdowns(current, comparison):
@@ -338,12 +355,14 @@ def _day_ahead_power_maximum_card(
             else None
         ),
         "pending": value is None,
+        "comparison_value": previous_value,
     }
     if comparison_date is not None:
         card["comparison_date"] = comparison_date.isoformat()
     if comparison_note is not None:
         card["comparison_note"] = comparison_note
     return card
+
 
 
 def _realtime_power_maximum_card(
@@ -382,6 +401,7 @@ def _realtime_power_maximum_card(
             else None
         ),
         "pending": value is None,
+        "comparison_value": comparison,
     }
     if load_type == "4":
         card["comparison_value"] = comparison
@@ -391,18 +411,21 @@ def _realtime_power_maximum_card(
     return card
 
 
+
 def parse_realtime_market_comparison(
     payload: dict[str, Any],
     target_date: date,
+    *, allow_partial: bool = False,
 ) -> list[dict[str, Any]]:
     """Build actual-load cards compared with the same day's day-ahead values."""
     items = (payload.get("data") or {}).get("dataNetLoadDTOList") or []
     load = next((item for item in items if str(item.get("loadType") or "") == "1"), None)
-    if not load:
+    if not load and not allow_partial:
         raise RuntimeError("负荷接口未返回统调负荷（loadType=1）")
+    load = load or {}
     day_ahead = _period_for_date(load.get("forecastPeriodList"), target_date)
     actual = _period_for_date(load.get("actualPeriodList"), target_date)
-    if not day_ahead or not actual:
+    if (not day_ahead or not actual) and not allow_partial:
         raise RuntimeError(f"{target_date.isoformat()} 缺少同日日前或实际统调负荷数据")
 
     specs = [
@@ -426,6 +449,7 @@ def parse_realtime_market_comparison(
                     else None
                 ),
                 "pending": value is None,
+                "comparison_value": comparison,
             }
         )
     cards.extend(
@@ -433,6 +457,7 @@ def parse_realtime_market_comparison(
         for label, load_type in DAY_AHEAD_POWER_CARD_SPECS
     )
     return cards
+
 
 
 def parse_market_board_status(
@@ -514,16 +539,18 @@ def parse_day_ahead_market_cards(
     load_payload: dict[str, Any],
     market_payload: dict[str, Any],
     target_date: date,
+    *, allow_partial: bool = False,
 ) -> list[dict[str, Any]]:
     """Build report-day day-ahead cards compared with the prior day's day-ahead."""
     previous_date = target_date - timedelta(days=1)
     items = (load_payload.get("data") or {}).get("dataNetLoadDTOList") or []
     load = next((item for item in items if str(item.get("loadType") or "") == "1"), None)
-    if not load:
+    if not load and not allow_partial:
         raise RuntimeError("负荷接口未返回统调负荷（loadType=1）")
+    load = load or {}
     current = _period_for_date(load.get("forecastPeriodList"), target_date)
     previous = _period_for_date(load.get("forecastPeriodList"), previous_date)
-    if not current or not previous:
+    if (not current or not previous) and not allow_partial:
         raise RuntimeError(
             f"缺少 {target_date.isoformat()} 或 {previous_date.isoformat()} 的日前统调负荷数据"
         )
@@ -546,6 +573,7 @@ def parse_day_ahead_market_cards(
                 else None
             ),
             "pending": value is None,
+            "comparison_value": previous_value,
         }
 
     current_online = _number((current_board or {}).get("onlineUnit"))
@@ -573,6 +601,7 @@ def parse_day_ahead_market_cards(
     return cards
 
 
+
 def collect_realtime_market_comparison(
     config: AppConfig,
     target_date: date,
@@ -581,8 +610,14 @@ def collect_realtime_market_comparison(
     day_ahead_date: date | None = None,
     username: str | None = None,
     password: str | None = None,
+    allow_partial_market: bool = False,
 ) -> dict[str, Any]:
     """Fetch one day's 96-point day-ahead and actual system-load summaries."""
+    if allow_partial_market:
+        return _collect_partial_market_comparison(
+            config, target_date, progress, day_ahead_date=day_ahead_date,
+            username=username, password=password,
+        )
     legacy = load_toolbox_auth_module(config.workspace, config.state_dir)
     target = target_date.isoformat()
     sources: dict[str, Any] = {}
@@ -807,3 +842,87 @@ def collect_realtime_market_comparison(
         "errors": errors,
     }
 
+
+
+def _collect_partial_thermal_card(context, base_url, specs, label, sources, errors, progress):
+    breakdowns = []
+    for key, target, groups, dtype in specs:
+        payload = {'data': []}
+        try:
+            payload = _fetch_thermal_payload(context, base_url, target, groups, dtype, label, progress, allow_partial=True)
+            sources[key] = payload
+        except Exception as exc:
+            errors[key] = str(exc)
+        breakdowns.append(_thermal_count_breakdown(payload, groups, dtype, allow_partial=True))
+    return _thermal_summary_card(breakdowns[0], breakdowns[1], label)
+
+
+
+def _collect_partial_market_comparison(
+    config, target_date, progress=lambda _message: None, *,
+    day_ahead_date=None, username=None, password=None,
+):
+    """Read endpoints independently while retaining this tool's login lock."""
+    legacy = load_toolbox_auth_module(config.workspace, config.state_dir)
+    sources, errors = {}, {}
+    target = target_date.isoformat()
+    with legacy.AuthStateLock(), sync_playwright() as playwright:
+        login = legacy.load_config()
+        if username and username.strip():
+            login.username = username.strip()
+        if password:
+            login.password = password
+        context = legacy.launch_context(playwright, headless=login.headless)
+        try:
+            legacy.ensure_login(context, login)
+
+            def get_source(name, path, start, end):
+                response = None
+                try:
+                    response = context.request.get(
+                        legacy.BASE_URL + path,
+                        params={"provinceAreaId": "044", "timeSegment": 2,
+                                "startDate": start, "endDate": end},
+                        timeout=60000,
+                    )
+                    payload = _json(response, name)
+                    sources[name] = payload
+                    return payload
+                except Exception as exc:
+                    errors[name] = f"{start} 至 {end} {name}：{exc}"
+                    progress(f"网站数据提示：{errors[name]}；继续读取其他指标。")
+                    return {}
+                finally:
+                    if response is not None:
+                        response.dispose()
+
+            progress(f"正在分别读取 {target} 实时负荷、市场看板及机组台数...")
+            rt_load = get_source("realtime_load_comparison", "/gdfire/api/data/net/load", target, target)
+            rt_board = get_source("market_board_status", "/gdfire/api/spot/market/info", target, target)
+            rt_thermal = _collect_partial_thermal_card(context, legacy.BASE_URL, [
+                ("realtime_thermal_unit_count", target, REALTIME_THERMAL_UNIT_COUNT_GROUPS, "2"),
+                ("realtime_day_ahead_thermal_unit_count", target, DAY_AHEAD_THERMAL_UNIT_COUNT_GROUPS, "1"),
+            ], "在线机组数", sources, errors, progress)
+            rt_cards = parse_realtime_market_comparison(rt_load, target_date, allow_partial=True)
+            rt_cards[2:2] = parse_market_board_status(rt_board, target_date)
+            rt_cards = [rt_thermal if card.get("label") == "在线机组数" else card for card in rt_cards]
+            da_cards = []
+            if day_ahead_date is not None:
+                current = day_ahead_date.isoformat()
+                previous = (day_ahead_date - timedelta(days=1)).isoformat()
+                start = (day_ahead_date - timedelta(days=DAY_AHEAD_CHANGE_LOOKBACK_DAYS)).isoformat()
+                progress(f"正在分别读取 {current} 日前负荷、市场看板及机组台数...")
+                da_load = get_source("day_ahead_load_comparison", "/gdfire/api/data/net/load", start, current)
+                da_board = get_source("day_ahead_market_board", "/gdfire/api/spot/market/info", start, current)
+                da_thermal = _collect_partial_thermal_card(context, legacy.BASE_URL, [
+                    ("thermal_unit_count_current", current, DAY_AHEAD_THERMAL_UNIT_COUNT_GROUPS, "1"),
+                    ("thermal_unit_count_previous", previous, DAY_AHEAD_THERMAL_UNIT_COUNT_GROUPS, "1"),
+                ], "市场开机", sources, errors, progress)
+                da_cards = parse_day_ahead_market_cards(da_load, da_board, day_ahead_date, allow_partial=True)
+                da_cards = [da_thermal if card.get("label") == "市场开机" else card for card in da_cards]
+        finally:
+            context.close()
+    return {
+        "analysis_date": target, "sources": sources, "errors": errors,
+        "market_day_ahead_cards": da_cards, "market_realtime_cards": rt_cards,
+    }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import timedelta
 from pathlib import Path
 import sys
@@ -32,6 +33,7 @@ def main() -> int:
     parser.add_argument("--d2-report", type=Path, required=True)
     parser.add_argument("--dongguan-operation")
     parser.add_argument("--realtime-maintenance", type=float)
+    parser.add_argument("--manual-market", type=json.loads, help="按报告日期绑定的市场补值 JSON")
     args = parser.parse_args()
 
     day_source = validate_report_workbook(args.day_report)
@@ -55,6 +57,7 @@ def main() -> int:
         realtime_detail_xlsx_path=d2_source,
         dongguan_operation_override=args.dongguan_operation,
         realtime_maintenance_capacity=args.realtime_maintenance,
+        manual_market=args.manual_market,
     )
     print(f"手机预览版：{result.preview_pdf_path}")
     print(f"打印版：{result.print_pdf_path}")

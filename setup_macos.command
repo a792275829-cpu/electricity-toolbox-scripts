@@ -26,6 +26,14 @@ print -r -- "Installing Python dependencies..."
 print -r -- "Installing Playwright Chromium browser..."
 "$venv_python" -m playwright install chromium
 
+if command -v cargo >/dev/null 2>&1 || [[ -x "$HOME/.cargo/bin/cargo" ]]; then
+  print -r -- "Building the shared Rust backend (including market report inputs)..."
+  "$venv_python" native/price-xlsx/build.py
+elif [[ ! -x "500kV断面分析/bin/toolbox-price-xlsx" ]]; then
+  print -r -- "Rust backend not found. Other Python tools remain available."
+  print -r -- "For market report manual inputs, install Rust and run: .venv/bin/python native/price-xlsx/build.py"
+fi
+
 uploader_dir="$launcher_dir/电力工具脚本/private-data-uploader-tool"
 if [[ -f "$uploader_dir/package.json" ]]; then
   if command -v npm >/dev/null 2>&1; then

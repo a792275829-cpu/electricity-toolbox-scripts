@@ -70,6 +70,7 @@ def _split_strategy_profit(strategy: dict[str, Any]) -> dict[str, Any]:
     prepared = dict(strategy)
     text = str(prepared.get("text") or "").strip()
     if str(prepared.get("plant", "")).startswith("粤东"):
+        prepared["plant"] = "粤东区域"
         prepared["paragraphs"] = [re.sub(r"各机组(?:日前)?收益(?:分别)?为[：:]?", "各机组日前偏差收益分别为：", line.strip()) for line in text.splitlines() if line.strip()]
         prepared["body_text"] = text
         prepared["profit_text"] = ""

@@ -128,7 +128,7 @@ class RemoteTaskRegistry(TaskRegistry):
             "power-benefit": ("start_date", "end_date", "create_backup"),
             "spot-price": ("start_date", "end_date", "overwrite", "create_backup"),
             "daily-pdf-parser": ("pdf_path", "output_path", "mode"),
-            "market-report": ("report_date", "day_report", "previous_report", "d2_report", "dongguan_operation", "realtime_maintenance"),
+            "market-report": ("report_date", "day_report", "previous_report", "d2_report", "dongguan_operation", "realtime_maintenance", "manual_market"),
             "report": ("report_date", "online_workbook", "day_ahead_workbook", "daily_workbook", "template_report", "fetch_data", "generate_word"),
             "guangdong-price": ("run_date", "master_workbook", "prediction_output_dir", "training_months"),
             "group-upload": ("force",), "summary-upload": ("input_dir", "output_file", "mode"),
