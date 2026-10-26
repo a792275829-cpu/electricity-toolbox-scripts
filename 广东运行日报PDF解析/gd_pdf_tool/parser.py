@@ -749,13 +749,12 @@ def _detect_category_geometry(
         first_center, x_spacing, category_count = label_geometry
         source = "axis-labels"
     else:
+        first_center, x_spacing = _detect_cluster_based_geometry(centers)
         anchors = _detect_edge_anchor_geometry(
-            masks, top_y, baseline_y, plot_left, plot_right
+            masks, top_y, baseline_y, plot_left, plot_right, x_spacing
         )
         if anchors:
             first_center, x_spacing = anchors
-        else:
-            first_center, x_spacing = _detect_cluster_based_geometry(centers)
         category_count = max(1, int(round((plot_right - plot_left) / x_spacing)))
         source = "plot-bounds-fallback"
     half_width = int(round(float(np.median(widths)) / 2 + 5))
@@ -784,13 +783,19 @@ def _detect_axis_label_geometry(
     dark_text = (maximum < 185) & (maximum - minimum < 35)
     column_counts = dark_text[y0:y1, :].sum(axis=0)
     threshold = max(3, int(round((y1 - y0) * 0.02)))
-    centers: list[float] = []
+    clusters: list[tuple[int, int]] = []
     for start, end in _cluster_indices(np.where(column_counts >= threshold)[0]):
         if end - start + 1 < 2:
             continue
         center = (start + end) / 2
         if plot_left - 8 <= center <= plot_right + 8:
-            centers.append(float(center))
+            clusters.append((start, end))
+    if not clusters:
+        return None
+    # Thin detached brackets are parts of labels, not extra category centers.
+    # Use the wider label bodies to fit spacing, including blank bar positions.
+    min_width = max(2, float(np.percentile([end - start + 1 for start, end in clusters], 75)) * 0.3)
+    centers = [float((start + end) / 2) for start, end in clusters if end - start + 1 >= min_width]
     return _fit_regular_axis_centers(centers)
 
 
@@ -848,6 +853,7 @@ def _detect_edge_anchor_geometry(
     baseline_y: int,
     plot_left: int,
     plot_right: int,
+    expected_spacing: float,
 ) -> tuple[float, float] | None:
     plot_width = plot_right - plot_left
     if plot_width <= 0:
@@ -875,12 +881,10 @@ def _detect_edge_anchor_geometry(
         return None
     left_center = left[0]
     right_center = right[0]
-    expected_spacing = plot_width / 48
     right_index = int(round((right_center - left_center) / expected_spacing))
-    if not 1 <= right_index <= 48:
+    if right_index < 1:
         return None
-    anchor_index = right_index if right_index >= 47 else 48
-    spacing = (right_center - left_center) / anchor_index
+    spacing = (right_center - left_center) / right_index
     if not 15 <= spacing <= 90:
         return None
     if not expected_spacing * 0.65 <= spacing <= expected_spacing * 1.2:

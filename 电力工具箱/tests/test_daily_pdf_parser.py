@@ -197,6 +197,41 @@ class DailyPdfImageLabelTests(unittest.TestCase):
 
 
 class DailyPdfChartPrecisionTests(unittest.TestCase):
+    def geometry_chart(self, count, *, labels):
+        heights = [(60, 20, 300)] + [(0, 0, 0)] * (count - 1)
+        for index, height in ((15, 80), (16, 60), (17, 40), (18, 20), (35, 10), (36, 50)):
+            heights[index] = (height, 0, 0)
+        heights[-1] = (0, 150, 0)
+        array = np.array(sample_chart(heights))
+        array[575:635] = 255
+        if labels:
+            for index in range(count):
+                center = 56 + index * 32
+                array[575:635, center - 8:center + 8] = 40
+                if index % 2 == 0:
+                    # A detached thin bracket beside an otherwise intact label.
+                    array[575:635, center - 13:center - 11] = 40
+        return Image.fromarray(array)
+
+    def test_detached_axis_brackets_do_not_shift_capacity_intervals(self):
+        for count in (49, 51, 55):
+            with self.subTest(count=count):
+                result = analyze_chart_image(self.geometry_chart(count, labels=True), 38000)
+                self.assertEqual("axis-labels", result.diagnostics["category_geometry_source"])
+                self.assertEqual(count, len(result.rows))
+                self.assertEqual("(875, 900]", result.rows[36].interval)
+                self.assertAlmostEqual(5000, result.rows[36].coal, delta=60)
+                self.assertAlmostEqual(15000, result.rows[-1].gas, delta=60)
+
+    def test_unreadable_labels_use_observed_spacing_without_fixed_bin_count(self):
+        for count in (49, 51, 55):
+            with self.subTest(count=count):
+                result = analyze_chart_image(self.geometry_chart(count, labels=False), 38000)
+                self.assertEqual("plot-bounds-fallback", result.diagnostics["category_geometry_source"])
+                self.assertEqual(count, len(result.rows))
+                self.assertAlmostEqual(5000, result.rows[36].coal, delta=60)
+                self.assertAlmostEqual(15000, result.rows[-1].gas, delta=60)
+
     def measure(self, image, count):
         array = np.array(image)
         masks = _select_palette_masks(_make_color_masks(array), 50, 550)
