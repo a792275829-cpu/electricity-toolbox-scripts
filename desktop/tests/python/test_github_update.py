@@ -8,6 +8,7 @@ import shutil
 import sys
 import threading
 import unittest
+import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
@@ -27,6 +28,14 @@ def release():
 
 class Response(io.BytesIO):
     status = 200
+
+    def __init__(self, data=b"", url="", headers=None):
+        super().__init__(data)
+        self.url = url
+        self.headers = headers or {}
+
+    def geturl(self):
+        return self.url
 
 
 class GitHubUpdateTests(unittest.TestCase):
@@ -96,6 +105,49 @@ class GitHubUpdateTests(unittest.TestCase):
         cancelled.set()
         with self.assertRaises(Cancelled):
             updater.download(candidate, cancelled, lambda _: None)
+
+    def public_opener(self, status=403, page=None, digest=None, size="123", assets=True):
+        data = release()
+        base = f"https://github.com/{REPO}/releases"
+        calls = []
+        def opener(request, timeout):
+            calls.append((request.full_url, request.get_method()))
+            if request.full_url.startswith("https://api.github.com/"):
+                raise urllib.error.HTTPError(request.full_url, status, "rate limit", {}, None)
+            if request.full_url == base + "/latest":
+                return Response(b'<div class="markdown-body"><h2>Changes</h2><div><p>Fixed &amp; tested</p></div></div>',
+                                page or base + "/tag/v1.2.0")
+            if "/expanded_assets/" in request.full_url:
+                html = "".join(f'<li><a href="/REPO/releases/download/v1.2.0/{name}">file</a>'
+                               f'<clipboard-copy value="{digest if digest is not None else data["assets"][0]["digest"]}"></clipboard-copy></li>'
+                               for name in (data["assets"][0]["name"], "update-manifest.json")) if assets else ""
+                return Response(html.replace("/REPO/", f"/{REPO}/").encode())
+            self.assertEqual(request.get_method(), "HEAD")
+            return Response(headers={"Content-Length": size})
+        return opener, calls
+
+    def test_rate_limit_falls_back_to_public_release_with_verified_metadata(self):
+        for status in (403, 429):
+            opener, calls = self.public_opener(status)
+            result = GitHubUpdater("0.1.3", opener=opener).check()
+            self.assertEqual(result.version, "v1.2.0")
+            self.assertIn("Fixed & tested", result.notes)
+            self.assertEqual(result.asset["size"], 123)
+            self.assertEqual(result.asset["digest"], release()["assets"][0]["digest"])
+            self.assertEqual(result.update_asset["name"], "update-manifest.json")
+            self.assertEqual(sum(method == "HEAD" for _, method in calls), 2)
+
+    def test_public_fallback_rejects_invalid_metadata_and_preserves_first_error(self):
+        for options in ({"page": "https://evil.example/tag/v1.2.0"},
+                        {"page": f"https://github.com/{REPO}/releases/tag/v1.2-beta"},
+                        {"digest": ""}, {"size": "740 MB"}, {"size": "0"}, {"assets": False}):
+            with self.subTest(options=options), self.assertRaisesRegex(UpdateError, "HTTP 403.*备用检测失败"):
+                GitHubUpdater("0.1.3", opener=self.public_opener(**options)[0]).check()
+
+    def test_public_fallback_same_version_needs_no_assets(self):
+        opener, calls = self.public_opener()
+        self.assertIsNone(GitHubUpdater("1.2.0", opener=opener).check())
+        self.assertEqual(len(calls), 2)
 
     def test_publication_requires_matching_dmg_and_checksum(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packaging/tauri"))

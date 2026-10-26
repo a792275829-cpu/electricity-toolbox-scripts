@@ -43,7 +43,7 @@ DMG 内部仍需构建 `.app` 作为中间产物，并保留 macOS ad-hoc 代码
 2. `.venv/bin/python packaging/tauri/version.py set X.Y.Z --notes "具体新增或修复内容"` 同步 npm、Tauri、Cargo、锁文件版本和根目录 `CHANGELOG.md`；多项变更重复传入 `--notes`。补充实际验证结果，提交这些修改。
 3. 执行 `.venv/bin/python packaging/tauri/version.py check --tag vX.Y.Z --require-notes`，再创建并推送对应标签 `vX.Y.Z`。发布流程自动提取该版本日志并拼接通用安装说明，缺少日志时阻止发布。
 4. Actions 创建草稿 → Mac arm64 原生构建 → 生成完整 DMG 与校验文件 → 为最近三个正式版本生成适用的直达补丁并实际还原验签 → 上传完整包、补丁与 `update-manifest.json` → 核对 GitHub 附件摘要、索引与大小 → 发布。校验器继续拒绝独立 App 压缩包、`.sig` 及旧 `latest.json`。
-5. 新版客户端直接请求 GitHub `/releases/latest`，只提示数字版本更高的正式版。自动检查错误保持安静，菜单手动检查显示具体错误。
+5. 新版客户端请求 GitHub API `/releases/latest`，只提示数字版本更高的正式版。API 返回 HTTP 403／429 时，自动通过 GitHub 正式版页面与附件列表检测，并从附件 HEAD 响应读取精确大小，继续校验 GitHub 公布的 SHA-256；不需要客户端令牌。备用检测失败保留原始 HTTP 错误。自动检查错误保持安静，菜单手动检查显示具体错误。
 
 构建失败保留草稿，不发布不完整版本。不再使用 Tauri 更新签名私钥，也不上传 `.app.tar.gz`、`.sig` 或 `latest.json`。不要在客户端内置 GitHub PAT。
 

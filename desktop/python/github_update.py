@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -47,6 +48,44 @@ class Release:
     page: str
     asset: dict | None
     update_asset: dict | None = None
+
+
+class ReleaseHTML(HTMLParser):
+    """Read GitHub's public notes and per-asset SHA-256 without API quota."""
+    def __init__(self):
+        super().__init__()
+        self.assets = []
+        self.asset = None
+        self.notes = []
+        self.notes_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "li":
+            self.asset = None
+        if tag == "a" and "/releases/download/" in attrs.get("href", ""):
+            self.asset = dict(browser_download_url=attrs["href"],
+                              name=attrs["href"].rsplit("/", 1)[-1])
+            self.assets.append(self.asset)
+        if tag == "clipboard-copy" and self.asset is not None:
+            self.asset["digest"] = attrs.get("value", "")
+        if tag == "div":
+            if self.notes_depth:
+                self.notes_depth += 1
+            elif "markdown-body" in attrs.get("class", "").split():
+                self.notes_depth = 1
+        if self.notes_depth and tag in {"p", "li", "br", "h1", "h2", "h3"}:
+            self.notes.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag == "li":
+            self.asset = None
+        if tag == "div" and self.notes_depth:
+            self.notes_depth -= 1
+
+    def handle_data(self, data):
+        if self.notes_depth:
+            self.notes.append(data)
 
 
 def parse_release(data: dict, current: str, repository: str = REPOSITORY) -> Release | None:
@@ -128,11 +167,67 @@ class GitHubUpdater:
                 data = json.loads(response.read(2 * 1024 * 1024))
             return parse_release(data, self.current, self.repository)
         except urllib.error.HTTPError as exc:
+            if exc.code in {403, 429}:
+                try:
+                    return self.check_public_release()
+                except Exception as fallback:
+                    raise UpdateError(f"GitHub 更新接口受限（HTTP {exc.code}）；备用检测失败：{fallback}") from exc
             messages = {403: "GitHub 请求次数已达上限，请稍后重试", 429: "GitHub 请求次数已达上限，请稍后重试",
                         404: "更新仓库尚未发布正式版本"}
             raise UpdateError(messages.get(exc.code, f"更新服务返回错误（HTTP {exc.code}）")) from exc
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise UpdateError("GitHub 版本信息无效") from exc
+
+    def check_public_release(self) -> Release | None:
+        base = f"https://github.com/{self.repository}/releases"
+
+        def request(url, method="GET"):
+            return self.open(urllib.request.Request(url, method=method, headers={
+                "User-Agent": f"ElectricityToolbox/{self.current}", "Cache-Control": "no-cache",
+            }), timeout=20)
+
+        def read_html(response):
+            raw = response.read(2 * 1024 * 1024 + 1)
+            if response.status != 200 or len(raw) > 2 * 1024 * 1024:
+                raise UpdateError("GitHub 发布页面无效或过大")
+            parser = ReleaseHTML()
+            parser.feed(raw.decode("utf-8"))
+            return parser
+
+        with request(base + "/latest") as response:
+            page = response.geturl()
+            prefix = base + "/tag/"
+            if not page.startswith(prefix):
+                raise UpdateError("GitHub 最新版本跳转地址无效")
+            tag = page[len(prefix):]
+            if version_parts(tag) <= version_parts(self.current):
+                return None
+            notes = "".join(read_html(response).notes).strip()
+        with request(base + "/expanded_assets/" + tag) as response:
+            assets = read_html(response).assets
+        names = {f"ElectricityToolbox-{tag.removeprefix('v')}-apple-silicon.dmg", "update-manifest.json"}
+        selected = []
+        for asset in assets:
+            if asset["name"] not in names:
+                continue
+            url = asset["browser_download_url"]
+            if url.startswith("/"):
+                url = "https://github.com" + url
+            if not url.startswith(base + "/download/" + tag + "/") or not re.fullmatch(
+                    r"sha256:[a-fA-F0-9]{64}", asset.get("digest", "")):
+                raise UpdateError("GitHub 发布附件链接或摘要无效")
+            asset["browser_download_url"] = url
+            with request(url, "HEAD") as response:
+                size = response.headers.get("Content-Length", "")
+                if response.status != 200 or not size.isascii() or not size.isdecimal() or int(size) <= 0:
+                    raise UpdateError("GitHub 发布附件大小无效")
+                asset["size"] = int(size)
+            selected.append(asset)
+        # A changed/empty HTML layout must not silently look like a successful check.
+        if not any(a["name"].endswith(".dmg") for a in selected):
+            raise UpdateError("GitHub 发布页面未找到可校验的 Apple 芯片安装包")
+        return parse_release(dict(tag_name=tag, html_url=page, draft=False, prerelease=False,
+                                  body=notes, assets=selected), self.current, self.repository)
 
     def download(self, release: Release, cancel: threading.Event, progress) -> Path:
         self.fallback_reason = None
