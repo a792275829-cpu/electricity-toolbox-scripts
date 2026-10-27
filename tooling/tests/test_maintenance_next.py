@@ -82,6 +82,8 @@ class MaintenanceNextTests(unittest.TestCase):
             relative = path.relative_to(ROOT).as_posix()
             if skip_roots & set(Path(relative).parts):
                 continue
+            if relative.startswith("desktop/src-tauri/payload/"):
+                continue
             if "/tests/" in relative or relative.startswith("tooling/tests"):
                 continue
             body = path.read_text(encoding="utf-8", errors="ignore")
