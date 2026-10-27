@@ -22,6 +22,7 @@ SUITES = {
     "morning": "每日生产经营情况汇报自动生成工具/scripts",
     "wind": "风力预测截图/tests",
     "spot": "现货价格更新/tests",
+    "group": "集团每日上传/tests",
     "maintenance": "tooling/tests",
 }
 
