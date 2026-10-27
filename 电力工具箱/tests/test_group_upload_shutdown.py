@@ -37,8 +37,8 @@ class GroupUploadShutdownTests(unittest.TestCase):
             original = source.read_bytes()
             uploads = [module.UploadFile(source, "省内", "2026-10-12"),
                        module.UploadFile(energy, "能销", "2026-10-13")]
-            with (mock.patch.object(module, "fetch_startup_max", return_value=20),
-                  mock.patch.object(module, "fetch_capacity_average", return_value=50000),
+            with (mock.patch.object(module.upload_flow, "fetch_startup_max", return_value=20),
+                  mock.patch.object(module.upload_flow, "fetch_capacity_average", return_value=50000),
                   mock.patch.object(module.subprocess, "run", side_effect=AssertionError("external Excel"))):
                 result = module.update_province_excel_for_upload(object(), "2026-10-13", uploads)
             self.assertEqual(source.read_bytes(), original)

@@ -35,8 +35,8 @@ class GroupUploadTemplateTests(unittest.TestCase):
         module = self.module
         run_date, uploads = module.prepare_upload_files(paths)
         with (
-            mock.patch.object(module, "fetch_startup_max", return_value=162),
-            mock.patch.object(module, "fetch_capacity_average", return_value=25219.7),
+            mock.patch.object(module.upload_flow, "fetch_startup_max", return_value=162),
+            mock.patch.object(module.upload_flow, "fetch_capacity_average", return_value=25219.7),
         ):
             return module.update_province_excel_for_upload(object(), run_date, uploads)
 

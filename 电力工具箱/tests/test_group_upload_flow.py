@@ -230,8 +230,8 @@ class GroupUploadRuntimeTests(unittest.TestCase):
                 module.UploadFile(path=energy_path, kind="能销", date="2026-07-03"),
             ]
             with (
-                mock.patch.object(module, "fetch_startup_max", return_value=20),
-                mock.patch.object(module, "fetch_capacity_average", return_value=50000.0),
+                mock.patch.object(module.upload_flow, "fetch_startup_max", return_value=20),
+                mock.patch.object(module.upload_flow, "fetch_capacity_average", return_value=50000.0),
             ):
                 updated_uploads = module.update_province_excel_for_upload(
                     object(),
@@ -271,8 +271,8 @@ class GroupUploadRuntimeTests(unittest.TestCase):
                 module.UploadFile(path=energy_path, kind="能销", date="2026-07-05"),
             ]
             with (
-                mock.patch.object(module, "fetch_startup_max", return_value=20),
-                mock.patch.object(module, "fetch_capacity_average", return_value=50000.0),
+                mock.patch.object(module.upload_flow, "fetch_startup_max", return_value=20),
+                mock.patch.object(module.upload_flow, "fetch_capacity_average", return_value=50000.0),
             ):
                 updated_uploads = module.update_province_excel_for_upload(
                     object(),

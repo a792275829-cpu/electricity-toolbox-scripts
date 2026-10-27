@@ -20,7 +20,7 @@ class ReviewDataGuardsTests(unittest.TestCase):
             values = (day_coal, day_gas) if groups[0].startswith("DAY_AHEAD") else (rt_coal, rt_gas)
             return {"data": [dict(date="2026-10-26", dataItemGroup=group, unitCount=curve)
                              for group, curve in zip(groups, values)]}
-        with patch.object(module, "parse_api_payload", side_effect=lambda response, _: response), patch.object(module, "log"):
+        with patch.object(module.upload_flow, "parse_api_payload", side_effect=lambda response, _: response), patch.object(module, "log"):
             return module.fetch_startup_max(SimpleNamespace(request=SimpleNamespace(post=post)), "2026-10-26", "044")
 
     def test_startup_sums_by_hour_and_uses_only_complete_fallback(self):
@@ -48,8 +48,8 @@ class ReviewDataGuardsTests(unittest.TestCase):
             energy.write_bytes(b"energy sentinel")
             template_bytes = module.BUILTIN_PROVINCE_TEMPLATE.read_bytes()
             day, uploads = module.prepare_upload_files([energy])
-            with patch.object(module, "parse_api_payload", side_effect=lambda response, _: response), patch.object(
-                module, "fetch_capacity_average", return_value=100
+            with patch.object(module.upload_flow, "parse_api_payload", side_effect=lambda response, _: response), patch.object(
+                module.upload_flow, "fetch_capacity_average", return_value=100
             ), patch.object(module, "log"):
                 context = SimpleNamespace(request=SimpleNamespace(post=post))
                 updated = module.update_province_excel_for_upload(context, day, uploads)
