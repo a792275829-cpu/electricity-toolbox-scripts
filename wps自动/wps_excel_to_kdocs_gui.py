@@ -1046,6 +1046,19 @@ class WpsWriterFrame(ttk.Frame):
             self.mapping_secondary_toolbar, text="导出", command=self.export_config, width=0
         ).pack(side="left", padx=(4, 0))
 
+        def resize_mapping_toolbar(event) -> None:
+            required = (self.mapping_primary_toolbar.winfo_reqwidth()
+                        + self.mapping_secondary_toolbar.winfo_reqwidth()
+                        + self.mapping_sort_toolbar.winfo_reqwidth() + 24)
+            if event.width < required:
+                self.mapping_secondary_toolbar.grid_configure(row=1, column=0, padx=0, pady=(4, 0))
+                self.mapping_sort_toolbar.grid_configure(row=1, column=3, pady=(4, 0))
+            else:
+                self.mapping_secondary_toolbar.grid_configure(row=0, column=1, padx=(12, 0), pady=0)
+                self.mapping_sort_toolbar.grid_configure(row=0, column=3, pady=0)
+
+        self.mapping_toolbar.bind("<Configure>", resize_mapping_toolbar)
+
         tree_frame = ttk.Frame(mapping_frame)
         tree_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
         tree_frame.rowconfigure(0, weight=1)

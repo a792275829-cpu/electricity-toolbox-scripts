@@ -15,6 +15,31 @@ def descendants(widget: tk.Misc):
 
 
 class WpsToolbarLayoutTests(unittest.TestCase):
+    def test_toolbar_wraps_when_buttons_need_more_space(self) -> None:
+        try:
+            root = tk.Tk()
+            root.geometry("520x720")
+        except tk.TclError as exc:
+            self.skipTest(f"Tk unavailable: {exc}")
+        from toolbox.runtime import ToolPaths, load_module
+        from toolbox.ui.theme import configure_theme
+
+        style = ttk.Style(root)
+        configure_theme(style)
+        style.configure("TButton", padding=(18, 5))
+        module = load_module("wps_large_toolbar_test", ToolPaths(Path(__file__).resolve().parents[2]).wps_writer)
+        frame = module.WpsWriterFrame(root)
+        frame.pack(fill="both", expand=True)
+        root.update_idletasks()
+        self.assertGreater(frame.mapping_sort_toolbar.winfo_rooty(), frame.mapping_primary_toolbar.winfo_rooty())
+        right = frame.winfo_rootx() + frame.winfo_width()
+        for toolbar in (frame.mapping_primary_toolbar, frame.mapping_secondary_toolbar, frame.mapping_sort_toolbar):
+            for button in toolbar.winfo_children():
+                self.assertLessEqual(button.winfo_rootx() + button.winfo_width(), right)
+        frame.destroy()
+        root.destroy()
+        gc.collect()
+
     def test_all_document_config_buttons_fit_at_520_pixels(self) -> None:
         try:
             root = tk.Tk()
