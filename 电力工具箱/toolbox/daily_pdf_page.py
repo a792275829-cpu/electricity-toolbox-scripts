@@ -44,11 +44,17 @@ class DailyPdfParserPage(ToolPage):
         )
         self.open_button.pack(side="left", padx=(8, 0))
 
-        settings = ttk.LabelFrame(self.content, text="文件与解析设置", padding=12)
+        settings = ttk.LabelFrame(self.content, padding=12)
         settings.grid(row=0, column=0, sticky="ew")
+        ttk.Label(settings, text="执行功能").grid(row=0, column=0, sticky="w", pady=8)
+        modes = SegmentedGroup(settings, variable=self.mode, choices=(("both", "解析并上传"), ("parse", "仅解析"), ("upload", "仅上传")))
+        modes.grid(row=0, column=1, columnspan=2, sticky="w")
+        mode_buttons = modes.buttons
+        self.mode.trace_add("write", self._update_mode)
+
         pdf_button = add_path_row(
             settings,
-            row=0,
+            row=1,
             label="运行日报 PDF",
             variable=self.pdf_path,
             command=self.choose_pdf,
@@ -56,18 +62,12 @@ class DailyPdfParserPage(ToolPage):
         )
         output_button = add_path_row(
             settings,
-            row=1,
+            row=2,
             label="输出 Excel",
             variable=self.output_path,
             command=self.choose_output,
             button_text="选择位置",
         )
-        ttk.Label(settings, text="执行功能").grid(row=2, column=0, sticky="w", pady=8)
-        modes = SegmentedGroup(settings, variable=self.mode, choices=(("both", "解析并上传"), ("parse", "仅解析"), ("upload", "仅上传")))
-        modes.grid(row=2, column=1, columnspan=2, sticky="w")
-        mode_buttons = modes.buttons
-        self.mode.trace_add("write", self._update_mode)
-
         notes = ttk.LabelFrame(self.content, text="输出说明", padding=10)
         notes.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         ttk.Label(
