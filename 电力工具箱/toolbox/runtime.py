@@ -318,6 +318,8 @@ def load_module(name: str, path: Path) -> ModuleType:
                 keep_name=name,
                 roots=local_roots,
             )
+        # A compatibility shim may hand the import over to the package module.
+        module = sys.modules.get(name, module)
         _MODULE_CACHE[(name, path)] = (modified, module)
         return module
 

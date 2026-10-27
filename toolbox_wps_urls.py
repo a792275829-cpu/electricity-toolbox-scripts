@@ -1,13 +1,8 @@
-"""Thin binding for the shared Rust WPS URL-label operation."""
+"""Compatibility shim: the implementation lives in toolbox_shared.wps_urls."""
 from __future__ import annotations
 
+import sys
 
-def url_choices(urls: list[str], titles: dict[str, str], selected: str = "") -> dict:
-    from toolbox_native_excel import call, native_binary
+from toolbox_shared import wps_urls as _implementation
 
-    binary = native_binary()
-    if binary is None:
-        raise RuntimeError("缺少 Rust 核心，请安装完整版本或构建 native/price-xlsx。")
-    return call(binary, "wps_url_choices", "", payload={
-        "urls": urls, "titles": titles, "selected": selected,
-    })
+sys.modules[__name__] = _implementation

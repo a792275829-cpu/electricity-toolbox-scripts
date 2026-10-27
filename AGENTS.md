@@ -13,6 +13,7 @@
 ## 仓库与改动边界
 
 - 本仓库是包含多个 Python/Tk 工具及少量 Node 工具的 macOS 工作区，不要把它当作单一 Python 包处理。
+- 公共逻辑实现在 `toolbox_shared/` 包内；根目录同名 `toolbox_*.py` 只是兼容层（导入后把 `sys.modules` 指向包内模块，保持单实例）。新增或修改公共逻辑写进包内并用包内相对导入，不要再往根目录加实现；包内模块比原来深一层，按 `__file__` 推导工作区路径时用 `toolbox_shared.storage.WORKSPACE_ROOT`。
 - 修改前运行 `git status --short`，记录并保留用户已有改动；不得清理、覆盖或顺带格式化无关文件。
 - 只编辑完成当前任务所需的文件。生成物、登录态、浏览器 profile、真实配置和本地缓存不得加入版本控制。
 - 若根目录存在 `.codegraph/`，理解或定位代码时先使用 `codegraph explore "<问题或符号>"`；更新现有索引使用 `codegraph sync .`，不要重复执行初始化。
