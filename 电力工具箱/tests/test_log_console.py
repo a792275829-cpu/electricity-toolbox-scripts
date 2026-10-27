@@ -12,6 +12,32 @@ from toolbox_log_console import LogConsole, _LogBuffer, explain_error, redact
 
 
 class DiagnosisTests(unittest.TestCase):
+    def test_group_upload_uses_one_output_channel_and_preserves_repeated_messages(self):
+        import contextlib
+        import io
+        from toolbox.runtime import load_module
+
+        module = load_module("group_upload_log_test", Path(__file__).resolve().parents[2] / "集团每日上传/upload_daily_report.py")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            module.log("cli-message")
+            with patch.object(module, "LOG_SINK", lambda message: print(message, flush=True)):
+                module.log("callback-message")
+                module.log("callback-message")
+        self.assertEqual(["cli-message", "callback-message", "callback-message"], output.getvalue().splitlines())
+
+    def test_remote_error_only_omits_traceback_that_was_delivered(self):
+        from toolbox.tasks.errors import RemoteTaskError, classify_error
+
+        trace = "Traceback (most recent call last):\n  original frame\nRuntimeError: business-failure\n"
+        message = "命令退出码 1\n" + trace
+        error = RemoteTaskError(message, trace)
+        self.assertEqual("命令退出码 1", error.log_details)
+        self.assertEqual(message, str(error))
+        self.assertEqual("RuntimeError: business-failure", classify_error(error).summary)
+        for delivered in ("", trace[:30], "another traceback"):
+            self.assertEqual(message, RemoteTaskError(message, delivered).log_details)
+
     def test_expired_login_explicitly_requires_login(self):
         from toolbox.tasks.errors import classify_error, ErrorCategory
 
@@ -97,6 +123,23 @@ class LogConsoleTests(unittest.TestCase):
     def tearDown(self):
         self.root.destroy()
         self.temp.cleanup()
+
+    def test_finish_refines_diagnosis_without_duplicate_terminal_record(self):
+        console = self.console
+        console.begin()
+        console.append("same-message")
+        console.append("same-message")
+        console.finish("执行失败", "初步错误", "检查输入")
+        console.append("Traceback (most recent call last):\nTimeoutError: original timeout")
+        console.finish("执行失败", "请求或等待超时", "检查网络")
+        console.finish("执行失败", "请求或等待超时", "检查网络")
+        self.assertEqual(1, console.contents().count("执行失败 · 耗时"))
+        self.assertEqual(2, console.contents().count("same-message\n"))
+        self.assertIn("检查网络", console.summary.get())
+        self.assertEqual(console.contents(), console.path.read_text())
+        console.begin()
+        console.finish("已完成")
+        self.assertEqual(1, console.contents().count("已完成 · 耗时"))
 
     def test_compact_layout_keeps_controls_above_log_and_hides_empty_rows(self):
         from toolbox.ui.theme import configure_theme
@@ -322,7 +365,39 @@ class LogConsoleTests(unittest.TestCase):
                 frame.drain_logs()
                 self.assertIn("超时", frame.log_console.summary.get())
                 self.assertIn("TimeoutError: original timeout", frame.log_console.contents())
+                self.assertEqual(1, frame.log_console.contents().count("执行失败 · 耗时"))
                 self.assertIs(frame.log_text, frame.log_console.text)
+            finally:
+                frame.destroy()
+
+    def test_wps_remote_failure_does_not_replay_streamed_trace(self):
+        from unittest.mock import Mock
+        from toolbox.runtime import load_module
+        from toolbox.tasks.errors import RemoteTaskError
+
+        module = load_module("wps_remote_log_test", Path(__file__).resolve().parents[2] / "wps自动/wps_excel_to_kdocs_gui.py")
+        trace = "Traceback (most recent call last):\nTimeoutError: original remote timeout\n"
+        def fail(_action, _config, _indexes, log):
+            log(trace)
+            raise RemoteTaskError("命令退出码 1\n" + trace, trace)
+        registry = Mock(remote_business=True)
+        registry.wps_action.side_effect = fail
+        with patch.object(module.WpsWriterFrame, "load_initial_config"), patch.object(module, "LOG_DIR", Path(self.temp.name)):
+            frame = module.WpsWriterFrame(self.root)
+            frame.task_registry = registry
+            try:
+                with patch.object(frame, "selected_config_indexes", return_value=[0]), patch.object(frame, "current_runtime_config", return_value={}), patch.object(frame, "save_current_config"), patch.object(frame, "_start_tracked_thread", side_effect=lambda worker, **_kw: worker()):
+                    frame._remote_write(preview=False)
+                frame.drain_logs()
+                contents = frame.log_console.contents()
+                self.assertEqual(1, contents.count("Traceback (most recent call last):"))
+                self.assertEqual(1, contents.count("执行失败 · 耗时"))
+                self.assertIn("命令退出码 1", contents)
+                self.assertIn("超时", frame.log_console.summary.get())
+                self.assertEqual(contents, frame.log_console.path.read_text())
+                daily = list(Path(self.temp.name).glob("wps_write_*.log"))
+                self.assertEqual(1, len(daily))
+                self.assertIn(trace, daily[0].read_text())
             finally:
                 frame.destroy()
 

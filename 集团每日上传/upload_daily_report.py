@@ -91,9 +91,10 @@ LOG_SINK: Callable[[str], None] | None = None
 
 
 def log(message: str) -> None:
-    print(message, flush=True)
-    if LOG_SINK:
+    if LOG_SINK is not None:
         LOG_SINK(message)
+    else:
+        print(message, flush=True)
 
 
 def short_error(exc: BaseException) -> str:

@@ -274,11 +274,15 @@ class LogConsole(ttk.Frame):
     def finish(self, state: str, summary="", advice=""):
         if not self._initialized:
             self.begin()
+        already_finished = self.finished
         self.finished = True
         self.failure = redact(f"原因：{summary}\n建议：{advice}") if summary else ""
         self.summary.set(self.failure)
         self.status.set(f"{state} · 耗时 {time.monotonic() - self.started:.1f} 秒")
-        self.append(self.status.get() + ("\n" + self.failure if self.failure else ""))
+        # A later traceback may refine the diagnosis, or a callback may refine
+        # the completion status. Refresh the UI without ending the run twice.
+        if not already_finished:
+            self.append(self.status.get() + ("\n" + self.failure if self.failure else ""))
 
     def copy_error(self):
         text = redact(f"{self.module}\n{self.status.get()}\n{self.failure}\n\n完整日志：\n{self.contents()}")

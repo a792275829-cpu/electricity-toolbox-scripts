@@ -2719,7 +2719,7 @@ class WpsWriterFrame(ttk.Frame):
                 self.login_event_queue.put((browser_mode, cdp_url, WpsLoginStatus(
                     "unknown", "暂时无法确认，请检查网络或浏览器后刷新登录状态。"
                 )))
-                self.browser_event_queue.put((False, str(exc), quiet))
+                self.browser_event_queue.put((False, getattr(exc, "log_details", str(exc)), quiet))
 
         self.browser_worker = self._start_tracked_thread(
             worker,
@@ -2754,8 +2754,8 @@ class WpsWriterFrame(ttk.Frame):
         self.schedule_drain_logs()
         return thread
 
-    def detail_log(self, message: str) -> None:
-        if "Traceback (most recent call last)" in message:
+    def detail_log(self, message: str, *, show_traceback: bool = True) -> None:
+        if show_traceback and "Traceback (most recent call last)" in message:
             self.log_queue.put(message)
         try:
             LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -3178,8 +3178,17 @@ class WpsWriterFrame(ttk.Frame):
                 result = self.task_registry.wps_action("preview" if preview else "run", config, indexes, self.log)
                 self.log(("预览通过：" if preview else "写入完成：") + result.get("message", "已完成"))
             except Exception as exc:
-                self.log(("预览失败：" if preview else "操作失败：") + str(exc))
-                self.detail_log(traceback.format_exc())
+                failure = getattr(exc, "log_details", str(exc))
+                diagnosis = explain_error(str(exc))
+                if hasattr(exc, "log_details") and diagnosis:
+                    failure = diagnosis[0] + "\n" + failure
+                self.log(("预览失败：" if preview else "操作失败：") + failure)
+                if hasattr(exc, "log_details"):
+                    # The business traceback already arrived through self.log.
+                    # Keep it in the daily diagnostic file without replaying it.
+                    self.detail_log(str(exc), show_traceback=False)
+                else:
+                    self.detail_log(traceback.format_exc())
                 if preview:
                     self._remote_messages.put(("预览失败", str(exc)))
         self.worker = self._start_tracked_thread(worker, name="wps-preview" if preview else "wps-write")

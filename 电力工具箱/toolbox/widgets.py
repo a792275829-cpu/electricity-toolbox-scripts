@@ -15,6 +15,7 @@ from toolbox_log_console import LogConsole
 
 from .runtime import TaskRegistry, utf8_environment
 from .tasks import TaskSnapshot, TaskState, classify_error
+from .tasks.errors import RemoteTaskError
 
 
 T = TypeVar("T")
@@ -237,7 +238,6 @@ class ToolPage(ttk.Frame):
     def _finish_error(self, exc: Exception, details: str) -> None:
         error = classify_error(exc, details)
         self.log_console.finish("执行失败", error.summary, error.advice)
-        self.append_log(f"失败：{exc}")
         self.append_log(details)
         self.set_busy(False, "执行失败")
         messagebox.showerror("执行失败", f"{error.summary}\n\n{error.advice}", parent=self)
@@ -260,15 +260,14 @@ class ToolPage(ttk.Frame):
             return
         if snapshot.state is TaskState.CANCELLED:
             self.log_console.finish("已取消")
-            self.append_log("任务已取消。")
             self.set_busy(False, "已取消")
             return
         error = classify_error(snapshot.error or RuntimeError("未知错误"), self.log_console.contents())
         self.log_console.finish("执行失败", error.summary, error.advice)
-        self.append_log(f"失败：{error.summary}")
-        self.append_log(f"建议：{error.advice}")
         if snapshot.error is not None:
-            self.append_log("".join(traceback.format_exception(snapshot.error)))
+            details = (snapshot.error.log_details if isinstance(snapshot.error, RemoteTaskError)
+                       else "".join(traceback.format_exception(snapshot.error)))
+            self.append_log(details)
         self.set_busy(False, "执行失败")
         messagebox.showerror(
             "执行失败", f"{error.summary}\n\n{error.advice}", parent=self

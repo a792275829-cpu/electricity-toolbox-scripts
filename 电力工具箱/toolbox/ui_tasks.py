@@ -12,6 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 from .runtime import TaskRegistry
 from .tasks import TaskCancelled
+from .tasks.errors import RemoteTaskError
 
 
 class BusinessClient:
@@ -73,13 +74,19 @@ class RemoteTaskRegistry(TaskRegistry):
                                    request_id=request_id, confirmed=True))
         cursor = 0
         cancelled = False
+        first_trace = []
+        trace_size = 0
         def consume_events():
-            nonlocal cursor
+            nonlocal cursor, trace_size
             batch = self.client.call("events", dict(after=cursor))
             cursor = batch["cursor"]
             for event in batch["events"]:
                 if event["task_id"] == task_id and event["kind"] == "log":
-                    log(event["message"].rstrip("\n"))
+                    message = event["message"]
+                    log(message.rstrip("\n"))
+                    if (first_trace or "Traceback (most recent call last)" in message) and trace_size < 16000:
+                        first_trace.append(message[:16000 - trace_size])
+                        trace_size += len(first_trace[-1])
             return batch.get("pending", 0)
         while True:
             if token.cancelled and not cancelled:
@@ -102,7 +109,7 @@ class RemoteTaskRegistry(TaskRegistry):
             if snapshot["state"] == "failed":
                 with self._request_lock:
                     self._request_ids.pop(fingerprint, None)
-                raise RuntimeError(snapshot["error"] or "业务任务失败")
+                raise RemoteTaskError(snapshot["error"] or "业务任务失败", "".join(first_trace))
             time.sleep(0.15)
 
     def prepare_page_worker(self, page, status, *, command=None, process=False):

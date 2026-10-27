@@ -18,6 +18,17 @@ class ErrorCategory(str, Enum):
     UNKNOWN = "unknown"
 
 
+class RemoteTaskError(RuntimeError):
+    """Keep the original diagnosis while avoiding replay of streamed details."""
+
+    def __init__(self, message: str, streamed_trace: str = ""):
+        super().__init__(message)
+        prefix, marker, trace = message.partition("\nTraceback (most recent call last)")
+        original_trace = (marker.lstrip("\n") + trace).strip()
+        self.log_details = (prefix if marker and original_trace in streamed_trace
+                            else message)
+
+
 @dataclass(frozen=True, slots=True)
 class UserFacingError:
     category: ErrorCategory
@@ -66,4 +77,7 @@ def classify_error(exc: BaseException, output: str = "") -> UserFacingError:
                 return UserFacingError(ErrorCategory.EXTERNAL_PROCESS, redact(line.strip())[:300],
                                        "请根据上述原始错误检查参数或输入文件；点击“复制错误”可提供完整排查信息。", exc)
         return UserFacingError(ErrorCategory.EXTERNAL_PROCESS, "任务执行失败，暂未识别具体原因", "点击“复制错误”获取完整日志用于排查；上传或写入任务请先核对是否已有部分成功。", exc)
-    return UserFacingError(ErrorCategory.UNKNOWN, str(exc) or exc.__class__.__name__, "请点击“复制错误”，提供完整日志以便排查。", exc)
+    summary = str(exc) or exc.__class__.__name__
+    if isinstance(exc, RemoteTaskError):
+        summary = summary.strip().splitlines()[-1][:300]
+    return UserFacingError(ErrorCategory.UNKNOWN, summary, "请点击“复制错误”，提供完整日志以便排查。", exc)
