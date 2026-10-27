@@ -68,6 +68,7 @@ class ToolboxApp(tk.Tk):
         self.title("电力工作工具箱")
         self.paths = ToolPaths(workspace or default_workspace())
         self._check_updates = check_updates
+        self._restart_requested = False
         # One shared asset serves the original Tk UI and both desktop targets.
         icon = Path(__file__).resolve().parents[2] / "desktop/assets/app-icon-256.png"
         if icon.is_file():
@@ -194,6 +195,9 @@ class ToolboxApp(tk.Tk):
         self.rail_toggle.grid(row=0, column=1, sticky="e")
         self.version_label = ttk.Label(status, text=application_version(), anchor="e", style="Status.TLabel")
         self.version_label.grid(row=0, column=2, sticky="e", padx=(14, 0))
+        if os.environ.get("TOOLBOX_SOURCE_DEBUG") == "1":
+            self.restart_button = ttk.Button(status, text="重启源码版", command=self._restart, style="Quiet.TButton")
+            self.restart_button.grid(row=0, column=3, sticky="e", padx=(14, 0))
         self.show_page(default_catalog()[0].name if self._lazy_pages else PAGE_NAMES[0])
 
     def set_update_available(self, available: bool) -> None:
@@ -389,20 +393,25 @@ class ToolboxApp(tk.Tk):
         else:
             self.nav_buttons[name].configure(style=style)
 
-    def _on_close(self) -> None:
+    def _restart(self) -> None:
+        if self._on_close():
+            self._restart_requested = True
+
+    def _on_close(self) -> bool:
         active = self.registry.active_snapshots()
         if active or self.registry.has_running_tasks():
             names = "\n".join(f"• {task.name}" for task in active) or "• 后台任务"
             if not messagebox.askyesno("仍有任务运行", f"以下任务仍在运行：\n\n{names}\n\n关闭工具箱将取消这些任务，确定关闭吗？", parent=self):
-                return
+                return False
         remaining = self.registry.terminate_all()
         if remaining:
             messagebox.showwarning("无法立即关闭", "仍有不可安全中断的写入任务。请等待任务结束后再关闭。", parent=self)
-            return
+            return False
         if self.credentials_panel.dirty and not self.credentials_panel.save():
             messagebox.showwarning("账号尚未保存", self.credentials_panel.status_var.get(), parent=self)
-            return
+            return False
         self.destroy()
+        return True
 
     def destroy(self) -> None:
         self._cancel_page_load()
@@ -420,4 +429,11 @@ def main() -> int:
     elif prototype:
         app.show_page("出清结果汇总上传")
     app.mainloop()
+    if app._restart_requested:
+        root = default_workspace()
+        python = root / ".venv/bin/python"
+        env = os.environ.copy()
+        env.pop("PYTHONHOME", None)
+        env.pop("__PYVENV_LAUNCHER__", None)
+        os.execve(str(python), [str(python), str(root / "desktop/python/source_debug.py")], env)
     return 0
