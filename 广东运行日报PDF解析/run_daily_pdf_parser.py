@@ -2,7 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+WORKSPACE_DIR = SCRIPT_DIR.parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+if str(WORKSPACE_DIR) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_DIR))
 
 from gd_pdf_tool import parse_pdf, write_quote_excel
 from gd_pdf_tool.uploader import build_upload_plan, upload_report_files, verify_quote_workbook
