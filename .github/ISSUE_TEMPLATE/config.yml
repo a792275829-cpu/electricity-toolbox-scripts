@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 私人报告安全漏洞
+    url: https://github.com/a792275829-cpu/electricity-toolbox-scripts/security/advisories/new
+    about: 请通过私人渠道报告漏洞，不要在公开 Issue 中提交敏感信息。

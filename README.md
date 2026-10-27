@@ -4,6 +4,10 @@
 
 仓库公开地址：[a792275829-cpu/electricity-toolbox-scripts](https://github.com/a792275829-cpu/electricity-toolbox-scripts)
 
+[下载最新 macOS 版](https://github.com/a792275829-cpu/electricity-toolbox-scripts/releases/latest) · [更新日志](CHANGELOG.md) · [贡献指南](CONTRIBUTING.md) · [问题反馈](https://github.com/a792275829-cpu/electricity-toolbox-scripts/issues) · [安全政策](SECURITY.md)
+
+本仓库代码采用 [MIT 许可证](LICENSE)。随附的 Noto Serif SC 字体采用 [SIL Open Font License 1.1](风力预测截图/fonts/OFL.txt)，其他第三方依赖或资源遵循其各自的许可证。部分功能需要相应业务系统的账号和访问权限。
+
 ## DMG 桌面版
 
 macOS 14+、Apple 芯片电脑使用 DMG 桌面版，已内置 Python、Node、Chromium 与 Tcl/Tk。打开 DMG，先退出旧工具箱，再双击“安装到我的应用程序.command”，安装到 `~/Applications/电力工具箱.app` 并自动打开；也可手动拖入个人用户目录的 Applications 文件夹。

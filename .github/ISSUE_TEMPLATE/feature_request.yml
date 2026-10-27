@@ -1,0 +1,21 @@
+name: 功能建议
+description: 提出功能或改进建议
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: 使用场景或问题
+      description: 描述需要解决的问题及现有使用方式。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议的改进
+      description: 涉及业务字段、日期、工作表或输出时，请给出精确口径；请勿提交真实业务数据。
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 其他背景
