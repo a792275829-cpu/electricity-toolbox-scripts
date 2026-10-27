@@ -60,24 +60,13 @@ class SummaryUploadPage(ToolPage):
         form = ttk.LabelFrame(self.content, text="数据与功能", padding=12)
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
-        browse = add_path_row(
-            form, row=0, label="复盘文件夹", variable=self.input_dir,
-            command=self.choose_input_dir, button_text="选择文件夹",
-        )
-        ttk.Label(form, text="执行功能").grid(row=1, column=0, sticky="w", pady=8)
+        ttk.Label(form, text="执行功能").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 10))
         modes = SegmentedGroup(form, variable=self.mode, choices=self.MODE_LABELS.items())
-        modes.grid(row=1, column=1, columnspan=2, sticky="w")
+        modes.grid(row=0, column=1, columnspan=2, sticky="w", pady=(0, 10))
         mode_buttons = modes.buttons
-
-        self.summary_form = ttk.Frame(form)
-        self.summary_form.grid(row=2, column=0, columnspan=3, sticky="ew")
-        output_button = add_path_row(
-            self.summary_form, row=0, label="输出文件", variable=self.output_file,
-            command=self.choose_output_file, button_text="选择位置",
-        )
-        self.hint = tk.StringVar(master=self)
-        ttk.Label(form, textvariable=self.hint, style="Muted.TLabel", wraplength=780).grid(
-            row=3, column=0, columnspan=3, sticky="w", pady=(8, 0),
+        browse = add_path_row(
+            form, row=1, label="复盘文件夹", variable=self.input_dir,
+            command=self.choose_input_dir, button_text="选择文件夹",
         )
 
         self.run_button = ttk.Button(self.actions, command=self.start_selected)
@@ -85,10 +74,9 @@ class SummaryUploadPage(ToolPage):
         self.preview_button = ttk.Button(self.actions, text="预览上传文件", command=self.preview_upload)
         self.open_button = ttk.Button(self.actions, text="打开输出目录", command=self.open_output_dir)
         self.register_busy_widgets(
-            browse, output_button, self.run_button, self.preview_button, self.open_button,
+            browse, self.run_button, self.preview_button, self.open_button,
             *mode_buttons,
-            *(widget for container in (form, self.summary_form)
-              for widget in container.winfo_children() if isinstance(widget, ttk.Entry)),
+            *(widget for widget in form.winfo_children() if isinstance(widget, ttk.Entry)),
         )
         self._previous_default_output = str(self.default_output_for(default_input))
         self.input_dir.trace_add("write", self._input_changed)
@@ -141,21 +129,12 @@ class SummaryUploadPage(ToolPage):
         mode = self.mode.get()
         self.preview_button.pack_forget()
         self.open_button.pack_forget()
-        if mode == "upload":
-            self.summary_form.grid_remove()
-        else:
-            self.summary_form.grid()
         if mode != "summary":
             self.preview_button.pack(side="left", padx=(8, 0))
         if mode != "upload":
             self.open_button.pack(side="left", padx=(8, 0))
         self.run_button.configure(text={
             "summary": "开始汇总", "upload": "开始上传", "both": "开始汇总并上传",
-        }[mode])
-        self.hint.set({
-            "summary": "可直接选择混放出清 Excel 的大文件夹，自动归类后汇总；也支持已分好的复盘目录或单个场站文件夹。",
-            "upload": "自动归类后预览、上传；已分好的复盘目录可直接使用。请先预览匹配文件，再开始上传。",
-            "both": "自动归类 → 汇总 → 上传。归类或汇总失败则停止；文件直接归入六个单元目录，日期和内容不变。",
         }[mode])
 
     def choose_input_dir(self) -> None:
@@ -168,16 +147,6 @@ class SummaryUploadPage(ToolPage):
             self.input_dir.set(selected)
             self.output_file.set(str(self.default_output_for(Path(selected))))
             self.file_dialogs.remember_directory("summary_upload_input", selected)
-
-    def choose_output_file(self) -> None:
-        selected = filedialog.asksaveasfilename(
-            title="选择输出文件",
-            initialdir=str(self.file_dialogs.initial_directory("summary_output", self.output_file.get())),
-            defaultextension=".xlsx", filetypes=[("Excel 文件", "*.xlsx")], parent=self,
-        )
-        if selected:
-            self.output_file.set(selected)
-            self.file_dialogs.remember_file("summary_output", selected)
 
     def open_output_dir(self) -> None:
         if self.output_file.get().strip():

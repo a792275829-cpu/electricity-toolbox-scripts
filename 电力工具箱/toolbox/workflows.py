@@ -166,7 +166,7 @@ def plan(paths, tool_id, action, p):
             return [(commands.prediction(paths, master, output, 1, int(months), p["run_date"]), paths.guangdong_price_dir)]
     elif tool_id == "summary-upload":
         source = required_path(p, "input_dir", directory=True)
-        output = required_path(p, "output_file", exists=False) if p["output_file"] else source / f"{source.name}_汇总.xlsx"
+        output = source / f"{source.name}_汇总.xlsx"
         if output.suffix.lower() != ".xlsx":
             raise ValueError("汇总输出必须是 .xlsx 文件")
         if p["mode"] == "both" and source in output.parents and output.parent != source:

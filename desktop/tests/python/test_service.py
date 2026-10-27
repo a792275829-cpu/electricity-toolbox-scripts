@@ -218,9 +218,9 @@ class ServiceTaskTests(unittest.TestCase):
             book.save(station / f'1号机{label}交易结果查询({day}).xlsx')
             book.close()
         self.service = ToolboxService(ROOT)
-        output = source / '汇总.xlsx'
+        output = source / 'review_汇总.xlsx'
         task_id = self.service.call('start', dict(tool_id='summary-upload', action='run',
-            request_id='summary-sample', confirmed=True, values=dict(input_dir=str(source), output_file=str(output), mode='summary')))
+            request_id='summary-sample', confirmed=True, values=dict(input_dir=str(source), mode='summary')))
         snapshot = self.finish(task_id)
         self.assertEqual(snapshot.state.value, 'succeeded', snapshot.error)
         book = load_workbook(output, data_only=True)

@@ -158,7 +158,7 @@ class SurfaceCacheTests(unittest.TestCase):
             self.assertEqual("/示例/复盘", summary.input_dir.get())
             self.assertEqual("upload", summary.mode.get())
             self.assertEqual("开始上传", summary.run_button.cget("text"))
-            self.assertEqual("", summary.summary_form.winfo_manager())
+            self.assertFalse(hasattr(summary, "summary_form"))
         finally:
             app.destroy()
 
