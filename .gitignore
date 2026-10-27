@@ -58,3 +58,6 @@ Thumbs.db
 # Local Codex/Superpowers workspaces
 .worktrees/
 .superpowers/
+
+# Local one-off archives kept out of business output directories
+/.archive/
