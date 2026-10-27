@@ -30,6 +30,10 @@ if str(WORKSPACE_DIR) not in sys.path:
 from toolbox_shared.credentials import mark_browser_session, prepare_browser_session, read_login_config
 from toolbox_shared.auth_loader import wait_for_login
 from toolbox_shared.dates import normalize_date_input
+import upload_files as _upload_files
+from upload_files import (UPLOAD_TYPES, UploadFile, classify_file, daily_report_name,
+                          extract_date_from_name, probe_standard_province_templates,
+                          validate_date)
 from toolbox_shared.province_excel import (
     number_or_none,
     format_formula_number,
@@ -205,43 +209,7 @@ def load_config() -> Config:
     )
 
 
-def validate_date(value: str) -> str:
-    return normalize_date_input(value)
 
-
-def daily_report_name(run_date: str) -> str:
-    validated = validate_date(run_date)
-    compact_date = validated.replace("-", "")
-    return f"广东电力现货市场监测评估日报（{compact_date}）"
-
-
-def extract_date_from_name(path: Path) -> str:
-    name = path.stem
-    compact = re.search(r"(20\d{2})([01]\d)([0-3]\d)", name)
-    if compact:
-        y, m, d = compact.groups()
-        return validate_date(f"{y}-{m}-{d}")
-
-    separated = re.search(r"(20\d{2})[-_.年 ]([01]?\d)[-_.月 ]([0-3]?\d)", name)
-    if separated:
-        y, m, d = separated.groups()
-        return validate_date(f"{int(y):04d}-{int(m):02d}-{int(d):02d}")
-
-    raise ValueError(f"文件名里没有识别到日期：{path.name}")
-
-
-def classify_file(path: Path) -> str:
-    name = path.name
-    matches = [
-        kind
-        for kind, spec in UPLOAD_TYPES.items()
-        if any(keyword in name for keyword in spec["filename_keywords"])
-    ]
-    if len(matches) == 1:
-        return matches[0]
-    if not matches:
-        raise ValueError(f"无法从文件名判断上传类型，请包含“省内”或“能销”：{path.name}")
-    raise ValueError(f"文件名同时匹配多个上传类型：{path.name}")
 
 
 def choose_files_interactively() -> list[Path]:
@@ -266,106 +234,14 @@ def choose_files_interactively() -> list[Path]:
     return [Path(item) for item in selected]
 
 
-def probe_standard_province_templates(folder: Path, target_date: str, *, days: int = 45) -> list[Path]:
-    center = datetime.strptime(target_date, "%Y-%m-%d").date()
-    candidates: list[Path] = []
-    for offset in range(days + 1):
-        offsets = [0] if offset == 0 else [-offset, offset]
-        for day_offset in offsets:
-            day = center + timedelta(days=day_offset)
-            path = folder / f"广东-省内数据-{day:%Y%m%d}.xlsx"
-            if path.exists() and not path.name.startswith("~$") and "自动更新" not in path.stem:
-                candidates.append(path)
-    return candidates
-
-
 def find_province_template(folder: Path, target_date: str) -> UploadFile:
-    candidates: list[UploadFile] = []
-    visible_excel_files: list[str] = []
-    paths = list(folder.glob("*.xlsx"))
-    if not paths:
-        paths = probe_standard_province_templates(folder, target_date)
-    for path in paths:
-        if path.name.startswith("~$") or "自动更新" in path.stem:
-            continue
-        visible_excel_files.append(path.name)
-        if "省内" not in path.name:
-            continue
-        try:
-            candidates.append(
-                UploadFile(
-                    path=path.resolve(),
-                    kind="省内",
-                    date=extract_date_from_name(path),
-                    auto_template=True,
-                )
-            )
-        except ValueError:
-            continue
-    if not candidates:
-        if BUILTIN_PROVINCE_TEMPLATE.is_file():
-            log("同目录未找到可用省内数据，使用内置省内模板。")
-            return UploadFile(
-                path=BUILTIN_PROVINCE_TEMPLATE.resolve(), kind="省内",
-                date=target_date, auto_template=True, builtin_template=True,
-            )
-        visible = "、".join(sorted(visible_excel_files)) or "无"
-        raise ValueError(
-            f"没有在 {folder} 找到可作为模板的省内数据 .xlsx 文件。"
-            f"内置省内模板也不存在：{BUILTIN_PROVINCE_TEMPLATE}。"
-            f"实际看到的 Excel 文件：{visible}"
-        )
-    target_day = datetime.strptime(target_date, "%Y-%m-%d").date()
-    selected = min(
-        candidates,
-        key=lambda item: (
-            abs((datetime.strptime(item.date, "%Y-%m-%d").date() - target_day).days),
-            datetime.strptime(item.date, "%Y-%m-%d").date() > target_day,
-            -item.path.stat().st_mtime,
-        ),
-    )
-    log(f"自动选择省内模板：{selected.path.name}")
-    return selected
+    return _upload_files.find_province_template(
+        folder, target_date, template=BUILTIN_PROVINCE_TEMPLATE, log=log)
 
 
 def prepare_upload_files(paths: list[Path]) -> tuple[str, list[UploadFile]]:
-    if len(paths) not in (1, 2):
-        raise ValueError("请选择一个能销数据文件，或同时选择一个省内数据和一个能销数据文件。")
-
-    uploads: list[UploadFile] = []
-    seen: set[str] = set()
-    for raw_path in paths:
-        path = raw_path.expanduser().resolve()
-        if not path.exists():
-            raise FileNotFoundError(f"文件不存在：{path}")
-        kind = classify_file(path)
-        if kind in seen:
-            raise ValueError(f"同一类型文件只能选一个，重复类型：{UPLOAD_TYPES[kind]['name']}")
-        seen.add(kind)
-        builtin = path == BUILTIN_PROVINCE_TEMPLATE.resolve()
-        uploads.append(UploadFile(
-            path=path, kind=kind, date="" if builtin else extract_date_from_name(path),
-            auto_template=builtin, builtin_template=builtin,
-        ))
-
-    if len(uploads) == 1:
-        only_upload = uploads[0]
-        if only_upload.kind != "能销":
-            raise ValueError("只选择一个文件时必须选择能销数据文件，省内数据会自动从同目录或内置模板生成。")
-        uploads.append(find_province_template(only_upload.path.parent, only_upload.date))
-        seen.add("省内")
-
-    missing = set(UPLOAD_TYPES) - seen
-    if missing:
-        names = "、".join(UPLOAD_TYPES[kind]["name"] for kind in sorted(missing))
-        raise ValueError(f"缺少文件：{names}")
-
-    ordered = sorted(uploads, key=lambda item: 0 if item.kind == "省内" else 1)
-    energy_upload = next(item for item in ordered if item.kind == "能销")
-    for item in ordered:
-        if item.builtin_template:
-            item.date = energy_upload.date
-    return energy_upload.date, ordered
+    return _upload_files.prepare_upload_files(
+        paths, template=BUILTIN_PROVINCE_TEMPLATE, log=log)
 
 
 def parse_json_response(response, label: str) -> dict[str, Any]:
