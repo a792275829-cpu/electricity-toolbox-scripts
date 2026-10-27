@@ -147,7 +147,7 @@ class GroupUploadRuntimeTests(unittest.TestCase):
                 return self.page
 
         context = DummyContext()
-        with mock.patch.object(module, "page_needs_manual_navigation", return_value=False):
+        with mock.patch.object(module.page_navigation, "page_needs_manual_navigation", return_value=False):
             page = module.open_day_report_page(context, allow_manual=False)
 
         self.assertIs(page, context.page)
@@ -193,9 +193,9 @@ class GroupUploadRuntimeTests(unittest.TestCase):
 
         context = DummyContext()
         with (
-            mock.patch.object(module, "page_needs_manual_navigation", side_effect=[True, False]),
-            mock.patch.object(module, "enter_huaneng_marketing_platform", side_effect=lambda page: page.goto(module.USERCENTER_URL)),
-            mock.patch.object(module, "click_button_by_text"),
+            mock.patch.object(module.page_navigation, "page_needs_manual_navigation", side_effect=[True, False]),
+            mock.patch.object(module.page_navigation, "enter_huaneng_marketing_platform", side_effect=lambda page: page.goto(module.USERCENTER_URL)),
+            mock.patch.object(module.page_navigation, "click_button_by_text"),
         ):
             page = module.open_day_report_page(context, allow_manual=False)
 
@@ -400,7 +400,7 @@ class GroupUploadRuntimeTests(unittest.TestCase):
 
         context = FakeContext()
         with (
-            mock.patch.object(module, "open_day_report_page", return_value=object()),
+            mock.patch.object(module.page_navigation, "open_day_report_page", return_value=object()),
         ):
             module.create_daily_report(context, "2026-07-04", headless=True)
 
@@ -458,7 +458,7 @@ class GroupUploadRuntimeTests(unittest.TestCase):
 
         context = FakeContext()
         with (
-            mock.patch.object(module, "open_day_report_page", return_value=object()),
+            mock.patch.object(module.page_navigation, "open_day_report_page", return_value=object()),
             mock.patch.object(module.time, "sleep"),
         ):
             module.create_daily_report(context, "2026-07-06", headless=True)
