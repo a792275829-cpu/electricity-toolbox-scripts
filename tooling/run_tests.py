@@ -24,6 +24,8 @@ SUITES = {
     "spot": "现货价格更新/tests",
     "group": "集团每日上传/tests",
     "transaction": "交易系统信息更新/tests",
+    "report": "南方分公司电力市场日报/tests",
+    "forecast": "广东电价预测/tests",
     "maintenance": "tooling/tests",
 }
 
