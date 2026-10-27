@@ -9,6 +9,7 @@
 - 针对性验证：增加 `--suite toolbox --pattern 'test_market_table*.py'`；可选套件为 toolbox、desktop、section、trade、morning、wind、spot、group、transaction、report、forecast、maintenance。
 - 每个测试模块使用独立进程与工作目录，超时默认 180 秒，超时会终止其进程组；失败保留原始输出。无测试用例也视为失败。结果 JSON 包含用例计数、耗时、退出码和完整诊断，每完成一个模块立即原子保存；中断保留已完成结果。每个模块使用独立临时数据目录，避免读写真实配置或登录态。
 - CI 与正式发布共用这个入口。新增目录必须登记到 `SUITES`；维护测试会检查是否有遗漏，防止新工具测试游离于 CI。
+- 清理工作区：`.venv/bin/python tooling/clean_workspace.py`（干跑，列出待删项与体积），确认后加 `--apply`。默认只保留最新两个版本的安装包，删除 `dist/release-v*/` 内的重复副本、`desktop/src-tauri/target` 与 `payload`；`dist/updates` 的增量补丁、`dist/tauri-build` 的下载缓存和发行日志一律保留。`--keep N` 调整保留版本数，`--keep-build` 只清安装包副本、保留构建缓存。
 - 更新依赖时重新生成并审查锁文件，在源码环境执行初始化、全量测试和启动器 smoke。涉及 openpyxl 时必须保留私有接口兼容测试和现有 Excel 写入／格式／公式回读测试，不单凭版本号判断兼容。
 
 ## 业务与模块边界
