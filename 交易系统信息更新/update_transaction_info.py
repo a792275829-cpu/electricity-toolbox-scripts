@@ -548,6 +548,8 @@ def _write_patched_workbook(
 
 
 def _values_equal(actual: Any, expected: int | float) -> bool:
+    if isinstance(actual, bool):
+        return False
     try:
         return math.isclose(float(actual), float(expected), rel_tol=0, abs_tol=1e-7)
     except (TypeError, ValueError):

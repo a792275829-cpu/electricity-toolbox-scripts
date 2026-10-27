@@ -315,10 +315,16 @@ class ProcessRunnerTests(unittest.TestCase):
             errors: list[BaseException] = []
             thread = threading.Thread(target=lambda: self._run_captured(runner, code, token, errors))
             thread.start()
-            deadline = time.monotonic() + 2
-            while not pid_file.exists() and time.monotonic() < deadline:
+            # The child creates the file before writing, so wait for a complete pid.
+            deadline = time.monotonic() + 5
+            written = ""
+            while time.monotonic() < deadline:
+                written = pid_file.read_text().strip() if pid_file.exists() else ""
+                if written.isdigit():
+                    break
                 time.sleep(0.01)
-            child_pid = int(pid_file.read_text())
+            self.assertRegex(written, r"^\d+$", "子进程未写出有效 pid")
+            child_pid = int(written)
             token.cancel()
             thread.join(timeout=5)
             self.assertIsInstance(errors[0], TaskCancelled)

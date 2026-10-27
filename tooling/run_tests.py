@@ -23,6 +23,7 @@ SUITES = {
     "wind": "风力预测截图/tests",
     "spot": "现货价格更新/tests",
     "group": "集团每日上传/tests",
+    "transaction": "交易系统信息更新/tests",
     "maintenance": "tooling/tests",
 }
 
