@@ -149,6 +149,7 @@ def collect_units(
 
 def _collect_station_units(station_dirs, logger):
     units: dict[tuple[str, str], UnitData] = {}
+    sources = {}
     for station_dir in station_dirs:
         station_key = station_dir.name
         station_name = STATION_DISPLAY_NAMES.get(station_key, station_key)
@@ -163,6 +164,13 @@ def _collect_station_units(station_dirs, logger):
                 logger(f"  读取文件：{file_path.name}")
                 for unit_name, energy, price in parse_workbook(file_path):
                     key = (station_key, unit_name)
+                    source_key = (*key, market)
+                    if source_key in sources:
+                        raise ValueError(
+                            f"{station_name} / {unit_name} / {MARKET_TITLES[market][0]} 来源冲突："
+                            f"{sources[source_key]} 与 {file_path}。请仅保留明确选定的一份来源后重试。"
+                        )
+                    sources[source_key] = file_path
                     unit = units.setdefault(
                         key,
                         UnitData(

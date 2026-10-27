@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import math
 import os
 import queue
 import re
@@ -1292,21 +1293,25 @@ def fetch_startup_max(context, run_date: str, province_area_id: str) -> int:
             )
             continue
 
-        hourly_totals: list[float] = []
+        curves = []
         for group in groups:
-            row = rows_by_group[group]
-            unit_count = row.get("unitCount") or []
-            for index, raw_value in enumerate(unit_count):
+            unit_count = rows_by_group[group].get("unitCount")
+            if not isinstance(unit_count, list) or len(unit_count) != 24:
+                break
+            curve = []
+            for raw_value in unit_count:
                 value = number_or_none(raw_value)
-                if value is None:
-                    continue
-                if index == len(hourly_totals):
-                    hourly_totals.append(0.0)
-                if index < len(hourly_totals):
-                    hourly_totals[index] += value
-        if not hourly_totals:
-            log(f"提醒：{label}出清电量没有可用的开机台数明细，将使用另一类型的完整数据。")
+                if (value is None or isinstance(raw_value, bool) or not math.isfinite(value)
+                        or value < 0 or not value.is_integer()):
+                    break
+                curve.append(value)
+            if len(curve) != 24:
+                break
+            curves.append(curve)
+        if len(curves) != len(groups):
+            log(f"提醒：{label}出清电量缺少完整24点有效燃煤/燃气开机台数，将使用另一类型的完整数据。")
             continue
+        hourly_totals = [sum(values) for values in zip(*curves)]
         max_values[label] = int(round(max(hourly_totals)))
 
     if not max_values:

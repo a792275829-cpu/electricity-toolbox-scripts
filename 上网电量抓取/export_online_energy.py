@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -488,6 +489,21 @@ def number_or_zero(value: Any) -> float:
         return 0.0
 
 
+def online_energy_hours(values, *, label: str) -> tuple[float, ...]:
+    if not isinstance(values, list) or len(values) != 24:
+        raise ValueError(f"{label} 应有完整24个小时电量，实际为 {len(values) if isinstance(values, list) else 0} 个，停止导出。")
+    result = []
+    for hour, raw in enumerate(values):
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"{label} {hour:02d}:00 电量缺失或无效，停止导出。") from None
+        if isinstance(raw, bool) or not math.isfinite(value):
+            raise ValueError(f"{label} {hour:02d}:00 电量缺失或无效，停止导出。")
+        result.append(value)
+    return tuple(result)
+
+
 def fetch_fire_rows(context, run_date: str, tenant_id: str) -> list[dict[str, Any]]:
     response = context.request.get(
         f"{BASE_URL}/gdfire/api/data/unit/power/fire",
@@ -557,12 +573,9 @@ def collect_detail_rows(run_date: str, config: Config) -> list[dict[str, Any]]:
                 for item in power_items:
                     unit_id = str(item.get("unitId") or "")
                     unit_name = unit_names.get(unit_id, unit_id or "未知机组")
-                    values = item.get("onlineEle") or []
-                    if not isinstance(values, list):
-                        values = []
-
-                    padded_values = [number_or_zero(values[hour]) if hour < len(values) else 0.0 for hour in range(24)]
-                    for hour, value in enumerate(padded_values):
+                    values = online_energy_hours(item.get("onlineEle"),
+                        label=f"{run_date} {company_name} / {unit_name}")
+                    for hour, value in enumerate(values):
                         detail_rows.append(
                             {
                                 "company": company_name,

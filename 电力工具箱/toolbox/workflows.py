@@ -91,8 +91,10 @@ def plan(paths, tool_id, action, p):
         threshold = number(p["threshold"], "价差阈值")
         return [(commands.section_analysis(paths, files, output, topology, threshold), paths.section_analysis_dir)]
     if tool_id == "trade-analysis":
-        selected_files(p)
-        required_path(p, "output_dir", exists=False)
+        sources = selected_files(p)
+        output = required_path(p, "output_dir", exists=False)
+        module = load_module("toolbox_trade_analysis", paths.trade_analysis)
+        module.plan_batch_outputs(sources, output)
     elif tool_id == "market-table":
         return [(commands.market_table(paths, day("run_date"), required_path(p, "workbook")), paths.market_table_update_dir)]
     elif tool_id == "transaction-info":
@@ -222,8 +224,7 @@ def execute(paths, tool_id, action, p):
         output_dir = Path(p["output_dir"]).expanduser()
         output_dir.mkdir(parents=True, exist_ok=True)
         outputs = []
-        for source in selected_files(p):
-            output = output_dir / f"{source.stem}_分析报告.html"
+        for source, output in module.plan_batch_outputs(selected_files(p), output_dir):
             module.generate_report(source, out_path=output)
             log(f"完成：{source.name} -> {output.name}")
             outputs.append(str(output))

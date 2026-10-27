@@ -294,12 +294,12 @@ class RuntimeTests(unittest.TestCase):
                         {
                             "date": "2026-07-18 00:00:00",
                             "dataItemGroup": "DAY_AHEAD_CLEARANCE_COAL",
-                            "unitCount": [10, 12],
+                            "unitCount": [10, 12] + [0] * 22,
                         },
                         {
                             "date": "2026-07-18 00:00:00",
                             "dataItemGroup": "DAY_AHEAD_CLEARANCE_GAS",
-                            "unitCount": [3, 4],
+                            "unitCount": [3, 4] + [0] * 22,
                         },
                     ]
                 )

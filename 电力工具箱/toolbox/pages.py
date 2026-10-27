@@ -268,8 +268,7 @@ class TradeAnalysisPage(ToolPage):
         def worker() -> list[Path]:
             module = load_module("toolbox_trade_analysis", self.paths.trade_analysis)
             outputs: list[Path] = []
-            for source in selected_files:
-                output = output_dir / f"{source.stem}_分析报告.html"
+            for source, output in module.plan_batch_outputs(selected_files, output_dir):
                 module.generate_report(source, out_path=output)
                 outputs.append(output)
                 self.append_log(f"完成：{source.name} -> {output.name}")

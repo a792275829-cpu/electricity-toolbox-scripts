@@ -8,6 +8,7 @@ import threading
 import tkinter as tk
 import datetime
 import re
+import unicodedata
 from collections import deque
 from itertools import islice
 from tkinter import filedialog, messagebox, ttk
@@ -978,16 +979,32 @@ def generate_report(xlsx_path, out_path=None):
     return ReportBuilder(xlsx_path, out_path=out_path).build()
 
 
+def plan_batch_outputs(xlsx_paths, output_dir):
+    """Reject distinct sources sharing a macOS output name before any write."""
+    output_dir = pathlib.Path(output_dir)
+    targets = {}
+    planned = []
+    for source in xlsx_paths:
+        source = pathlib.Path(source)
+        output = output_dir / f"{source.stem}_分析报告.html"
+        key = unicodedata.normalize("NFC", output.name).casefold()
+        previous = targets.get(key)
+        if previous is not None and previous.resolve() != source.resolve():
+            raise ValueError(f"分析报告输出文件名冲突：{previous} 与 {source} 都将写入 {output.name}。请更改输入文件名或分批选择不同输出目录。")
+        targets[key] = source
+        planned.append((source, output))
+    return planned
+
+
 def generate_batch(xlsx_paths, output_dir):
     output_dir = pathlib.Path(output_dir)
+    planned = plan_batch_outputs(xlsx_paths, output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     results = []
-    xlsx_paths = [pathlib.Path(path) for path in xlsx_paths]
+    xlsx_paths = [source for source, _ in planned]
     repeated = len({path.resolve() for path in xlsx_paths}) < len(xlsx_paths)
     with excel_session(cache=repeated, enabled=repeated):
-        for xlsx_path in xlsx_paths:
-            xlsx_path = pathlib.Path(xlsx_path)
-            out_path = output_dir / f"{xlsx_path.stem}_分析报告.html"
+        for xlsx_path, out_path in planned:
             results.append(generate_report(xlsx_path, out_path=out_path))
     return results
 
@@ -1101,9 +1118,14 @@ class ReportApp:
         success = []
         errors = []
         output_dir = pathlib.Path(self.output_dir.get())
-        for path in self.files:
+        try:
+            planned = plan_batch_outputs(self.files, output_dir)
+        except ValueError as exc:
+            self.root.after(0, self.append_log, str(exc))
+            self.root.after(0, self._finish_batch, [], [(None, exc)])
+            return
+        for path, out_path in planned:
             try:
-                out_path = output_dir / f"{path.stem}_分析报告.html"
                 generate_report(path, out_path=out_path)
                 success.append(out_path)
                 self.root.after(0, self.append_log, f"完成：{path.name} -> {out_path.name}")
