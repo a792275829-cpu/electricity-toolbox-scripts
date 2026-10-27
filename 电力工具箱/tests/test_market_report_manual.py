@@ -238,7 +238,8 @@ class ManualUiTests(unittest.TestCase):
         editor.refresh()
         self.assertEqual(editor.deltas["realtime"]["price"].get(), "-50")
         editor.save()
-        self.assertIn("2/36", self.page.manual_status.get())
+        self.assertEqual(json.loads(self.page.manual_market.get())["realtime"]["price"],
+                         {"value": -50.0, "comparison": 0.0})
         self.page.open_market_editor()
         self.page.report_date.set("2026-10-16")
         self.assertFalse(self.page.market_editor.winfo_exists())

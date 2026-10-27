@@ -30,7 +30,6 @@ class MarketReportPage(ToolPage):
         self.dongguan_operation = tk.StringVar(master=self)
         self.realtime_maintenance = tk.StringVar(master=self)
         self.manual_market = tk.StringVar(master=self, value="")
-        self.manual_status = tk.StringVar(master=self, value="未填写；网站数据优先")
         self.market_editor = None
         self._manual_date = self.report_date.get()
         self.report_date.trace_add("write", self._clear_manual_on_date_change)
@@ -56,22 +55,13 @@ class MarketReportPage(ToolPage):
         ttk.Label(form, text="实时检修容量（可选，万千瓦）").grid(row=5, column=0, sticky="w", pady=5)
         ttk.Entry(form, textvariable=self.realtime_maintenance, width=18).grid(row=5, column=1, sticky="w", pady=5)
 
-        market_form = ttk.LabelFrame(self.content, text="市场情况补录（可选）", padding=14)
-        market_form.grid(row=1, column=0, sticky="ew", pady=(12, 0))
-        market_form.columnconfigure(1, weight=1)
-        self.manual_button = ttk.Button(market_form, text="填写日前及实时市场", command=self.open_market_editor)
-        self.manual_button.grid(row=0, column=0, sticky="w", padx=(0, 12))
-        ttk.Label(market_form, textvariable=self.manual_status, style="Muted.TLabel").grid(row=0, column=1, sticky="w")
-        ttk.Label(market_form, text="日前、实时各 9 项的当前值与对比值，共 36 格；自动计算增减。", style="Muted.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-
-        ttk.Label(self.content, text="输出：手机预览版 PDF、打印版 PDF。登录使用工具箱现有配置。", style="Muted.TLabel").grid(
-            row=2, column=0, sticky="w", pady=(10, 0)
-        )
         self.run_button = ttk.Button(self.actions, text="生成日报", command=self.start_report)
         self.run_button.pack(side="left")
         ttk.Button(self.actions, text="打开输出目录", command=lambda: open_directory(paths.market_report_output_dir)).pack(
             side="left", padx=(8, 0)
         )
+        self.manual_button = ttk.Button(self.actions, text="手动填写数据", command=self.open_market_editor)
+        self.manual_button.pack(side="left", padx=(8, 0))
         self.register_busy_widgets(self.run_button, self.manual_button, *buttons)
 
     def _clear_manual_on_date_change(self, *_):
@@ -79,14 +69,11 @@ class MarketReportPage(ToolPage):
             return
         self._manual_date = self.report_date.get()
         self.manual_market.set("")
-        self.manual_status.set("报告日期已变更，补录已清空")
         if self.market_editor is not None and self.market_editor.winfo_exists():
             self.market_editor.close()
 
     def save_manual_market(self, data):
         self.manual_market.set(json.dumps(data, ensure_ascii=False) if data else "")
-        count = sum(len(pair) for period in ("day_ahead", "realtime") for pair in data.get(period, {}).values())
-        self.manual_status.set(f"已填 {count}/36 格；网站有效值优先" if count else "未填写；网站数据优先")
 
     def open_market_editor(self):
         try:
