@@ -6,7 +6,6 @@ import json
 import math
 import re
 import sys
-import time
 import uuid
 import zipfile
 from dataclasses import dataclass, replace
@@ -25,7 +24,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = SCRIPT_DIR.parent
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
-from toolbox_auth_loader import load_login_module
+from toolbox_auth_loader import load_login_module, standalone_login
 from toolbox_dates import parse_date_input
 from toolbox_credentials import apply_credentials
 from toolbox_excel_read import read_cell_snapshots
@@ -682,30 +681,13 @@ def update_workbook(
 
 
 def interactive_login(config: Config | None = None) -> None:
-    config = replace(config or load_config(), headless=False)
-    auth = load_auth_module()
-    with auth.AuthStateLock():
-        with sync_playwright() as playwright:
-            context = auth.launch_context(playwright, headless=False)
-            try:
-                if config.username and config.password and auth.try_auto_login(
-                    context, config.username, config.password
-                ):
-                    log("自动登录成功，交易系统信息更新模块的独立登录态已保存。")
-                    return
-                page = context.new_page()
-                page.goto(APP_URL, wait_until="domcontentloaded", timeout=60_000)
-                log("请在打开的浏览器中完成登录；最长等待5分钟。")
-                deadline = time.monotonic() + 5 * 60
-                while time.monotonic() < deadline:
-                    if auth.is_logged_in(context):
-                        auth.save_auth_state(context)
-                        log("登录成功，独立登录态已保存。")
-                        return
-                    time.sleep(2)
-                raise RuntimeError("等待登录超时，请完成浏览器中的登录后重新运行任务。")
-            finally:
-                context.close()
+    standalone_login(
+        load_auth_module(),
+        config or load_config(),
+        app_url=APP_URL,
+        log=log,
+        label="交易系统信息更新模块的独立",
+    )
 
 
 def main() -> int:

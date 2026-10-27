@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -19,7 +18,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = SCRIPT_DIR.parent
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
-from toolbox_auth_loader import load_login_module
+from toolbox_auth_loader import load_login_module, standalone_login
 from toolbox_credentials import apply_credentials
 from toolbox_dates import normalize_date_input
 
@@ -385,27 +384,7 @@ def generate_screenshot(run_date: str, config: Config | None = None) -> Path:
 
 
 def interactive_login(config: Config) -> None:
-    auth = load_auth_module()
-    with auth.AuthStateLock():
-        with sync_playwright() as playwright:
-            context = auth.launch_context(playwright, headless=False)
-            try:
-                if config.username and config.password and auth.try_auto_login(context, config.username, config.password):
-                    log("自动登录成功，独立登录态已保存。")
-                    return
-                page = context.new_page()
-                page.goto(APP_URL, wait_until="domcontentloaded", timeout=60000)
-                log("请在打开的浏览器中完成登录；工具会自动检测并保存登录态（最长等待5分钟）。")
-                deadline = time.time() + 5 * 60
-                while time.time() < deadline:
-                    if auth.is_logged_in(context):
-                        auth.save_auth_state(context)
-                        log("登录成功，独立登录态已保存。")
-                        return
-                    time.sleep(2)
-                raise RuntimeError("等待登录超时，请完成浏览器中的登录后重新运行任务。")
-            finally:
-                context.close()
+    standalone_login(load_auth_module(), config, app_url=APP_URL, log=log)
 
 
 def main() -> int:

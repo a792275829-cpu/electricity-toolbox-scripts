@@ -35,6 +35,47 @@ class LoginFlowTests(unittest.TestCase):
             module.interactive_login(context, module.Config())
         save.assert_called_once_with(context)
 
+    def _standalone_auth(self, *, auto_login: bool):
+        context = mock.Mock()
+        auth = SimpleNamespace(
+            AuthStateLock=mock.MagicMock(),
+            launch_context=mock.Mock(return_value=context),
+            try_auto_login=mock.Mock(return_value=auto_login),
+            is_logged_in=mock.Mock(return_value=True),
+            save_auth_state=mock.Mock(),
+        )
+        return auth, context
+
+    def test_standalone_login_prefers_saved_credentials(self):
+        import toolbox_auth_loader
+        auth, context = self._standalone_auth(auto_login=True)
+        log = mock.Mock()
+        with mock.patch("playwright.sync_api.sync_playwright"):
+            toolbox_auth_loader.standalone_login(
+                auth, SimpleNamespace(username="user", password="secret"),
+                app_url="https://example.test", log=log)
+        auth.try_auto_login.assert_called_once_with(context, "user", "secret")
+        auth.save_auth_state.assert_called_once_with(context)
+        context.new_page.assert_not_called()
+        context.close.assert_called_once_with()
+        log.assert_called_once_with("自动登录成功，独立登录态已保存。")
+
+    def test_standalone_login_falls_back_to_manual_login(self):
+        import toolbox_auth_loader
+        auth, context = self._standalone_auth(auto_login=False)
+        page = mock.Mock()
+        context.new_page.return_value = page
+        log = mock.Mock()
+        with mock.patch("playwright.sync_api.sync_playwright"):
+            toolbox_auth_loader.standalone_login(
+                auth, SimpleNamespace(username="", password=""),
+                app_url="https://example.test", log=log, label="现货价格模块独立")
+        page.goto.assert_called_once_with("https://example.test", wait_until="domcontentloaded", timeout=60_000)
+        auth.save_auth_state.assert_called_once_with(context)
+        page.close.assert_called_once_with()
+        context.close.assert_called_once_with()
+        log.assert_called_with("登录成功，现货价格模块独立登录态已保存。")
+
 class AccountPanelTests(unittest.TestCase):
     def setUp(self):
         self.root = tk.Tk()

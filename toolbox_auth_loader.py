@@ -24,6 +24,47 @@ def wait_for_login(is_ready: Callable[[], bool], *, timeout_seconds: float = 300
         time.sleep(2)
 
 
+def standalone_login(
+    auth: ModuleType,
+    config: object,
+    *,
+    app_url: str,
+    log: Callable[[str], None],
+    label: str = "独立",
+    timeout_seconds: float = 300,
+    page_timeout_ms: float = 60_000,
+) -> None:
+    """Headed login for standalone CLI tools; one implementation for every tool.
+
+    ``auth`` is the module returned by :func:`load_login_module`, so each tool keeps
+    its own state file, lock and browser profile while sharing this flow.
+    """
+    from playwright.sync_api import sync_playwright
+
+    username = str(getattr(config, "username", "") or "")
+    password = str(getattr(config, "password", "") or "")
+    with auth.AuthStateLock():
+        with sync_playwright() as playwright:
+            context = auth.launch_context(playwright, headless=False)
+            try:
+                if username and password and auth.try_auto_login(context, username, password):
+                    auth.save_auth_state(context)
+                    log(f"自动登录成功，{label}登录态已保存。")
+                    return
+                page = context.new_page()
+                try:
+                    # Matching the longest navigation wait used by the original tools.
+                    page.goto(app_url, wait_until="domcontentloaded", timeout=page_timeout_ms)
+                    log(f"请在打开的浏览器中完成登录；工具会自动检测并保存登录态（最长等待{int(timeout_seconds // 60)}分钟）。")
+                    wait_for_login(lambda: auth.is_logged_in(context), timeout_seconds=timeout_seconds)
+                    auth.save_auth_state(context)
+                finally:
+                    page.close()
+                log(f"登录成功，{label}登录态已保存。")
+            finally:
+                context.close()
+
+
 def load_login_module(
     workspace: Path,
     *,
