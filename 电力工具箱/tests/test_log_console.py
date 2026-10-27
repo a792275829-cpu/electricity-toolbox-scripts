@@ -12,6 +12,41 @@ from toolbox_log_console import LogConsole, _LogBuffer, explain_error, redact
 
 
 class DiagnosisTests(unittest.TestCase):
+    def test_expired_login_explicitly_requires_login(self):
+        from toolbox.tasks.errors import classify_error, ErrorCategory
+
+        result = classify_error(RuntimeError("登录状态已过期"))
+        self.assertEqual(result.summary, "需要重新登录")
+        self.assertEqual(result.category, ErrorCategory.AUTHENTICATION)
+        self.assertIn("在本模块重新登录", result.advice)
+
+    def test_reported_proxy_failure_is_not_classified_as_expired_login(self):
+        from toolbox.tasks.errors import classify_error, ErrorCategory
+        from toolbox.tasks.process import ProcessExecutionError
+
+        output = (
+            "正在使用已配置的清能网站账号密码自动登录...\n"
+            "接口登录失败：APIRequestContext.get: connect ECONNREFUSED 127.0.0.1:7897\n"
+            "改用页面登录...\n"
+            "失败：Page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://example.test/#/login\n"
+            "subprocess.CalledProcessError: Command returned non-zero exit status 1.\n"
+        )
+        for error in (ProcessExecutionError(1), RuntimeError("命令退出码 1"), RuntimeError(output)):
+            with self.subTest(error=type(error).__name__):
+                result = classify_error(error, output)
+                self.assertEqual(result.category, ErrorCategory.NETWORK)
+                self.assertEqual(result.summary, "代理或网络连接失败")
+                self.assertIn("代理软件是否运行", result.advice)
+        self.assertEqual(explain_error(output)[0], "代理或网络连接失败")
+
+    def test_recovered_proxy_failure_does_not_hide_final_authentication_failure(self):
+        from toolbox.tasks.errors import classify_error, ErrorCategory
+
+        error = RuntimeError("首次请求：ECONNREFUSED 127.0.0.1:7897\n重试后：HTTP status 401 Unauthorized")
+        result = classify_error(error)
+        self.assertEqual(result.summary, "需要重新登录")
+        self.assertEqual(result.category, ErrorCategory.AUTHENTICATION)
+
     def test_log_buffer_pages_and_search_cross_chunk_boundaries(self):
         buffer = _LogBuffer()
         chunks = ["甲🙂AB", "cd", "EF尾", "第二段"]
@@ -308,3 +343,32 @@ class LogConsoleTests(unittest.TestCase):
             self.assertIn("TimeoutError", page.log_console.contents())
             popup.assert_called_once()
         page.destroy()
+
+    def test_login_and_proxy_failures_display_distinct_actionable_reasons(self):
+        from toolbox.runtime import TaskRegistry
+        from toolbox.widgets import ToolPage
+
+        cases = (
+            ("登录状态已过期", "需要重新登录"),
+            ("接口登录失败：connect ECONNREFUSED 127.0.0.1:7897\n失败：Page.goto: net::ERR_PROXY_CONNECTION_FAILED", "代理或网络连接失败"),
+        )
+        for output, expected in cases:
+            with self.subTest(reason=expected):
+                page = ToolPage(self.root, registry=TaskRegistry(), title="风力预测截图")
+                try:
+                    with patch("toolbox.widgets.messagebox.showerror") as popup:
+                        page.run_process(
+                            [sys.executable, "-c", f"import sys; print({output!r}, flush=True); sys.exit(1)"],
+                            cwd=Path.cwd(), status="正在生成截图",
+                        )
+                        deadline = time.monotonic() + 5
+                        while page.busy and time.monotonic() < deadline:
+                            self.root.update()
+                            time.sleep(.01)
+                        self.assertFalse(page.busy)
+                        self.assertIn(expected, page.log_console.summary.get())
+                        self.assertIn("命令退出码 1", page.log_console.contents())
+                        popup.assert_called_once()
+                        self.assertIn(expected, popup.call_args.args[1])
+                finally:
+                    page.destroy()

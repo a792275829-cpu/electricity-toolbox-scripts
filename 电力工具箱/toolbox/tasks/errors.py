@@ -36,7 +36,13 @@ def classify_error(exc: BaseException, output: str = "") -> UserFacingError:
         return UserFacingError(ErrorCategory.INPUT, "找不到输入文件或程序文件", "请重新选择文件，并确认项目目录完整。", exc)
     if isinstance(exc, PermissionError):
         return UserFacingError(ErrorCategory.PERMISSION, "文件无权访问或正被占用", "请关闭占用该文件的 Excel/WPS，并检查目录访问权限后重试。", exc)
-    diagnosis = explain_error(exc.__class__.__name__ + ": " + str(exc))
+    diagnosis = None
+    # Remote task errors may contain the complete multiline subprocess output.
+    # Diagnose its final concrete cause, just as for separately captured logs.
+    for line in reversed((exc.__class__.__name__ + ": " + str(exc)).splitlines()):
+        diagnosis = explain_error(line)
+        if diagnosis:
+            break
     if diagnosis is None:
         # Prefer the final concrete exception over earlier recovered failures.
         for line in reversed(output.splitlines()):
@@ -48,6 +54,7 @@ def classify_error(exc: BaseException, output: str = "") -> UserFacingError:
         category = ErrorCategory.UNKNOWN
         for word, candidate in (("依赖", ErrorCategory.DEPENDENCY), ("登录", ErrorCategory.AUTHENTICATION),
                                 ("超时", ErrorCategory.NETWORK), ("网络", ErrorCategory.NETWORK),
+                                ("代理", ErrorCategory.NETWORK),
                                 ("权限", ErrorCategory.PERMISSION), ("文件", ErrorCategory.INPUT)):
             if word in summary:
                 category = candidate
