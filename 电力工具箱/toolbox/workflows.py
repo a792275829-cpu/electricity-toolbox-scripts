@@ -255,7 +255,7 @@ def execute(paths, tool_id, action, p):
 
 
 def execute_wps(paths, action, p, log):
-    module = load_module("toolbox_wps_writer", paths.wps_writer)
+    import toolbox_wps_service as module
     operation = json.loads(p.get("operation", "{}"))
     if action == "inspect":
         method = operation.get("method")

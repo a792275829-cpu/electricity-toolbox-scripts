@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 import time
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
@@ -24,8 +25,28 @@ SUITES = {
 }
 
 
+def save_report(report, results):
+    if report is None:
+        return
+    report = Path(report)
+    report.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=report.parent,
+                                         prefix=f'.{report.name}-', delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(results, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, report)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def run(suites, *, timeout=180, native=False, report=None, pattern="test_*.py"):
     results = []
+    save_report(report, results)
     for suite in suites:
         folder = ROOT / SUITES[suite]
         modules = sorted(folder.glob(pattern))
@@ -38,6 +59,8 @@ def run(suites, *, timeout=180, native=False, report=None, pattern="test_*.py"):
             if native:
                 env.update(TOOLBOX_XLSX_BACKEND="rust", TOOLBOX_COMPUTE_BACKEND="rust",
                            TOOLBOX_500KV_BACKEND="rust")
+            data_directory = tempfile.TemporaryDirectory(prefix="toolbox-test-data-")
+            env.update(TOOLBOX_DATA_ROOT=data_directory.name, TOOLBOX_CODE_ROOT=str(ROOT))
             started = time.monotonic()
             process = subprocess.Popen(
                     [sys.executable, "-m", "unittest", "discover", "-s", str(folder),
@@ -57,6 +80,15 @@ def run(suites, *, timeout=180, native=False, report=None, pattern="test_*.py"):
                 output = stdout + stderr
                 output += f"\nModule timed out after {timeout}s"
                 code = 124
+            except BaseException:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.communicate()
+                raise
+            finally:
+                data_directory.cleanup()
             counts = re.findall(r"^Ran (\d+) tests? in", output, re.MULTILINE)
             count = int(counts[-1]) if counts else 0
             # unittest returning 0 with no discovered cases must never green-light CI.
@@ -67,14 +99,11 @@ def run(suites, *, timeout=180, native=False, report=None, pattern="test_*.py"):
                           tests=count,
                           seconds=round(time.monotonic() - started, 3), output=output)
             results.append(result)
+            save_report(report, results)
             print(f"{'PASS' if code == 0 else 'FAIL'} {suite}/{module.name} "
                   f"({result['tests']} tests, {result['seconds']}s)", flush=True)
             if code:
                 print(output, flush=True)
-    if report:
-        report = Path(report)
-        report.parent.mkdir(parents=True, exist_ok=True)
-        report.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"{sum(r['tests'] for r in results)} tests in {len(results)} modules; "
           f"{sum(r['returncode'] != 0 for r in results)} failed modules", flush=True)
     return int(any(r["returncode"] for r in results))

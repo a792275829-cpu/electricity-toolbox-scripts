@@ -19,6 +19,7 @@ def result_html_name(source: Path) -> str:
 
 
 class SectionAnalysisPage(ToolPage):
+    tool_id = 'section-analysis'
     def __init__(
         self,
         parent: tk.Misc,
@@ -236,7 +237,7 @@ class SectionAnalysisPage(ToolPage):
 
         self.run_process(
             command,
-            cwd=self.paths.section_analysis_dir,
+            action='run', cwd=self.paths.section_analysis_dir,
             status="正在生成500kV断面分析...",
             on_success=on_success,
         )

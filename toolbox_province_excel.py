@@ -11,6 +11,7 @@ import tempfile
 
 from toolbox_workbook_commit import (assert_workbook_unchanged, commit_workbooks,
                                      workbook_commit_lock, workbook_fingerprint)
+from toolbox_atomic_output import publish_new_file
 
 
 def number_or_none(value: Any) -> float | None:
@@ -127,9 +128,8 @@ def write_province_workbook(source, target, run_date, startup_max, capacity_aver
                              create_backup=False)
         else:
             with workbook_commit_lock((target,)):
-                # link() publishes without overwriting a file created while we prepared.
                 try:
-                    os.link(temporary, target)
+                    publish_new_file(temporary, target)
                 except FileExistsError as exc:
                     raise RuntimeError(f"准备期间目标工作簿已出现，停止覆盖：{target}") from exc
         return target

@@ -14,6 +14,7 @@ from .market_editor import MarketEditor, market_module
 
 
 class MarketReportPage(ToolPage):
+    tool_id = 'market-report'
     def __init__(self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry) -> None:
         super().__init__(
             parent,
@@ -117,7 +118,7 @@ class MarketReportPage(ToolPage):
             return
         self.clear_log()
         self.run_process(
-            command, cwd=self.paths.market_report_dir, status="正在生成电力市场日报...",
+            command, action='run', cwd=self.paths.market_report_dir, status="正在生成电力市场日报...",
             on_success=lambda _code: messagebox.showinfo(
                 "生成完成", f"两份 PDF 已保存到：\n{self.paths.market_report_output_dir}", parent=self
             ),

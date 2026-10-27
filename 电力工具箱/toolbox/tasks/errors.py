@@ -21,12 +21,29 @@ class ErrorCategory(str, Enum):
 class RemoteTaskError(RuntimeError):
     """Keep the original diagnosis while avoiding replay of streamed details."""
 
-    def __init__(self, message: str, streamed_trace: str = ""):
+    def __init__(self, message: str, streamed_trace: str = "", *, details=None):
         super().__init__(message)
+        self.error_detail = dict(details or {})
         prefix, marker, trace = message.partition("\nTraceback (most recent call last)")
         original_trace = (marker.lstrip("\n") + trace).strip()
         self.log_details = (prefix if marker and original_trace in streamed_trace
                             else message)
+
+
+def error_detail(exc, *, tool_id="", action="", stage="execute"):
+    """Transport stable metadata alongside the unchanged human-readable error."""
+    existing = getattr(exc, "error_detail", None)
+    if existing:
+        return dict(existing)
+    code = next((value for kind, value in (
+        (TaskCancelled, "cancelled"), (PermissionError, "permission"),
+        (FileNotFoundError, "input"), (ImportError, "dependency"),
+        (TimeoutError, "network"), (ConnectionError, "network"),
+        (ValueError, "input"), (ProcessExecutionError, "external_process"))
+        if isinstance(exc, kind)), "unknown")
+    return dict(code=code, tool_id=tool_id, action=action, stage=stage,
+                exception_type=type(exc).__name__,
+                exit_code=getattr(exc, "returncode", None))
 
 
 @dataclass(frozen=True, slots=True)

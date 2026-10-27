@@ -8,6 +8,7 @@ from unittest import mock
 from openpyxl import load_workbook
 
 import export_online_energy as report_export
+from toolbox_storage import data_path
 
 
 class ReportExportReuseTests(unittest.TestCase):
@@ -17,8 +18,8 @@ class ReportExportReuseTests(unittest.TestCase):
                 config = report_export.load_config()
         self.assertEqual(report_export.OUTPUT_DIR, config.output_dir)
         self.assertEqual(report_export.AUTH_LOCK_PATH, report_export.AuthStateLock().path)
-        self.assertEqual(report_export.AUTH_STATE_PATH.parent, report_export.SCRIPT_DIR)
-        self.assertEqual(report_export.PROFILE_DIR.parent, report_export.SCRIPT_DIR)
+        self.assertEqual(report_export.AUTH_STATE_PATH.parent, data_path(report_export.SCRIPT_DIR))
+        self.assertEqual(report_export.PROFILE_DIR.parent, data_path(report_export.SCRIPT_DIR))
 
     def test_summary_export_values_survive_reopen(self) -> None:
         rows = [

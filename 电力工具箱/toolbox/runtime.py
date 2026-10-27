@@ -265,6 +265,13 @@ def _restore_local_imports(
         current = sys.modules.get(module_name, _MISSING_MODULE)
         if previous is current:
             continue
+        shared_file = Path(__file__).resolve().parents[2] / f"{module_name}.py"
+        if (previous is _MISSING_MODULE and module_name.startswith("toolbox_")
+                and getattr(current, "__file__", None)
+                and Path(current.__file__).resolve() == shared_file):
+            # Ordinary workspace libraries keep one module/class/lock identity.
+            # Standalone tools and their local helper names remain isolated.
+            continue
         if not (
             _module_is_local(previous, roots)
             or _module_is_local(current, roots)

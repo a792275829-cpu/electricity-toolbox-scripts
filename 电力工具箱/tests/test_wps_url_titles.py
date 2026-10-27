@@ -1,4 +1,5 @@
 from __future__ import annotations
+import importlib
 
 import copy
 import json
@@ -114,7 +115,7 @@ class WpsTitleDialogTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             config_path = Path(directory) / 'config.json'
             with (mock.patch.object(self.module, 'load_config', return_value={}),
-                  mock.patch.object(self.module, 'CONFIG_PATH', config_path)):
+                  mock.patch.object(importlib.import_module('toolbox_wps_service'), 'CONFIG_PATH', config_path)):
                 frame = self.module.WpsWriterFrame(self.root)
                 try:
                     frame.remember_document_title(FIRST, TITLE)

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import importlib
 
 import json
 import threading
@@ -80,7 +81,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_truncated_xlsx_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_service')
         with TemporaryDirectory() as temp_dir:
             workbook_path = Path(temp_dir) / "summary.xlsx"
             workbook_path.write_bytes(b"PK\x03\x04partial workbook data")
@@ -92,7 +93,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_blank_tab_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
         blank_page = mock.Mock()
         blank_page.url = "about:blank"
         context = mock.Mock()
@@ -115,7 +116,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_background_page_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
         session = mock.Mock()
         browser = mock.Mock()
         browser.contexts = []
@@ -148,7 +149,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_ready_probe_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_service')
         page = mock.Mock()
         page.evaluate.return_value = {
             "ready": True,
@@ -170,7 +171,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_chrome_command_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
         chrome_path = Path(
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         )
@@ -207,7 +208,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_chrome_preference_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
         with mock.patch.object(module.Path, "is_file", return_value=True):
             selected = module.find_macos_chrome()
 
@@ -223,7 +224,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_chrome_pid_recovery_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
         chrome_command = (
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
             "--remote-debugging-port=9222 "
@@ -259,7 +260,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_chrome_state_cleanup_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
 
         def fake_kill(_pid, sig):
             if sig == module.signal.SIGTERM:
@@ -287,7 +288,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_chrome_stale_pid_cleanup_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
 
         with TemporaryDirectory() as temp_dir:
             pid_path = Path(temp_dir) / "wps-chrome.pid"
@@ -313,7 +314,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_chrome_reuse_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
         websocket_url = "ws://127.0.0.1:9222/devtools/browser/test"
 
         with (
@@ -342,7 +343,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_chrome_recovery_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
         websocket_url = "ws://127.0.0.1:9222/devtools/browser/recovered"
         process = mock.Mock(pid=456)
         process.poll.return_value = None
@@ -379,7 +380,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_empty_cdp_page_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
         opener = mock.MagicMock()
         response = opener.open.return_value.__enter__.return_value
         response.read.return_value = b'{"id":"page-1","type":"page"}'
@@ -415,7 +416,7 @@ class WpsDialogAsyncTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        module = load_module("wps_managed_context_test", paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_browser')
         playwright = mock.Mock()
         browser = mock.Mock()
         context = mock.Mock()
@@ -570,7 +571,7 @@ class WpsConnectionTimeoutTests(unittest.TestCase):
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
-        self.module = load_module("wps_connection_timeout_test", paths.wps_writer)
+        self.module = importlib.import_module('toolbox_wps_browser')
         self.playwright = mock.Mock()
         self.browser = mock.Mock()
         self.context = mock.Mock()

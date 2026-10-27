@@ -19,6 +19,7 @@ from .widgets import ToolPage
 
 
 class DailyPdfParserPage(ToolPage):
+    tool_id = 'daily-pdf-parser'
     def __init__(
         self,
         parent: tk.Misc,
@@ -162,7 +163,7 @@ class DailyPdfParserPage(ToolPage):
 
         self.run_process(
             self.build_command(source, output),
-            cwd=self.paths.daily_pdf_parser_dir,
+            action='run', cwd=self.paths.daily_pdf_parser_dir,
             status={"both": "正在解析运行日报并上传 PDF、Excel...", "parse": "正在解析运行日报并生成 Excel...", "upload": "正在上传源 PDF 和报价容量 Excel..."}[mode],
             on_success=on_success,
         )

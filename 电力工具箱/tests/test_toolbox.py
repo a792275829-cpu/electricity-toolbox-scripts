@@ -1,4 +1,5 @@
 from __future__ import annotations
+import importlib
 
 import gc
 import subprocess
@@ -143,6 +144,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(module.playwright_proxy(), {"server": "http://127.0.0.1:7890"})
 
     def test_login_state_paths_are_separate_for_parallel_tools(self) -> None:
+        from toolbox_storage import data_path
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
@@ -166,26 +168,26 @@ class RuntimeTests(unittest.TestCase):
             ("wind", paths.wind_forecast_dir),
         ):
             auth = loaded_auth[name]
-            self.assertEqual(directory / "auth_state.json", auth.AUTH_STATE_PATH)
-            self.assertEqual(directory / "auth_state.json.lock", auth.AUTH_LOCK_PATH)
-            self.assertEqual(directory / ".browser-profile", auth.PROFILE_DIR)
-            self.assertEqual(directory / "config.json", auth.CONFIG_PATH)
+            self.assertEqual(data_path(directory / "auth_state.json"), auth.AUTH_STATE_PATH)
+            self.assertEqual(data_path(directory / "auth_state.json.lock"), auth.AUTH_LOCK_PATH)
+            self.assertEqual(data_path(directory / ".browser-profile"), auth.PROFILE_DIR)
+            self.assertEqual(data_path(directory / "config.json"), auth.CONFIG_PATH)
 
-        self.assertEqual(online.AUTH_STATE_PATH, paths.online_energy_dir / "auth_state.json")
-        self.assertEqual(online.PROFILE_DIR, paths.online_energy_dir / ".browser-profile")
-        self.assertEqual(market.online_export_module.AUTH_STATE_PATH, paths.market_table_update_dir / "auth_state.json")
-        self.assertEqual(market.online_export_module.PROFILE_DIR, paths.market_table_update_dir / ".browser-profile")
-        self.assertEqual(group.AUTH_STATE_PATH, paths.group_upload_dir / "auth_state.json")
-        self.assertEqual(group.PROFILE_DIR, paths.group_upload_dir / ".browser-profile")
-        self.assertEqual(spot.AUTH_STATE_PATH, paths.spot_price_update_dir / "auth_state.json")
-        self.assertEqual(spot.PROFILE_DIR, paths.spot_price_update_dir / ".browser-profile")
+        self.assertEqual(online.AUTH_STATE_PATH, data_path(paths.online_energy_dir / "auth_state.json"))
+        self.assertEqual(online.PROFILE_DIR, data_path(paths.online_energy_dir / ".browser-profile"))
+        self.assertEqual(market.online_export_module.AUTH_STATE_PATH, data_path(paths.market_table_update_dir / "auth_state.json"))
+        self.assertEqual(market.online_export_module.PROFILE_DIR, data_path(paths.market_table_update_dir / ".browser-profile"))
+        self.assertEqual(group.AUTH_STATE_PATH, data_path(paths.group_upload_dir / "auth_state.json"))
+        self.assertEqual(group.PROFILE_DIR, data_path(paths.group_upload_dir / ".browser-profile"))
+        self.assertEqual(spot.AUTH_STATE_PATH, data_path(paths.spot_price_update_dir / "auth_state.json"))
+        self.assertEqual(spot.PROFILE_DIR, data_path(paths.spot_price_update_dir / ".browser-profile"))
         self.assertEqual(
             transaction.AUTH_STATE_PATH,
-            paths.transaction_info_update_dir / "auth_state.json",
+            data_path(paths.transaction_info_update_dir / "auth_state.json"),
         )
         self.assertEqual(
             transaction.PROFILE_DIR,
-            paths.transaction_info_update_dir / ".browser-profile",
+            data_path(paths.transaction_info_update_dir / ".browser-profile"),
         )
 
         auth_paths = {
@@ -1201,7 +1203,7 @@ class PageAdapterTests(unittest.TestCase):
     def test_wps_writer_imports_exported_config_payload(self) -> None:
         from toolbox.runtime import load_module
 
-        module = load_module("toolbox_wps_writer_import_test", self.paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_service')
         payload = {
             "schema": "wps_excel_to_kdocs_config_export",
             "version": 1,
@@ -1240,7 +1242,7 @@ class PageAdapterTests(unittest.TestCase):
     def test_wps_writer_exports_runtime_config_with_schema(self) -> None:
         from toolbox.runtime import load_module
 
-        module = load_module("toolbox_wps_writer_export_test", self.paths.wps_writer)
+        module = importlib.import_module('toolbox_wps_service')
         runtime_config = {
             "recent_urls": ["https://www.kdocs.cn/l/target"],
             "browser_mode": "persistent",

@@ -13,6 +13,7 @@ from .widgets import ToolPage
 
 
 class WindForecastPage(ToolPage):
+    tool_id = 'wind-forecast'
     def __init__(self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry) -> None:
         super().__init__(
             parent,
@@ -74,7 +75,7 @@ class WindForecastPage(ToolPage):
         self._no_data_reason = None
         self.run_process(
             self.build_generate_command(run_date),
-            cwd=self.paths.wind_forecast_dir,
+            action='run', cwd=self.paths.wind_forecast_dir,
             status="正在抓取风力预测并生成截图...",
             on_success=self._generation_finished,
         )
@@ -82,6 +83,6 @@ class WindForecastPage(ToolPage):
     def start_login(self) -> None:
         self.run_process(
             [python_executable(), str(self.paths.wind_forecast), "--login"],
-            cwd=self.paths.wind_forecast_dir,
+            action='login', cwd=self.paths.wind_forecast_dir,
             status="正在打开风力预测登录窗口...",
         )

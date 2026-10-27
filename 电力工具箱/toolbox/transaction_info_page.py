@@ -22,6 +22,7 @@ DEFAULT_WORKBOOK = (
 
 
 class TransactionInfoUpdatePage(ToolPage):
+    tool_id = 'transaction-info'
     def __init__(
         self,
         parent: tk.Misc,
@@ -161,7 +162,7 @@ class TransactionInfoUpdatePage(ToolPage):
                 start_date=start_date,
                 create_backup=self.create_backup.get(),
             ),
-            cwd=self.paths.transaction_info_update_dir,
+            action='run', cwd=self.paths.transaction_info_update_dir,
             status="正在抓取并更新交易系统信息收集表...",
             cancellable=False,
             on_success=lambda _code: messagebox.showinfo(
@@ -177,7 +178,7 @@ class TransactionInfoUpdatePage(ToolPage):
                 "--login",
                 "--headed",
             ],
-            cwd=self.paths.transaction_info_update_dir,
+            action='login', cwd=self.paths.transaction_info_update_dir,
             status="正在打开交易系统登录窗口...",
         )
 

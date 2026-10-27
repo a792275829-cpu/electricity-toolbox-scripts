@@ -174,11 +174,12 @@ class PowerBenefitTests(unittest.TestCase):
             self.assertFalse(list(Path(folder).glob(".*.xlsx")))
 
     def test_auth_profile_and_lock_are_independent(self):
+        from toolbox_storage import data_path
         m=self.module; auth=m.load_auth_module()
-        self.assertEqual(auth.AUTH_STATE_PATH,m.SCRIPT_DIR/"auth_state.json")
-        self.assertEqual(auth.AUTH_LOCK_PATH,m.SCRIPT_DIR/"auth_state.json.lock")
-        self.assertEqual(auth.PROFILE_DIR,m.SCRIPT_DIR/".browser-profile")
-        self.assertNotEqual(auth.AUTH_STATE_PATH,self.paths.online_energy_dir/"auth_state.json")
+        self.assertEqual(auth.AUTH_STATE_PATH,data_path(m.SCRIPT_DIR/"auth_state.json"))
+        self.assertEqual(auth.AUTH_LOCK_PATH,data_path(m.SCRIPT_DIR/"auth_state.json.lock"))
+        self.assertEqual(auth.PROFILE_DIR,data_path(m.SCRIPT_DIR/".browser-profile"))
+        self.assertNotEqual(auth.AUTH_STATE_PATH,data_path(self.paths.online_energy_dir/"auth_state.json"))
 
     def haifeng_template(self, folder):
         path = Path(folder) / "海风博弈收益统计-新.xlsx"

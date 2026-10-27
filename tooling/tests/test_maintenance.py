@@ -97,6 +97,7 @@ class MaintenanceTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT/'packaging/tauri'))
         from prepare_payload import runtime_source
         names = ('toolbox_market_contracts.py', 'toolbox_wps_values.py',
+                     'toolbox_atomic_output.py', 'toolbox_wps_browser.py', 'toolbox_wps_service.py', 'toolbox_wps_paths.py',
                      'toolbox_trade_report.py', 'toolbox_province_excel.py',
                      'toolbox_trade_batch.py', '500kV断面分析/src/map_html_view.py',
                      '南方分公司电力市场日报/gd_power_report/clearing_table_view.py')
@@ -115,6 +116,7 @@ class MaintenanceTests(unittest.TestCase):
                 "sys.path[:0]=['.', '电力工具箱', '500kV断面分析', '南方分公司电力市场日报']; "
                 "import toolbox_trade_batch, toolbox_market_contracts, toolbox_wps_values; "
                 "import toolbox_trade_report, toolbox_province_excel; "
+                "import toolbox_wps_browser, toolbox_wps_service; "
                 "from src.build_500kv_map_html import _render_html; "
                 "from gd_power_report.company_clearing_xlsx import _display_value; "
                 "assert _display_value(.125, '0.0%') == '12.5%'; "

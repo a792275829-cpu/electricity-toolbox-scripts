@@ -16,9 +16,11 @@ from .runtime import ToolPaths, TaskRegistry, python_executable, utf8_environmen
 from .service_catalog import desktop_catalog
 from .tasks import ProcessRunner, ProcessExecutionError, TaskEvent, TaskEventKind
 from .workflows import validate
+from .tasks.errors import RemoteTaskError, error_detail
 
 PROTOCOL_VERSION = 3
 RESULT_PREFIX = "TOOLBOX_RESULT="
+ERROR_PREFIX = "TOOLBOX_ERROR="
 
 
 class ToolboxService:
@@ -50,7 +52,8 @@ class ToolboxService:
     def snapshots(self):
         return [dict(id=s.task_id, tool_id=self._tasks.get(s.task_id, ""), name=s.name,
                      state=s.state.value, cancellable=s.cancellable, message=redact(s.message),
-                     result=s.result, error=redact(str(s.error)) if s.error else None)
+                     result=s.result, error=redact(str(s.error)) if s.error else None,
+                     error_detail=error_detail(s.error, tool_id=self._tasks.get(s.task_id, ""), stage="worker") if s.error else None)
                 for s in self.registry.snapshots()]
 
     def start(self, params):
@@ -88,10 +91,13 @@ class ToolboxService:
                 no_data = None
                 first_trace = []
                 trace_size = 0
+                failure_detail = None
                 def output(line):
-                    nonlocal result, no_data, trace_size
+                    nonlocal result, no_data, trace_size, failure_detail
                     if line.startswith(RESULT_PREFIX):
                         result = json.loads(line[len(RESULT_PREFIX):])
+                    elif line.startswith(ERROR_PREFIX):
+                        failure_detail = json.loads(line[len(ERROR_PREFIX):])
                     else:
                         safe_line = redact(line)
                         if (first_trace or "Traceback (most recent call last)" in line) and trace_size < 16000:
@@ -111,6 +117,9 @@ class ToolboxService:
                         result = dict(message=no_data, outputs=[])
                     return result
                 except ProcessExecutionError as exc:
+                    if failure_detail:
+                        failure_detail["exit_code"] = exc.returncode
+                        raise RemoteTaskError(f"{exc}\n{''.join(first_trace)}".rstrip(), details=failure_detail) from exc
                     if first_trace:
                         raise RuntimeError(f"{exc}\n{''.join(first_trace)}") from exc
                     raise

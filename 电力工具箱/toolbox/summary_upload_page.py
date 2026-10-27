@@ -29,6 +29,7 @@ def _resolve_default_input(results: queue.Queue, today: date, review_root: Path 
 
 
 class SummaryUploadPage(ToolPage):
+    tool_id = 'summary-upload'
     MODE_LABELS = {"summary": "仅汇总", "upload": "仅上传", "both": "汇总并上传"}
 
     def __init__(
@@ -183,7 +184,7 @@ class SummaryUploadPage(ToolPage):
             )
 
         self.run_in_thread(
-            worker, status="正在归类并预览上传文件...",
+            worker, action='preview', status="正在归类并预览上传文件...",
         )
 
     def start_selected(self) -> None:
@@ -256,7 +257,7 @@ class SummaryUploadPage(ToolPage):
             messagebox.showinfo("完成", f"{self.MODE_LABELS[mode]}已完成。{detail}", parent=self)
 
         self.run_in_thread(
-            worker, status={"summary": "正在汇总...", "upload": "正在上传...", "both": "正在汇总并上传..."}[mode],
+            worker, action='run', status={"summary": "正在汇总...", "upload": "正在上传...", "both": "正在汇总并上传..."}[mode],
             on_success=finished,
             cancellable=mode == "summary",
         )

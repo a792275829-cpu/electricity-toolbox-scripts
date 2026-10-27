@@ -10,6 +10,7 @@ import threading
 import time
 from pathlib import Path
 from uuid import uuid4
+from .page_contracts import PAGE_BINDINGS
 from .runtime import TaskRegistry
 from .tasks import TaskCancelled
 from .tasks.errors import RemoteTaskError
@@ -50,7 +51,7 @@ class BusinessClient:
             except queue.Empty:
                 raise RuntimeError("后台响应超时；写入或上传不会自动重试，请先核对结果。") from None
             if "error" in response:
-                raise RuntimeError(response["error"])
+                raise RemoteTaskError(response["error"], details=response.get("error_detail"))
             return response.get("result")
         finally:
             with self._lock:
@@ -109,63 +110,36 @@ class RemoteTaskRegistry(TaskRegistry):
             if snapshot["state"] == "failed":
                 with self._request_lock:
                     self._request_ids.pop(fingerprint, None)
-                raise RemoteTaskError(snapshot["error"] or "业务任务失败", "".join(first_trace))
+                raise RemoteTaskError(snapshot["error"] or "业务任务失败", "".join(first_trace), details=snapshot.get("error_detail"))
             time.sleep(0.15)
 
-    def prepare_page_worker(self, page, status, *, command=None, process=False):
-        name = page.__class__.__name__
-        tool_id = {
-            "OnlineEnergyPage": "online-energy", "WindForecastPage": "wind-forecast",
-            "SectionAnalysisPage": "section-analysis", "TradeAnalysisPage": "trade-analysis",
-            "MarketTableUpdatePage": "market-table", "TransactionInfoUpdatePage": "transaction-info",
-            "PowerBenefitUpdatePage": "power-benefit", "SpotPriceUpdatePage": "spot-price",
-            "DailyPdfParserPage": "daily-pdf-parser", "MarketReportPage": "market-report",
-            "ReportPage": "report", "GuangdongPricePage": "guangdong-price",
-            "GroupUploadPage": "group-upload", "SummaryUploadPage": "summary-upload",
-        }.get(name)
-        if tool_id is None:
-            raise ValueError(f"该页面尚未注册业务服务：{name}")
+    def prepare_page_worker(self, page, status, *, command=None, process=False, action="run"):
+        tool_id = getattr(page, "tool_id", None)
+        if tool_id not in PAGE_BINDINGS:
+            raise ValueError(f"该页面尚未注册业务服务：{tool_id}")
         get = lambda key: getattr(page, key).get()
         # Read every Tk variable here, before the worker thread is started.
-        fields = {
-            "online-energy": ("run_date",), "wind-forecast": ("run_date",),
-            "section-analysis": ("output_root", "topology_path", "threshold"),
-            "trade-analysis": ("output_dir",), "market-table": ("run_date", "workbook"),
-            "transaction-info": ("workbook", "start_date", "end_date", "create_backup"),
-            "power-benefit": ("start_date", "end_date", "create_backup"),
-            "spot-price": ("start_date", "end_date", "overwrite", "create_backup"),
-            "daily-pdf-parser": ("pdf_path", "output_path", "mode"),
-            "market-report": ("report_date", "day_report", "previous_report", "d2_report", "manual_market"),
-            "report": ("report_date", "online_workbook", "day_ahead_workbook", "daily_workbook", "template_report", "fetch_data", "generate_word"),
-            "guangdong-price": ("run_date", "master_workbook", "prediction_output_dir", "training_months"),
-            "group-upload": ("force",), "summary-upload": ("input_dir", "output_file", "mode"),
-        }[tool_id]
-        values = {key: get(key) for key in fields}
-        if tool_id in {"section-analysis", "trade-analysis"}:
-            values["files"] = [str(p) for p in page.files]
-        if tool_id == "group-upload":
-            values["files"] = [str(p) for p in page.selected_paths]
-        if tool_id == "spot-price":
-            for key, label in (("guihu", "归湖"), ("tuolian", "鮀莲"), ("haifeng", "海风")):
-                values[key + "_workbook"] = page.station_workbooks[label].get()
-                values[key + "_selected"] = page.selected_stations[label].get()
-        if tool_id == "power-benefit":
-            for index, key in enumerate(("guihu", "tuolian", "haifeng")):
-                values[key + "_workbook"] = page.workbooks[index].get()
-                values[key + "_selected"] = page.selected[index].get()
-        action = "run"
-        if command and "--login" in command:
-            action = "login"
-        elif tool_id == "guangdong-price":
-            action = "predict" if process else "update"
-            if action == "predict":
-                values["master_workbook"] = page.prediction_input.get()
-                values["prediction_output_dir"] = str(page.resolve_business_path(values["prediction_output_dir"]))
-            values["master_workbook"] = str(page.resolve_business_path(values["master_workbook"]))
-        elif tool_id == "summary-upload" and "预览" in status:
-            action = "preview"
-        if action == "login":
-            values = {}
+        fields = PAGE_BINDINGS[tool_id].fields
+        values = {}
+        if action != "login":
+            values = {key: get(key) for key in fields}
+            if tool_id in {"section-analysis", "trade-analysis"}:
+                values["files"] = [str(p) for p in page.files]
+            if tool_id == "group-upload":
+                values["files"] = [str(p) for p in page.selected_paths]
+            if tool_id == "spot-price":
+                for key, label in (("guihu", "归湖"), ("tuolian", "鮀莲"), ("haifeng", "海风")):
+                    values[key + "_workbook"] = page.station_workbooks[label].get()
+                    values[key + "_selected"] = page.selected_stations[label].get()
+            if tool_id == "power-benefit":
+                for index, key in enumerate(("guihu", "tuolian", "haifeng")):
+                    values[key + "_workbook"] = page.workbooks[index].get()
+                    values[key + "_selected"] = page.selected[index].get()
+            if tool_id == "guangdong-price":
+                if action == "predict":
+                    values["master_workbook"] = page.prediction_input.get()
+                    values["prediction_output_dir"] = str(page.resolve_business_path(values["prediction_output_dir"]))
+                values["master_workbook"] = str(page.resolve_business_path(values["master_workbook"]))
 
         def worker(token):
             result = self.execute_remote(tool_id, action, values, token, page.append_log)

@@ -115,7 +115,7 @@ class ProvinceExcelTests(unittest.TestCase):
                 destination.write_bytes(b'external save')
                 raise FileExistsError(str(destination))
 
-            with patch.object(province.os, 'link', race), self.assertRaisesRegex(RuntimeError, '停止覆盖'):
+            with patch.object(province, 'publish_new_file', race), self.assertRaisesRegex(RuntimeError, '停止覆盖'):
                 province.write_province_workbook(source, target, '2026-10-27', 20, 50000)
             self.assertEqual(target.read_bytes(), b'external save')
             self.assertFalse(list(Path(temp).glob('.province-*')))

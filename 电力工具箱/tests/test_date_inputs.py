@@ -131,6 +131,8 @@ class CalendarInputTests(unittest.TestCase):
         self.assertEqual(widget.displayed_month, date(2023, 2, 1))
         widget.change_month(12)
         widget._open_from_key()
+        # Synthetic key events require focus even when another macOS app is active.
+        widget.popup.focus_force()
         self.root.update()
         widget.popup.event_generate("<Escape>")
         self.root.update()

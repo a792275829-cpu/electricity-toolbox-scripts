@@ -21,6 +21,7 @@ DEFAULT_NAMES = ("功率预测调整收益统计-归湖.xlsx", "功率预测调�
 
 
 class PowerBenefitUpdatePage(ToolPage):
+    tool_id = 'power-benefit'
     def __init__(self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry,
                  *, today: date | None = None) -> None:
         super().__init__(parent, registry=registry, title="功率调整收益统计表更新",
@@ -104,6 +105,6 @@ class PowerBenefitUpdatePage(ToolPage):
         self.clear_log()
         self.run_process(self.build_update_command(
             workbooks, end, start_date=start, create_backup=self.create_backup.get()),
-            cwd=self.paths.power_benefit_update_dir, status="正在补齐功率调整收益统计表...",
+            action='run', cwd=self.paths.power_benefit_update_dir, status="正在补齐功率调整收益统计表...",
             cancellable=False,
             on_success=lambda _: messagebox.showinfo("完成", "任务已完成，请查看日志中的写入及待发布数据。", parent=self))

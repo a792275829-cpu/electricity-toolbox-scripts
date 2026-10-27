@@ -17,9 +17,15 @@ def main():
     args = parser.parse_args()
     from toolbox.runtime import ToolPaths
     from toolbox.workflows import execute
-    from toolbox.service import RESULT_PREFIX
+    from toolbox.service import RESULT_PREFIX, ERROR_PREFIX
+    from toolbox.tasks.errors import error_detail
     request = json.loads(args.request.read_text(encoding="utf-8"))
-    result = execute(ToolPaths(args.workspace), request["tool_id"], request["action"], request["values"])
+    try:
+        result = execute(ToolPaths(args.workspace), request["tool_id"], request["action"], request["values"])
+    except Exception as exc:
+        detail = error_detail(exc, tool_id=request["tool_id"], action=request["action"])
+        print(ERROR_PREFIX + json.dumps(detail, ensure_ascii=False), flush=True)
+        raise
     print(RESULT_PREFIX + json.dumps(result, ensure_ascii=False, default=str), flush=True)
 
 

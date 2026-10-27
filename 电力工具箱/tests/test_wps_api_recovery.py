@@ -1,4 +1,5 @@
 from __future__ import annotations
+import importlib
 
 import unittest
 from pathlib import Path
@@ -16,7 +17,7 @@ def load_writer():
 
 class WpsOperationRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.module = load_writer()
+        self.module = importlib.import_module('toolbox_wps_service')
         self.page = mock.Mock()
         self.ready = {"ready": True, "title": "Test document", "url": "about:blank"}
 
@@ -118,7 +119,7 @@ class WpsBrowserRecoveryTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.module = load_writer()
+        cls.module = importlib.import_module('toolbox_wps_service')
         if cls.module.sync_playwright is None:
             raise unittest.SkipTest("Playwright is unavailable")
         cls.playwright = cls.module.sync_playwright().start()

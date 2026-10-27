@@ -23,6 +23,7 @@ DEFAULT_HAIFENG_WORKBOOK = DEFAULT_WORKBOOK_DIR / "2026年现货价格分析-海
 
 
 class SpotPriceUpdatePage(ToolPage):
+    tool_id = 'spot-price'
     def __init__(
         self,
         parent: tk.Misc,
@@ -216,7 +217,7 @@ class SpotPriceUpdatePage(ToolPage):
                 create_backup=self.create_backup.get(),
                 selected_stations=tuple(workbooks),
             ),
-            cwd=self.paths.spot_price_update_dir,
+            action='run', cwd=self.paths.spot_price_update_dir,
             status="正在抓取并更新现货价格工作簿...",
             cancellable=False,
             on_success=lambda _code: messagebox.showinfo(
@@ -230,6 +231,6 @@ class SpotPriceUpdatePage(ToolPage):
     def start_login(self) -> None:
         self.run_process(
             [python_executable(), str(self.paths.spot_price_update), "--login", "--headed"],
-            cwd=self.paths.spot_price_update_dir,
+            action='login', cwd=self.paths.spot_price_update_dir,
             status="正在打开现货价格登录窗口...",
         )

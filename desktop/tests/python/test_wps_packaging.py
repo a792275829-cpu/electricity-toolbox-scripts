@@ -1,4 +1,5 @@
 from __future__ import annotations
+import importlib
 
 import importlib.util
 import json
@@ -78,7 +79,7 @@ class WpsPackagedConfigurationTests(unittest.TestCase):
         self.assertFalse(any((self.root / 'user').rglob('wps-browser-profile')))
 
     def test_source_mode_uses_defaults_without_writing_over_user_settings(self):
-        module = load_module('wps_defaults_packaging_test', ROOT / 'wps自动/wps_excel_to_kdocs_gui.py')
+        module = importlib.import_module('toolbox_wps_service')
         runtime = self.root / 'local/wps_excel_to_kdocs_config.json'
         with mock.patch.object(module, 'CONFIG_PATH', runtime):
             self.assertEqual(module.load_config(), self.seed)

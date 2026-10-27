@@ -60,6 +60,7 @@ def _file_dialog_state(paths: ToolPaths) -> FileDialogState:
 
 
 class OnlineEnergyPage(ToolPage):
+    tool_id = 'online-energy'
     def __init__(
         self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry
     ) -> None:
@@ -112,7 +113,7 @@ class OnlineEnergyPage(ToolPage):
         self.clear_log()
         self.run_process(
             self.build_export_command(run_date),
-            cwd=self.paths.online_energy_dir,
+            action='run', cwd=self.paths.online_energy_dir,
             status="正在导出上网电量...",
             on_success=lambda _code: messagebox.showinfo(
                 "完成", "上网电量导出已完成。", parent=self
@@ -122,12 +123,13 @@ class OnlineEnergyPage(ToolPage):
     def start_login(self) -> None:
         self.run_process(
             [python_executable(), str(self.paths.online_energy), "--login"],
-            cwd=self.paths.online_energy_dir,
+            action='login', cwd=self.paths.online_energy_dir,
             status="正在打开登录窗口...",
         )
 
 
 class TradeAnalysisPage(ToolPage):
+    tool_id = 'trade-analysis'
     def __init__(
         self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry
     ) -> None:
@@ -276,7 +278,7 @@ class TradeAnalysisPage(ToolPage):
 
         self.run_in_thread(
             worker,
-            status="正在生成分析报告...",
+            action='run', status="正在生成分析报告...",
             on_success=lambda outputs: messagebox.showinfo(
                 "完成", f"已生成 {len(outputs)} 个报告。", parent=self
             ),
@@ -284,6 +286,7 @@ class TradeAnalysisPage(ToolPage):
 
 
 class ReportPage(ToolPage):
+    tool_id = 'report'
     def __init__(
         self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry
     ) -> None:
@@ -517,7 +520,7 @@ class ReportPage(ToolPage):
 
         self.run_in_thread(
             worker,
-            status="正在生成报告...",
+            action='run', status="正在生成报告...",
             on_success=lambda count: messagebox.showinfo(
                 "完成", f"已完成 {count} 个任务。", parent=self
             ),
@@ -525,6 +528,7 @@ class ReportPage(ToolPage):
 
 
 class GroupUploadPage(ToolPage):
+    tool_id = 'group-upload'
     def __init__(
         self,
         parent: tk.Misc,
@@ -674,19 +678,20 @@ class GroupUploadPage(ToolPage):
 
         self.run_in_thread(
             upload,
-            status="正在上传集团每日数据...",
+            action='run', status="正在上传集团每日数据...",
             cancellable=False,
         )
 
     def start_login(self) -> None:
         self.run_process(
             [python_executable(), str(self.paths.group_upload), "--login"],
-            cwd=self.paths.group_upload_dir,
+            action='login', cwd=self.paths.group_upload_dir,
             status="正在打开登录窗口...",
         )
 
 
 class MarketTableUpdatePage(ToolPage):
+    tool_id = 'market-table'
     MAPPING_DESCRIPTIONS = (
         "现货运行日报 > 市场负荷信息 > 日前：来源日期为基准日期 D；写入 2026年市场情况 工作表对应日期行 B:U。",
         "现货运行日报 > 日前市场 > 发电侧申报均价起 12 项：来源日期为基准日期 D-1；写入 2026年市场情况 工作表对应日期行 V:AG。",
@@ -814,7 +819,7 @@ class MarketTableUpdatePage(ToolPage):
         self.clear_log()
         self.run_process(
             self.build_update_command(run_date, workbook),
-            cwd=self.paths.market_table_update_dir,
+            action='run', cwd=self.paths.market_table_update_dir,
             status="正在更新市场表...",
             cancellable=False,
             on_success=lambda _code: messagebox.showinfo(
@@ -830,12 +835,13 @@ class MarketTableUpdatePage(ToolPage):
                 "--login",
                 "--headed",
             ],
-            cwd=self.paths.market_table_update_dir,
+            action='login', cwd=self.paths.market_table_update_dir,
             status="正在打开登录窗口...",
         )
 
 
 class GuangdongPricePage(ToolPage):
+    tool_id = 'guangdong-price'
     def __init__(
         self,
         parent: tk.Misc,
@@ -1019,7 +1025,7 @@ class GuangdongPricePage(ToolPage):
 
         self.run_in_thread(
             worker,
-            status="正在抓取并合并广东现货数据...",
+            action='update', status="正在抓取并合并广东现货数据...",
             on_success=finished,
             cancellable=False,
         )
@@ -1048,7 +1054,7 @@ class GuangdongPricePage(ToolPage):
             self.build_prediction_command(
                 input_path, output_dir, 1, training_months
             ),
-            cwd=self.paths.guangdong_price_dir,
+            action='predict', cwd=self.paths.guangdong_price_dir,
             status="正在训练并生成 D+1 日前电价预测...",
             on_success=lambda _code: messagebox.showinfo(
                 "预测完成", f"预测结果已保存到：\n{output_dir}", parent=self
@@ -1057,6 +1063,7 @@ class GuangdongPricePage(ToolPage):
 
 
 class WpsWriterPage(ToolPage):
+    tool_id = "wps-writer"
     def __init__(
         self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry
     ) -> None:
