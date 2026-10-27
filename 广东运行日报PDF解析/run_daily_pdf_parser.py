@@ -94,7 +94,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    process_report(args.pdf, args.output, args.baseline, mode=args.mode)
+    process_report(args.pdf, args.output, args.baseline, mode=args.mode,
+                   logger=lambda message: print(message, flush=True))
     return 0
 
 

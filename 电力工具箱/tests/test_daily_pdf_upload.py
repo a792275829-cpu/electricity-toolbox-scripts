@@ -149,6 +149,77 @@ class DailyPdfUploadTests(unittest.TestCase):
             uploader.verify_remote_status(context, auth, data_type="SPOT_RUN_REPORT_DATA", plan=plan, path=self.pdf)
 
 
+class DailyPdfUploadResponseTests(unittest.TestCase):
+    def setUp(self):
+        self.page = mock.Mock()
+        self.listeners = {}
+        self.page.on.side_effect = lambda name, callback: self.listeners.update({name: callback})
+        self.page.remove_listener.side_effect = lambda name, callback: self.listeners.pop(name)
+        self.clock = 0
+        self.page.wait_for_timeout.side_effect = self.advance
+        self.addCleanup(mock.patch.stopall)
+        mock.patch.object(uploader.time, "monotonic", side_effect=lambda: self.clock).start()
+        self.endpoint = "/datacenter/gd/api/pub/data/report/import/valid/multi"
+        self.response = SimpleNamespace(request=SimpleNamespace(method="POST", url=uploader.BASE_URL + self.endpoint))
+        self.logs = []
+
+    def advance(self, milliseconds):
+        self.clock += milliseconds / 1000
+
+    def wait(self, action, **kwargs):
+        return uploader.wait_upload_response(
+            self.page, action, endpoint=self.endpoint, label="现货交易日报文件校验",
+            logger=self.logs.append, **kwargs,
+        )
+
+    def test_listens_before_selection_and_ignores_unrelated_responses(self):
+        def action():
+            callback = self.listeners["response"]
+            callback(SimpleNamespace(request=SimpleNamespace(method="GET", url=self.response.request.url)))
+            callback(SimpleNamespace(request=SimpleNamespace(method="POST", url=self.response.request.url + "/other")))
+            callback(self.response)
+        self.assertIs(self.response, self.wait(action))
+        self.page.wait_for_timeout.assert_not_called()
+        self.assertEqual({}, self.listeners)
+
+    def test_request_failure_exits_without_waiting_full_timeout(self):
+        request = SimpleNamespace(method="POST", url=self.response.request.url, failure="net::ERR_CONNECTION_RESET")
+        with self.assertRaisesRegex(RuntimeError, "文件校验网络请求失败.*ERR_CONNECTION_RESET"):
+            self.wait(lambda: self.listeners["requestfailed"](request))
+        self.page.wait_for_timeout.assert_not_called()
+        self.assertEqual({}, self.listeners)
+
+    def test_validation_timeout_names_stage_and_does_not_retry(self):
+        action = mock.Mock()
+        with self.assertRaisesRegex(RuntimeError, "文件校验超时.*尚未执行本文件的全部上传") as raised:
+            self.wait(action, timeout_ms=1000)
+        action.assert_called_once()
+        self.assertIn("Timeout 1000ms", str(raised.exception.__cause__))
+        self.assertEqual({}, self.listeners)
+
+    def test_submission_timeout_warns_of_possible_write_instead_of_retrying(self):
+        action = mock.Mock()
+        with self.assertRaisesRegex(RuntimeError, "上传请求可能已提交.*核对网站状态"):
+            self.wait(action, timeout_ms=1000, submitted=True)
+        action.assert_called_once()
+
+    def test_progress_is_reported_while_waiting_for_slow_response(self):
+        def advance(milliseconds):
+            self.clock += 5
+            if self.clock >= 20:
+                self.listeners["response"](self.response)
+        self.page.wait_for_timeout.side_effect = advance
+        self.assertIs(self.response, self.wait(mock.Mock(), timeout_ms=30000))
+        self.assertTrue(any("已等待 15 秒" in line for line in self.logs))
+
+    def test_selection_error_retains_original_exception_and_removes_listeners(self):
+        error = ValueError("invalid local file")
+        with self.assertRaises(ValueError) as raised:
+            self.wait(mock.Mock(side_effect=error))
+        self.assertIs(error, raised.exception)
+        self.assertEqual({}, self.listeners)
+
+
 class DailyPdfUploadPageTests(unittest.TestCase):
     def test_page_defaults_to_both_and_builds_correct_mode_argument(self):
         try:

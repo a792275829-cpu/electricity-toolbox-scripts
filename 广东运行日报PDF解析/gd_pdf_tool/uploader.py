@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit
 
 from openpyxl import load_workbook
 
@@ -191,6 +193,56 @@ def verify_remote_status(context, auth, *, data_type: str, plan: UploadPlan, pat
     return record
 
 
+def wait_upload_response(page, action, *, endpoint: str, label: str, logger,
+                         submitted: bool = False, timeout_ms: int = 120000):
+    """Report progress and request failures without retrying a possible write."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    responses, failures = [], []
+
+    def matches(request):
+        return request.method == "POST" and urlsplit(request.url).path == endpoint
+
+    def on_response(response):
+        if matches(response.request):
+            responses.append(response)
+
+    def on_failure(request):
+        if matches(request):
+            failures.append(request.failure or "连接中断")
+
+    page.on("response", on_response)
+    page.on("requestfailed", on_failure)
+    started = time.monotonic()
+    next_progress = 15.0
+    seconds = math.ceil(timeout_ms / 1000)
+    detail = ("上传请求可能已提交，请核对网站状态后再重试。" if submitted
+              else "文件校验未完成，尚未执行本文件的全部上传；可稍后使用“仅上传”重试。")
+    try:
+        logger(f"{label}：等待网站接口返回，最多 {seconds} 秒")
+        action()
+        while not responses:
+            if failures:
+                raise RuntimeError(f"{label}网络请求失败：{failures[0]}；{detail}本地 PDF 和 Excel 已保留。")
+            elapsed = time.monotonic() - started
+            if elapsed * 1000 >= timeout_ms:
+                cause = PlaywrightTimeoutError(
+                    f'Timeout {timeout_ms}ms exceeded while waiting for POST {endpoint}'
+                )
+                raise RuntimeError(
+                    f"{label}超时：{seconds} 秒内网站接口未返回。"
+                    f"{detail}本地 PDF 和 Excel 已保留。"
+                ) from cause
+            if elapsed >= next_progress:
+                logger(f"{label}：已等待 {int(elapsed)} 秒，网站仍未返回结果")
+                next_progress += 15
+            page.wait_for_timeout(min(250, max(1, timeout_ms - elapsed * 1000)))
+        return responses[0]
+    finally:
+        page.remove_listener("response", on_response)
+        page.remove_listener("requestfailed", on_failure)
+
+
 def upload_one(page, context, auth, plan: UploadPlan, path: Path, *, label: str, data_type: str, logger):
     from playwright.sync_api import expect
 
@@ -203,12 +255,11 @@ def upload_one(page, context, auth, plan: UploadPlan, path: Path, *, label: str,
     row = date_row(page, plan.report_date)
     logger(f"{label}：{plan.report_date.isoformat()} 选择文件 {path.name}")
     prefix = "/datacenter/gd/api/pub/data/report/import" if data_type == "SPOT_RUN_REPORT_DATA" else "/datacenter/gd/api/pub/data/import"
-    with page.expect_response(
-        lambda response: prefix + "/valid/multi" in response.url
-        and response.request.method == "POST", timeout=120000,
-    ) as validating:
-        row.locator('input[type="file"]').set_input_files(str(path))
-    auth.parse_json_response(validating.value, f"{label}文件校验")
+    validating = wait_upload_response(
+        page, lambda: row.locator('input[type="file"]').set_input_files(str(path)),
+        endpoint=prefix + "/valid/multi", label=f"{label}文件校验", logger=logger,
+    )
+    auth.parse_json_response(validating, f"{label}文件校验")
     button = panel.get_by_role("button", name="全部上传", exact=True)
     try:
         expect(button).to_be_enabled(timeout=30000)
@@ -216,12 +267,11 @@ def upload_one(page, context, auth, plan: UploadPlan, path: Path, *, label: str,
     except AssertionError as exc:
         raise RuntimeError(f"{label}文件未通过网站校验，未执行全部上传。") from exc
     logger(f"{label}：执行全部上传")
-    with page.expect_response(
-        lambda response: prefix + "/create/multi" in response.url
-        and response.request.method == "POST", timeout=120000,
-    ) as uploading:
-        button.click()
-    payload = auth.parse_json_response(uploading.value, f"{label}全部上传")
+    uploading = wait_upload_response(
+        page, button.click, endpoint=prefix + "/create/multi",
+        label=f"{label}全部上传", logger=logger, submitted=True,
+    )
+    payload = auth.parse_json_response(uploading, f"{label}全部上传")
     if payload.get("data") != []:
         raise RuntimeError(f"{label}服务器返回导入异常，请检查网站导入结果。")
     expect(button).to_be_disabled(timeout=30000)
@@ -241,7 +291,9 @@ def upload_report_files(plan: UploadPlan, *, logger: Callable[[str], None] = pri
         with sync_playwright() as playwright:
             context = auth.launch_context(playwright, headless=config.headless)
             try:
+                logger("正在检查清能网站登录状态...")
                 auth.ensure_login(context, config)
+                logger("正在打开广东数据中心日报上传页面...")
                 page = open_upload_page(context, auth)
                 for path, label, data_type in (
                     (plan.pdf_path, "现货交易日报", "SPOT_RUN_REPORT_DATA"),
