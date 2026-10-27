@@ -1544,10 +1544,10 @@ class MappingDialog(tk.Toplevel):
                 self.online_sheet_combo = entry
             else:
                 entry = ttk.Entry(self, textvariable=self.vars[key], width=64 if key == "local_file" else 36)
-            entry.grid(row=row, column=1, padx=10, pady=6, sticky="ew")
+            entry.grid(row=row, column=1, padx=(10, 0) if key == "local_file" else 10, pady=6, sticky="ew")
             if key == "local_file":
                 button_frame = ttk.Frame(self)
-                button_frame.grid(row=row, column=2, padx=10, pady=6)
+                button_frame.grid(row=row, column=2, padx=(8, 10), pady=6, sticky="w")
                 FileSelectButton(button_frame, text="选择文件", command=self.browse_local_file).pack(side="left")
                 ttk.Button(button_frame, text="刷新工作表", command=self.refresh_local_sheets).pack(side="left", padx=(6, 0))
             elif key == "target_sheet":
@@ -1861,9 +1861,9 @@ class DocumentConfigDialog(tk.Toplevel):
         ttk.Entry(docs, textvariable=self.source_doc_title, state="readonly").grid(row=4, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
 
         ttk.Label(docs, text="本地文件").grid(row=5, column=0, padx=8, pady=6, sticky="w")
-        ttk.Entry(docs, textvariable=self.local_file).grid(row=5, column=1, padx=8, pady=6, sticky="ew")
+        ttk.Entry(docs, textvariable=self.local_file).grid(row=5, column=1, padx=(8, 0), pady=6, sticky="ew")
         file_buttons = ttk.Frame(docs)
-        file_buttons.grid(row=5, column=2, padx=8, pady=6)
+        file_buttons.grid(row=5, column=2, padx=8, pady=6, sticky="w")
         FileSelectButton(file_buttons, text="选择文件", command=self.browse_local_file).pack(side="left")
         ttk.Button(file_buttons, text="刷新工作表", command=self.refresh_local_sheets).pack(side="left", padx=(6, 0))
         ttk.Label(docs, textvariable=self.read_status, style="Muted.TLabel").grid(

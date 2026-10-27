@@ -50,6 +50,6 @@ def add_path_row(parent: ttk.Frame, *, row: int, label: str, variable: tk.String
     ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=5)
     ttk.Entry(parent, textvariable=variable).grid(row=row, column=1, sticky="ew", pady=5)
     button = FileSelectButton(parent, text=button_text, command=command)
-    button.grid(row=row, column=2, padx=(8, 0), pady=5)
+    button.grid(row=row, column=2, padx=(8, 0), pady=5, sticky="w")
     parent.columnconfigure(1, weight=1)
     return button

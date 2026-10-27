@@ -58,7 +58,7 @@ def main() -> None:
         if path:
             topology_var.set(path)
 
-    FileSelectButton(frame, text="选择拓扑文件", command=choose_topology).grid(row=0, column=2, pady=5)
+    FileSelectButton(frame, text="选择拓扑文件", command=choose_topology).grid(row=0, column=2, pady=5, sticky="w")
 
     output_entry = row("输出目录", 1)
     output_entry.configure(textvariable=output_dir_var)
@@ -68,7 +68,7 @@ def main() -> None:
         if path:
             output_dir_var.set(path)
 
-    FileSelectButton(frame, text="选择输出目录", command=choose_output_dir).grid(row=1, column=2, pady=5)
+    FileSelectButton(frame, text="选择输出目录", command=choose_output_dir).grid(row=1, column=2, pady=5, sticky="w")
 
     tk.Label(frame, text="价差阈值", anchor="w").grid(row=2, column=0, sticky="w", pady=5)
     threshold_entry = tk.Entry(frame, textvariable=threshold_var, width=12)

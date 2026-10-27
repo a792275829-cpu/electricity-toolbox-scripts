@@ -4,13 +4,10 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from PIL import Image, ImageDraw, ImageTk
-
-
 class FileSelectButton(ttk.Button):
     def __init__(self, parent, *, text="选择文件", command=None):
         # Retain the descriptive text for keyboard/accessibility clients and
-        # the tooltip; only the folder-plus icon is drawn on the button.
+        # the tooltip; only a clear plus sign is drawn on the button.
         style = ttk.Style(parent)
         style.configure("FileSelect.TButton", padding=5, width=0, anchor="center")
         if style.theme_use() == "aqua":
@@ -20,19 +17,11 @@ class FileSelectButton(ttk.Button):
                 "sticky": "nsew", "children": [("Button.label", {"sticky": "nsew"})],
             })])
         self._icons = []
-        for ink in ("#777772", "#b5b5b0"):
-            scale = 3
-            bitmap = Image.new("RGBA", (20 * scale, 20 * scale))
-            draw = ImageDraw.Draw(bitmap)
-            draw.line([(2 * scale, 7 * scale), (2 * scale, 5 * scale),
-                       (4 * scale, 3 * scale), (8 * scale, 3 * scale),
-                       (11 * scale, 6 * scale)], fill=ink, width=scale * 2,
-                      joint="curve")
-            draw.rounded_rectangle((2 * scale, 7 * scale, 18 * scale, 18 * scale),
-                                   radius=2 * scale, outline=ink, width=scale * 2)
-            draw.line((7 * scale, 12 * scale, 13 * scale, 12 * scale), fill=ink, width=scale)
-            draw.line((10 * scale, 9 * scale, 10 * scale, 15 * scale), fill=ink, width=scale)
-            self._icons.append(ImageTk.PhotoImage(bitmap.resize((20, 20), Image.Resampling.LANCZOS), master=parent))
+        for ink in ("#333333", "#b5b5b0"):
+            icon = tk.PhotoImage(master=parent, width=20, height=20)
+            icon.put(ink, to=(4, 9, 16, 11))
+            icon.put(ink, to=(9, 4, 11, 16))
+            self._icons.append(icon)
         super().__init__(parent, text=text, command=command, style="FileSelect.TButton",
                          image=(self._icons[0], "disabled", self._icons[1]), compound="image")
         self._tip = None

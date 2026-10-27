@@ -120,7 +120,7 @@ class ReportTool(tk.Tk):
     ) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky=tk.W, padx=(10, 6), pady=6)
         ttk.Entry(parent, textvariable=variable).grid(row=row, column=1, sticky=tk.EW, pady=6)
-        FileSelectButton(parent, text="选择工作簿", command=command or (lambda: self.choose_workbook(variable))).grid(row=row, column=2, padx=8, pady=6)
+        FileSelectButton(parent, text="选择工作簿", command=command or (lambda: self.choose_workbook(variable))).grid(row=row, column=2, padx=(8, 0), pady=6, sticky="w")
         parent.columnconfigure(1, weight=1)
 
     def choose_workbook(self, variable: tk.StringVar) -> None:
