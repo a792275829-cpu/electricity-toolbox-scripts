@@ -1,0 +1,113 @@
+{
+  "day_ahead_load": {
+    "source_days": 0,
+    "sheet": "2026年市场情况",
+    "columns": [
+      "B",
+      "U"
+    ],
+    "fields": [],
+    "percent_fields": []
+  },
+  "actual_load": {
+    "source_days": -2,
+    "sheet": "2026年市场情况",
+    "columns": [
+      "AH",
+      "BA"
+    ],
+    "fields": [],
+    "percent_fields": []
+  },
+  "day_ahead_market": {
+    "source_days": -1,
+    "sheet": "2026年市场情况",
+    "columns": [
+      "V",
+      "AG"
+    ],
+    "fields": [
+      "generateSideDeclareAvgPrice",
+      "totalGenerateSideDealEle",
+      "totalCoalDealEle",
+      "totalGasDealEle",
+      "totalNuclearDealEle",
+      "totalNewEnergyDealEle",
+      "totalPowerSideDealEle",
+      "generateSideAvgPrice",
+      "coalDealMaxPrice",
+      "coalDealAvgPrice",
+      "gasDealMaxPrice",
+      "gasDealAvgPrice"
+    ],
+    "percent_fields": []
+  },
+  "realtime_market": {
+    "source_days": -2,
+    "sheet": "2026年市场情况",
+    "columns": [
+      "BB",
+      "BE"
+    ],
+    "fields": [
+      [
+        "generateSideDealEle",
+        "totalGenerateSideDealEle"
+      ],
+      "generateSideAvgPrice",
+      "coalDealAvgPrice",
+      "gasDealAvgPrice"
+    ],
+    "percent_fields": []
+  },
+  "generation_settlement": {
+    "source_days": -6,
+    "sheet": "2026年市场情况",
+    "columns": [
+      "BF",
+      "BQ"
+    ],
+    "fields": [
+      "marketUnitOnlineEle",
+      "marketUnitBaseEle",
+      "marketUnitBaseEleRadio",
+      "marketUnitMltEle",
+      "marketUnitMltEleRadio",
+      "marketUnitDeviationEle",
+      "marketUnitDeviationEleRadio",
+      "spotPosDeviationRadio",
+      "spotNegDeviationRadio",
+      "marketUnitFee",
+      "generateAvgPriceWithCompensate",
+      "generateAvgPrice"
+    ],
+    "percent_fields": [
+      "marketUnitBaseEleRadio",
+      "marketUnitDeviationEleRadio",
+      "marketUnitMltEleRadio",
+      "spotNegDeviationRadio",
+      "spotPosDeviationRadio"
+    ]
+  },
+  "user_settlement": {
+    "source_days": -6,
+    "sheet": "2026年市场情况",
+    "columns": [
+      "BR",
+      "BX"
+    ],
+    "fields": [
+      "marketUserConsumeEle",
+      "mltEle",
+      "mltEleRadio",
+      "spotDeviationEle",
+      "spotDeviationRadio",
+      "getMarketUserConsumeFee",
+      "userAvePrice"
+    ],
+    "percent_fields": [
+      "mltEleRadio",
+      "spotDeviationRadio"
+    ]
+  }
+}

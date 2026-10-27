@@ -8,7 +8,6 @@ import threading
 import tkinter as tk
 import datetime
 import re
-import unicodedata
 from collections import deque
 from itertools import islice
 from tkinter import filedialog, messagebox, ttk
@@ -17,7 +16,8 @@ from tkinter import filedialog, messagebox, ttk
 WORKSPACE = pathlib.Path(__file__).resolve().parents[2]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
-from toolbox_native_excel import load_value_workbook, excel_session
+from toolbox_native_excel import load_value_workbook
+from toolbox_trade_batch import plan_batch_outputs, iter_batch_reports
 from toolbox_file_button import FileSelectButton
 
 
@@ -980,34 +980,13 @@ def generate_report(xlsx_path, out_path=None):
     return ReportBuilder(xlsx_path, out_path=out_path).build()
 
 
-def plan_batch_outputs(xlsx_paths, output_dir):
-    """Reject distinct sources sharing a macOS output name before any write."""
-    output_dir = pathlib.Path(output_dir)
-    targets = {}
-    planned = []
-    for source in xlsx_paths:
-        source = pathlib.Path(source)
-        output = output_dir / f"{source.stem}_分析报告.html"
-        key = unicodedata.normalize("NFC", output.name).casefold()
-        previous = targets.get(key)
-        if previous is not None and previous.resolve() != source.resolve():
-            raise ValueError(f"分析报告输出文件名冲突：{previous} 与 {source} 都将写入 {output.name}。请更改输入文件名或分批选择不同输出目录。")
-        targets[key] = source
-        planned.append((source, output))
-    return planned
+def batch_reports(xlsx_paths, output_dir, *, continue_on_error=False):
+    return iter_batch_reports(xlsx_paths, output_dir, generate_report,
+                              continue_on_error=continue_on_error)
 
 
 def generate_batch(xlsx_paths, output_dir):
-    output_dir = pathlib.Path(output_dir)
-    planned = plan_batch_outputs(xlsx_paths, output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    results = []
-    xlsx_paths = [source for source, _ in planned]
-    repeated = len({path.resolve() for path in xlsx_paths}) < len(xlsx_paths)
-    with excel_session(cache=repeated, enabled=repeated):
-        for xlsx_path, out_path in planned:
-            results.append(generate_report(xlsx_path, out_path=out_path))
-    return results
+    return [result for _, _, result, _ in batch_reports(xlsx_paths, output_dir)]
 
 
 class ReportApp:
@@ -1120,19 +1099,17 @@ class ReportApp:
         errors = []
         output_dir = pathlib.Path(self.output_dir.get())
         try:
-            planned = plan_batch_outputs(self.files, output_dir)
+            for path, out_path, _, error in batch_reports(self.files, output_dir, continue_on_error=True):
+                if error is None:
+                    success.append(out_path)
+                    self.root.after(0, self.append_log, f"完成：{path.name} -> {out_path.name}")
+                else:
+                    errors.append((path, error))
+                    self.root.after(0, self.append_log, f"失败：{path.name} -> {error}")
         except ValueError as exc:
             self.root.after(0, self.append_log, str(exc))
             self.root.after(0, self._finish_batch, [], [(None, exc)])
             return
-        for path, out_path in planned:
-            try:
-                generate_report(path, out_path=out_path)
-                success.append(out_path)
-                self.root.after(0, self.append_log, f"完成：{path.name} -> {out_path.name}")
-            except Exception as exc:  # noqa: BLE001
-                errors.append((path, exc))
-                self.root.after(0, self.append_log, f"失败：{path.name} -> {exc}")
         self.root.after(0, self._finish_batch, success, errors)
 
     def _finish_batch(self, success, errors):

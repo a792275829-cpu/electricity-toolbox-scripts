@@ -220,8 +220,7 @@ def execute(paths, tool_id, action, p):
         output_dir = Path(p["output_dir"]).expanduser()
         output_dir.mkdir(parents=True, exist_ok=True)
         outputs = []
-        for source, output in module.plan_batch_outputs(selected_files(p), output_dir):
-            module.generate_report(source, out_path=output)
+        for source, output, _, _ in module.batch_reports(selected_files(p), output_dir):
             log(f"完成：{source.name} -> {output.name}")
             outputs.append(str(output))
         return dict(outputs=outputs)

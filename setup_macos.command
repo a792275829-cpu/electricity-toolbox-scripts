@@ -5,13 +5,15 @@ launcher_dir=${0:A:h}
 cd "$launcher_dir"
 
 if ! command -v python3 >/dev/null 2>&1; then
-  print -r -- "python3 was not found. Install Python 3.11 or newer, then run this script again."
+  print -r -- "python3 was not found. Install Python 3.11, then run this script again."
   exit 1
 fi
 
 if [[ ! -d ".venv" ]]; then
   print -r -- "Creating local Python virtual environment: .venv"
-  python3 -m venv .venv
+  bootstrap_python=$(command -v python3.11 || command -v python3)
+  "$bootstrap_python" -c 'import sys; sys.exit("Install Python 3.11 to match the release runtime.") if sys.version_info[:2] != (3, 11) else None'
+  "$bootstrap_python" -m venv .venv
 fi
 
 venv_python="$launcher_dir/.venv/bin/python"
@@ -21,10 +23,12 @@ if [[ ! -x "$venv_python" ]]; then
 fi
 
 print -r -- "Installing Python dependencies..."
-"$venv_python" -m pip install -r requirements.txt
+"$venv_python" -c 'import sys; sys.exit("Please recreate .venv with Python 3.11 (the release runtime).") if sys.version_info[:2] != (3, 11) else None'
+"$venv_python" -m pip install --require-hashes --no-deps --only-binary :all: -r packaging/tauri/requirements-macos.lock
+"$venv_python" -m pip check
 
 print -r -- "Installing Playwright Chromium browser..."
-"$venv_python" -m playwright install chromium
+PLAYWRIGHT_SKIP_BROWSER_GC=1 "$venv_python" -m playwright install chromium
 
 if command -v cargo >/dev/null 2>&1 || [[ -x "$HOME/.cargo/bin/cargo" ]]; then
   print -r -- "Building the shared Rust backend (including market report inputs)..."

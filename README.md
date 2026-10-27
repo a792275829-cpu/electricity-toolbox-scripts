@@ -28,7 +28,7 @@ macOS 14+、Apple 芯片电脑使用 DMG 桌面版，已内置 Python、Node、C
 ## 环境要求
 
 - macOS 12 或更新版本
-- Python 3.11 或更新版本
+- Python 3.11（与发行运行时一致）
 - Google Chrome，用于网页登录、上传和 WPS/KDocs 流程
 - Node.js 18 或更新版本，仅“出清结果汇总上传”的上传功能需要
 - 能访问相关业务系统的网络环境；如公司网络要求代理或 VPN，请先连接
@@ -69,7 +69,7 @@ chmod +x setup_macos.command "00_启动/电力工具箱.command" \
 安装脚本会完成以下工作：
 
 1. 创建项目专用 Python 环境 `.venv`。
-2. 安装 `requirements.txt` 中的 Python 依赖。
+2. 使用 Python 3.11，按 `requirements.txt` 引用的发行锁文件安装并校验 Python 依赖。
 3. 安装 Playwright Chromium。
 4. 检测 Node.js/npm；如果存在，则安装私有数据上传工具的 Node 依赖。
 5. 修复工具箱和 WPS 专用 Chrome 的 `.command` 启动权限。
@@ -86,14 +86,17 @@ npm install
 只有自动安装失败时才需要使用以下等价命令：
 
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements.txt
+python -m pip check
 python -m playwright install chromium
 
 cd "电力工具脚本/private-data-uploader-tool"
 npm install
 ```
+
+完整分模块测试、依赖升级、业务契约与更新兼容验证见 [维护指南](tooling/README.md)。
 
 ## 启动工具箱
 

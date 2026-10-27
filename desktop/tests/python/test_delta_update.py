@@ -67,6 +67,29 @@ class DeltaTests(unittest.TestCase):
         shutil.copytree(app, target, symlinks=True)
         return target
 
+    def test_three_previous_versions_restore_to_current_fixture(self):
+        # Synthetic applications exercise the compatibility protocol without
+        # downloading historical production installers or modifying user data.
+        new = self.app('0.1.21')
+        for base in ('0.1.18', '0.1.19', '0.1.20'):
+            with self.subTest(base=base):
+                old = self.app(base)
+                archive, _ = self.patch_for(old, new)
+                restored = self.clone(old, base + '.app')
+                apply_patch(restored, archive, self.root/'restored-installer.py', base, '0.1.21')
+                self.assertEqual(inventory(restored), inventory(new))
+                self.assertEqual((self.root/'restored-installer.py').read_bytes(), self.installer.read_bytes())
+
+    def test_major_minor_and_unknown_protocol_require_full_dmg(self):
+        old, new = self.app('0.1.21'), self.app('0.2.0')
+        with self.assertRaises(UpdateError):
+            self.patch_for(old, new)
+        for target in ('0.2.0', '1.0.0'):
+            index = dict(format=1, version=target, patches=[edge('0.1.21', target, 10)])
+            self.assertEqual(select_route(index, '0.1.21', target, 100, REPOSITORY), [])
+        with self.assertRaises(UpdateError):
+            select_route(dict(format=2, version='0.1.22', patches=[]), '0.1.21', '0.1.22', 100, REPOSITORY)
+
     def test_roundtrip_files_links_deletions_modes_and_type_changes(self):
         old, new = self.app('1.0.1'), self.app('1.0.2')
         (old / 'Contents/remove').write_text('remove')

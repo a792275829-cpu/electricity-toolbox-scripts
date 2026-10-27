@@ -22,6 +22,16 @@ MAX_ENTRIES = 100_000
 MAX_APP_SIZE = 12 * 1024**3
 
 
+def delta_compatible(base, target):
+    """Protocol 1 supports increasing patch releases within one minor baseline.
+
+    Major/minor changes deliberately require a verified full DMG. Keep this
+    gate in both producer and consumer so hand-crafted indexes cannot bypass it.
+    """
+    before, after = version_parts(base), version_parts(target)
+    return before[:2] == after[:2] and before < after
+
+
 def cancelled(cancel):
     if cancel is not None and cancel.is_set():
         raise Cancelled('已取消更新')
@@ -128,8 +138,8 @@ def verify_app(app, cancel=None):
 def create_patch(old, new, installer, output):
     old, new, output = Path(old), Path(new), Path(output)
     base, target = app_version(old), app_version(new)
-    if version_parts(base) >= version_parts(target):
-        raise UpdateError('补丁目标必须高于基准版本')
+    if not delta_compatible(base, target):
+        raise UpdateError('补丁必须为同主次版本内递增更新；跨版本请使用完整安装包')
     verify_app(old)
     verify_app(new)
     before, after = inventory(old), inventory(new)
@@ -179,7 +189,7 @@ def apply_patch(app, patch, installer, expected_base, expected_target, cancel=No
         if (manifest.get('format') != FORMAT or manifest.get('base') != expected_base
                 or manifest.get('target') != expected_target
                 or app_version(app) != expected_base
-                or version_parts(expected_target) <= version_parts(expected_base)):
+                or not delta_compatible(expected_base, expected_target)):
             raise UpdateError('补丁版本不匹配')
         before, after = manifest['before'], manifest['after']
         validate_inventory(before)
@@ -261,7 +271,8 @@ def select_route(index, current, target, full_size, repository):
                 raise UpdateError('增量更新路径无效')
         except (KeyError, TypeError, AttributeError) as exc:
             raise UpdateError('增量更新路径无效') from exc
-        graph.setdefault(base, []).append(edge)
+        if delta_compatible(base, end):
+            graph.setdefault(base, []).append(edge)
     queue, costs, serial = [(0, 0, current, [])], {current: 0}, 0
     while queue:
         cost, _, node, route = heapq.heappop(queue)
