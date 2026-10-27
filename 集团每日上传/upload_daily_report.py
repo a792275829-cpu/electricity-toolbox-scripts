@@ -30,6 +30,14 @@ if str(WORKSPACE_DIR) not in sys.path:
 from toolbox_credentials import mark_browser_session, prepare_browser_session, read_login_config
 from toolbox_auth_loader import wait_for_login
 from toolbox_dates import normalize_date_input
+from toolbox_province_excel import (
+    number_or_none,
+    format_formula_number,
+    replace_capacity_in_formula,
+    evaluate_simple_excel_formula,
+    write_formula_result_as_value,
+    write_province_workbook,
+)
 
 LOGIN_SOURCE_DIR = WORKSPACE_DIR / "上网电量抓取"
 
@@ -1221,21 +1229,6 @@ def parse_api_payload(response, label: str) -> dict[str, Any]:
     return payload
 
 
-def number_or_none(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def format_formula_number(value: float) -> str:
-    if abs(value - round(value)) < 0.000001:
-        return str(int(round(value)))
-    return f"{value:.6f}".rstrip("0").rstrip(".")
-
-
 def fetch_capacity_average(context, run_date: str, province_area_id: str) -> float:
     response = context.request.get(
         f"{BASE_URL}/gdfire/api/data/net/capacity",
@@ -1351,43 +1344,6 @@ def province_output_path(source_path: Path, run_date: str, *, output_dir: Path |
     return target_path
 
 
-def replace_capacity_in_formula(formula: str, capacity_value: float) -> str:
-    match = re.match(r"^(=.*?-\s*)(\d+(?:\.\d+)?)(\s*-.*)$", formula)
-    if not match:
-        raise RuntimeError(f"C2 公式格式无法自动替换容量值：{formula}")
-    return f"{match.group(1)}{format_formula_number(capacity_value)}{match.group(3)}"
-
-
-def evaluate_simple_excel_formula(formula: str) -> float:
-    expression = formula.strip()
-    if expression.startswith("="):
-        expression = expression[1:]
-    if not re.fullmatch(r"\s*\d+(?:\.\d+)?(?:\s*[+-]\s*\d+(?:\.\d+)?)*\s*", expression):
-        raise RuntimeError(f"C2 公式超出自动计算范围：{formula}")
-
-    total = 0.0
-    for sign, number_text in re.findall(r"([+-]?)\s*(\d+(?:\.\d+)?)", expression):
-        value = float(number_text)
-        total += -value if sign == "-" else value
-    return total
-
-
-
-
-
-
-def write_formula_result_as_value(workbook_path: Path, sheet_name: str, cell: str, value: float) -> None:
-    from openpyxl import load_workbook
-
-    workbook = load_workbook(workbook_path, data_only=False)
-    try:
-        worksheet = workbook[sheet_name] if sheet_name in workbook.sheetnames else workbook.active
-        worksheet[cell].value = int(round(value)) if abs(value - round(value)) < 0.000001 else value
-        workbook.save(workbook_path)
-    finally:
-        workbook.close()
-
-
 def update_province_excel_for_upload(
     context,
     run_date: str,
@@ -1416,30 +1372,8 @@ def update_province_excel_for_upload(
         province_upload.path, run_date,
         output_dir=energy_upload.path.parent if province_upload.builtin_template else None,
     )
-    workbook = load_workbook(province_upload.path, data_only=False)
-    try:
-        worksheet = workbook["省内数据"] if "省内数据" in workbook.sheetnames else workbook.active
-        worksheet["A2"].value = datetime.strptime(run_date, "%Y-%m-%d")
-        worksheet["B2"].value = startup_max
-        current_formula = worksheet["C2"].value
-        if not isinstance(current_formula, str) or not current_formula.startswith("="):
-            formula_result = number_or_none(current_formula)
-            if formula_result is None:
-                raise RuntimeError(f"C2 不是公式，无法按模板更新：{current_formula!r}")
-            log(f"C2 已是数值，保留现有结果：{current_formula}")
-        else:
-            updated_formula = replace_capacity_in_formula(current_formula, capacity_average)
-            formula_result = evaluate_simple_excel_formula(updated_formula)
-            worksheet["C2"].value = updated_formula
-            if hasattr(workbook, "calculation"):
-                workbook.calculation.fullCalcOnLoad = True
-                workbook.calculation.forceFullCalc = True
-        workbook.save(target_path)
-    finally:
-        workbook.close()
-
-    if isinstance(current_formula, str) and current_formula.startswith("="):
-        write_formula_result_as_value(target_path, worksheet.title, "C2", formula_result)
+    write_province_workbook(province_upload.path, target_path, run_date,
+                            startup_max, capacity_average, log=log)
 
     log(f"省内数据已更新：{target_path}")
     return [

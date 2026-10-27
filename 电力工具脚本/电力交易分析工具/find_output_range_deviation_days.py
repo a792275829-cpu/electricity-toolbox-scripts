@@ -12,10 +12,12 @@ import openpyxl
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
+WORKSPACE = SCRIPT_DIR.parents[1]
+if str(WORKSPACE) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE))
 
-from generate_electricity_report import ReportBuilder, THERMAL_COMPANIES, fmt, load_value_workbook
+from toolbox_trade_report import ReportBuilder, THERMAL_COMPANIES, fmt
+from toolbox_native_excel import load_value_workbook
 
 
 DEFAULT_INPUT_DIR = Path.home() / "Downloads" / "haimen shouxian"

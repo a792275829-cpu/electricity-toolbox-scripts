@@ -1,0 +1,12 @@
+[
+  {
+    "name": "dayahead-2026-10-27.xlsx",
+    "realtime": false,
+    "sha256": "1269971d2469c0d848b6c3218c80859aba7db1025876b6964c1355097aabb3ac"
+  },
+  {
+    "name": "realtime-2026-10-27.xlsx",
+    "realtime": true,
+    "sha256": "a8b4553f86ef3c5edac8c6e9832b24a5134543d0a2067cc5d3bc5a74fe6f295c"
+  }
+]

@@ -267,9 +267,9 @@ class TradeAnalysisPage(ToolPage):
         self.clear_log()
 
         def worker() -> list[Path]:
-            module = load_module("toolbox_trade_analysis", self.paths.trade_analysis)
+            from toolbox_trade_report import batch_reports
             outputs: list[Path] = []
-            for source, output, _, _ in module.batch_reports(selected_files, output_dir):
+            for source, output, _, _ in batch_reports(selected_files, output_dir):
                 outputs.append(output)
                 self.append_log(f"完成：{source.name} -> {output.name}")
             return outputs

@@ -93,8 +93,8 @@ def plan(paths, tool_id, action, p):
     if tool_id == "trade-analysis":
         sources = selected_files(p)
         output = required_path(p, "output_dir", exists=False)
-        module = load_module("toolbox_trade_analysis", paths.trade_analysis)
-        module.plan_batch_outputs(sources, output)
+        from toolbox_trade_batch import plan_batch_outputs
+        plan_batch_outputs(sources, output)
     elif tool_id == "market-table":
         return [(commands.market_table(paths, day("run_date"), required_path(p, "workbook")), paths.market_table_update_dir)]
     elif tool_id == "transaction-info":
@@ -216,11 +216,11 @@ def execute(paths, tool_id, action, p):
         return dict(message="任务已完成，请核对日志及输出文件", outputs=outputs)
     log = lambda text: print(str(text), flush=True)
     if tool_id == "trade-analysis":
-        module = load_module("toolbox_trade_analysis", paths.trade_analysis)
+        from toolbox_trade_report import batch_reports
         output_dir = Path(p["output_dir"]).expanduser()
         output_dir.mkdir(parents=True, exist_ok=True)
         outputs = []
-        for source, output, _, _ in module.batch_reports(selected_files(p), output_dir):
+        for source, output, _, _ in batch_reports(selected_files(p), output_dir):
             log(f"完成：{source.name} -> {output.name}")
             outputs.append(str(output))
         return dict(outputs=outputs)
