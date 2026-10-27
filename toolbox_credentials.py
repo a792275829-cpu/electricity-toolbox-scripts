@@ -57,10 +57,21 @@ def apply_credentials(raw: dict[str, Any], *, workspace: Path = WORKSPACE) -> di
 
 
 def read_login_config(path: Path, fallback: Path | None = None, *, workspace: Path = WORKSPACE) -> dict[str, Any]:
+    """Read a tool-local config, keeping the shared login fallback in play.
+
+    A tool-local file that only carries business options (for example ``headless``)
+    must not cancel the shared login: the fallback file still supplies the account
+    pair, while every key present locally wins.
+    """
     path = data_path(path)
     fallback = data_path(fallback) if fallback is not None else None
-    selected = path if path.is_file() or fallback is None else fallback
-    return apply_credentials(read_json(selected), workspace=workspace)
+    local = read_json(path)
+    has_login = bool(local.get("username")) and bool(local.get("password"))
+    if has_login or fallback is None:
+        return apply_credentials(local, workspace=workspace)
+    merged = read_json(fallback)
+    merged.update(local)
+    return apply_credentials(merged, workspace=workspace)
 
 
 class CredentialStore:

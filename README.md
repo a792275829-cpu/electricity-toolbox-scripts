@@ -134,15 +134,29 @@ npm install
 
 修改账号密码后，从下次启动任务开始使用新设置，各工具首次运行会重新登录。正在运行的任务继续使用启动时的设置。每个工具各自维护登录态、锁和浏览器 profile；账号修改不会删除这些文件。
 
-如需调整业务配置，复制示例配置：
+业务选项与登录分开保存：账号密码优先读统一账号 `.toolbox/qingneng/config.json`，各工具的 `config.json` 只放业务或调试选项。需要时先复制对应示例再编辑，未列出的工具不需要 `config.json`：
+
+| 工具 | 配置路径 | 可配置字段 |
+| --- | --- | --- |
+| 上网电量抓取 | `上网电量抓取/config.json` | `headless`、`unitIdsMode`、`skipExisting`、`requestDelaySeconds`、`outputDir`、`exportTimeoutSeconds`、`downloadDir` |
+| 风力预测截图 | `风力预测截图/config.json` | `headless`、`outputDir`、`orgId`、`orgName`、`unitId`、`unitName` |
+| 每日生产经营情况汇报自动生成工具 | `每日生产经营情况汇报自动生成工具/scripts/config.json` | `headless`、`unitIdsMode`、`skipExisting`、`requestDelaySeconds`、`exportTimeoutSeconds`、`downloadDir` |
+| 广东电价预测 | `广东电价预测/config.json` | `masterWorkbook`、`predictionOutputDir`、`initialWorkbook`、`initialDate` |
+| 现货价格更新 | `现货价格更新/config.json` | `headless` |
+| 交易系统信息更新 | `交易系统信息更新/config.json` | `headless` |
+| 广东运行日报解析上传 | `广东运行日报PDF解析/config.json` | `headless` |
+| 集团每日上传 | 不需要 | 登录用统一账号；上传时始终显示浏览器 |
+| 功率调整收益统计表更新 | 不需要 | 用 `--headed` 或 `--login-only` 决定是否显示浏览器 |
 
 ```bash
-cp "上网电量抓取/config.example.json" "上网电量抓取/config.json"
-cp "每日生产经营情况汇报自动生成工具/scripts/config.example.json" \
-   "每日生产经营情况汇报自动生成工具/scripts/config.json"
+cp "现货价格更新/config.example.json" "现货价格更新/config.json"
 ```
 
-编辑生成的 `config.json` 中的业务字段。尚未保存统一账号时，命令行工具仍兼容原有配置中的 `username`、`password`。
+几条规则：
+
+- 登录只写统一账号。只有需要在命令行调试、且尚未保存统一账号时，才在工具自己的 `config.json` 里写 `username`、`password`；新增的示例文件不带账号占位符，避免占位符覆盖真实账号。
+- 工具自己的 `config.json` 缺少账号时，登录会回退到 `上网电量抓取/config.json`，本地文件里的业务选项不会把共享账号顶掉。
+- `广东电价预测/config.example.json` 和 `每日生产经营情况汇报自动生成工具/scripts/config.example.json` 里的 `username`、`password` 只是占位符，复制后请删除这两行或改成真实值。
 
 下列工具各自保存独立登录态，可以并行运行，互不占用同一个浏览器 profile：
 

@@ -71,6 +71,29 @@ class CredentialStoreTests(unittest.TestCase):
             self.assertEqual(store.path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(list(store.path.parent.glob("*.tmp")), [])
 
+    def test_local_options_do_not_cancel_shared_login_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fallback = root / "上网电量抓取/config.json"
+            fallback.parent.mkdir()
+            fallback.write_text(json.dumps(
+                {"username": "shared", "password": "shared-secret", "headless": True}), encoding="utf-8")
+            local = root / "现货价格更新/config.json"
+            local.parent.mkdir()
+            local.write_text(json.dumps({"headless": False}), encoding="utf-8")
+
+            merged = accounts.read_login_config(local, fallback, workspace=root)
+            self.assertEqual(merged["username"], "shared")
+            self.assertEqual(merged["password"], "shared-secret")
+            self.assertFalse(merged["headless"])
+
+            local.write_text(json.dumps(
+                {"username": "local", "password": "local-secret"}), encoding="utf-8")
+            override = accounts.read_login_config(local, fallback, workspace=root)
+            self.assertEqual(override["username"], "local")
+            self.assertEqual(override["password"], "local-secret")
+            self.assertNotIn("headless", override)
+
     def test_incomplete_edits_and_failed_replace_preserve_saved_account(self):
         with tempfile.TemporaryDirectory() as directory:
             store = accounts.CredentialStore(Path(directory))
