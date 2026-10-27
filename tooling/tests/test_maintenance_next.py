@@ -59,6 +59,38 @@ class MaintenanceNextTests(unittest.TestCase):
         self.assertIs(gui.MappingRow, service.MappingRow)
         self.assertIs(gui.WPS_CHROME_START_LOCK, browser.WPS_CHROME_START_LOCK)
 
+    def test_library_modules_do_not_patch_sys_path(self):
+        """Only entry points and the module loader may adjust sys.path."""
+        import re
+        package = ROOT / "电力工具箱/toolbox"
+        allowed = {"电力工具箱/toolbox/runtime.py"}
+        offenders = []
+        for path in sorted(package.rglob("*.py")):
+            relative = path.relative_to(ROOT).as_posix()
+            if relative in allowed:
+                continue
+            if re.search(r"sys\.path\.(insert|append)", path.read_text(encoding="utf-8")):
+                offenders.append(relative)
+        self.assertEqual(offenders, [], "库模块不应自行修改 sys.path，改由入口脚本负责")
+
+    def test_no_module_injects_the_same_path_twice(self):
+        import re
+        pattern = re.compile(r"sys\.path\.(?:insert|append)\([^)]*\)")
+        duplicates = []
+        skip_roots = {"dist", ".toolbox", "logs", ".venv", ".git", "node_modules", "target", "__pycache__"}
+        for path in sorted(ROOT.rglob("*.py")):
+            relative = path.relative_to(ROOT).as_posix()
+            if skip_roots & set(Path(relative).parts):
+                continue
+            if "/tests/" in relative or relative.startswith("tooling/tests"):
+                continue
+            body = path.read_text(encoding="utf-8", errors="ignore")
+            calls = pattern.findall(body)
+            repeated = {call for call in calls if calls.count(call) > 1}
+            if repeated:
+                duplicates.append((relative, sorted(repeated)))
+        self.assertEqual(duplicates, [], "同一文件重复注入同一路径")
+
     def test_native_exclusive_publish_and_unsupported_rename_fallback(self):
         from toolbox_shared import atomic_output as atomic
         with tempfile.TemporaryDirectory() as temp:
