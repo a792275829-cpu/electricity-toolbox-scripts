@@ -592,17 +592,19 @@ class SummaryApp(tk.Tk):
         self._build_ui()
 
     def _build_ui(self) -> None:
+        from toolbox_file_button import FileSelectButton
+
         container = ttk.Frame(self, padding=14)
         container.pack(fill="both", expand=True)
         container.columnconfigure(1, weight=1)
 
         ttk.Label(container, text="原始数据文件夹").grid(row=0, column=0, sticky="w", pady=(0, 8))
         ttk.Entry(container, textvariable=self.input_var).grid(row=0, column=1, sticky="ew", pady=(0, 8))
-        ttk.Button(container, text="选择文件夹", command=self.choose_input_dir).grid(row=0, column=2, padx=(8, 0), pady=(0, 8))
+        FileSelectButton(container, text="选择文件夹", command=self.choose_input_dir).grid(row=0, column=2, padx=(8, 0), pady=(0, 8))
 
         ttk.Label(container, text="输出文件").grid(row=1, column=0, sticky="w", pady=(0, 8))
         ttk.Entry(container, textvariable=self.output_var).grid(row=1, column=1, sticky="ew", pady=(0, 8))
-        ttk.Button(container, text="选择位置", command=self.choose_output_file).grid(row=1, column=2, padx=(8, 0), pady=(0, 8))
+        FileSelectButton(container, text="选择位置", command=self.choose_output_file).grid(row=1, column=2, padx=(8, 0), pady=(0, 8))
 
         button_row = ttk.Frame(container)
         button_row.grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 10))

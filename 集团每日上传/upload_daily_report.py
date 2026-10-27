@@ -1751,7 +1751,8 @@ def run_gui() -> None:
 
     actions = ttk.Frame(outer)
     actions.pack(fill="x", pady=(0, 10))
-    choose_button = ttk.Button(actions, text="选择文件", command=choose_files)
+    from toolbox_file_button import FileSelectButton
+    choose_button = FileSelectButton(actions, text="选择文件", command=choose_files)
     choose_button.pack(side="left")
     upload_button = ttk.Button(actions, text="开始上传", command=start_upload)
     upload_button.pack(side="left", padx=(8, 0))

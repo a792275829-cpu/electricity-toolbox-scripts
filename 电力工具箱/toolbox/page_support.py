@@ -15,6 +15,7 @@ if str(WORKSPACE) not in sys.path:
 from .file_rules import clearing_file_date
 from toolbox_dates import DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
 from toolbox_date_input import DateInput
+from toolbox_file_button import FileSelectButton
 
 
 def open_directory(path: Path) -> None:
@@ -48,7 +49,7 @@ def default_review_folder_for_date(today: date, review_root: Path | None = None)
 def add_path_row(parent: ttk.Frame, *, row: int, label: str, variable: tk.StringVar, command, button_text: str = "浏览") -> ttk.Button:
     ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=5)
     ttk.Entry(parent, textvariable=variable).grid(row=row, column=1, sticky="ew", pady=5)
-    button = ttk.Button(parent, text=button_text, command=command)
+    button = FileSelectButton(parent, text=button_text, command=command)
     button.grid(row=row, column=2, padx=(8, 0), pady=5)
     parent.columnconfigure(1, weight=1)
     return button

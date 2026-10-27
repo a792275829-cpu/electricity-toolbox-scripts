@@ -18,6 +18,7 @@ WORKSPACE = pathlib.Path(__file__).resolve().parents[2]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
 from toolbox_native_excel import load_value_workbook, excel_session
+from toolbox_file_button import FileSelectButton
 
 
 THERMAL_COMPANIES = ["汕头", "海门", "东莞"]
@@ -1029,7 +1030,7 @@ class ReportApp:
 
         toolbar = ttk.Frame(frame)
         toolbar.pack(fill="x")
-        ttk.Button(toolbar, text="添加文件", command=self.add_files).pack(side="left")
+        FileSelectButton(toolbar, text="添加文件", command=self.add_files).pack(side="left")
         ttk.Button(toolbar, text="移除选中", command=self.remove_selected).pack(side="left", padx=(8, 0))
         ttk.Button(toolbar, text="清空列表", command=self.clear_files).pack(side="left", padx=(8, 0))
 
@@ -1044,7 +1045,7 @@ class ReportApp:
         output_frame = ttk.LabelFrame(frame, text="输出目录", padding=12)
         output_frame.pack(fill="x")
         ttk.Entry(output_frame, textvariable=self.output_dir).pack(side="left", fill="x", expand=True)
-        ttk.Button(output_frame, text="选择目录", command=self.choose_output_dir).pack(side="left", padx=(8, 0))
+        FileSelectButton(output_frame, text="选择目录", command=self.choose_output_dir).pack(side="left", padx=(8, 0))
 
         action_frame = ttk.Frame(frame)
         action_frame.pack(fill="x", pady=(14, 8))

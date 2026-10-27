@@ -6,6 +6,7 @@ import webbrowser
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from toolbox_file_button import FileSelectButton
 
 from .file_dialogs import FileDialogState
 from .page_support import add_path_row, open_directory
@@ -43,7 +44,7 @@ class SectionAnalysisPage(ToolPage):
         )
         self.threshold = tk.StringVar(master=self, value="80")
 
-        self.add_button = ttk.Button(self.actions, text="添加电价文件", command=self.add_files)
+        self.add_button = FileSelectButton(self.actions, text="添加电价文件", command=self.add_files)
         self.add_button.pack(side="left")
         self.remove_button = ttk.Button(self.actions, text="移除选中", command=self.remove_selected)
         self.remove_button.pack(side="left", padx=(8, 0))

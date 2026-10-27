@@ -11,6 +11,7 @@ import tempfile
 import threading
 import tkinter as tk
 from toolbox_choices import OptionCheckbutton, SettingCheckbutton
+from toolbox_file_button import FileSelectButton
 
 from collections.abc import Mapping
 from datetime import date, timedelta
@@ -142,7 +143,7 @@ class TradeAnalysisPage(ToolPage):
         self.output_dir = tk.StringVar(master=self, value=str(Path.home() / "Downloads"))
 
         toolbar = self.actions
-        ttk.Button(toolbar, text="添加文件", command=self.add_files).pack(side="left")
+        FileSelectButton(toolbar, text="添加文件", command=self.add_files).pack(side="left")
         ttk.Button(toolbar, text="自动匹配D和D-2", command=self.auto_match_files).pack(
             side="left", padx=(8, 0)
         )
@@ -559,7 +560,7 @@ class GroupUploadPage(ToolPage):
         ).pack(anchor="w", pady=(8, 0))
 
         actions = self.actions
-        self.choose_button = ttk.Button(
+        self.choose_button = FileSelectButton(
             actions, text="选择文件", command=self.choose_files
         )
         self.choose_button.pack(side="left")

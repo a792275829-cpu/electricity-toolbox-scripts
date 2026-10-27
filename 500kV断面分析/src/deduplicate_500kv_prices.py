@@ -300,6 +300,8 @@ def _safe_sheet_title(title: str, existing_titles: list[str]) -> str:
 def main() -> None:
     import tkinter as tk
     from tkinter import filedialog, messagebox, scrolledtext
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from toolbox_file_button import FileSelectButton
 
     root = tk.Tk()
     root.title("500kV节点电价去重")
@@ -363,7 +365,7 @@ def main() -> None:
 
         status.set(f"处理完成: 成功 {success_count} / {len(selected_files)} 个文件")
 
-    choose_button = tk.Button(toolbar, text="选择Excel文件", width=16, command=choose_files)
+    choose_button = FileSelectButton(toolbar, text="选择Excel文件", command=choose_files)
     choose_button.pack(side=tk.LEFT)
 
     process_button = tk.Button(toolbar, text="开始处理", width=12, command=process_selected)

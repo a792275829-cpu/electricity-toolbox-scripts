@@ -20,6 +20,9 @@ DEFAULT_OUTPUT_DIR = Path.home() / "Downloads"
 
 
 def main() -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from toolbox_file_button import FileSelectButton
+
     root = tk.Tk()
     root.title("500kV 断面分析")
     root.geometry("860x560")
@@ -55,7 +58,7 @@ def main() -> None:
         if path:
             topology_var.set(path)
 
-    tk.Button(frame, text="选择", command=choose_topology).grid(row=0, column=2, sticky="ew", pady=5)
+    FileSelectButton(frame, text="选择拓扑文件", command=choose_topology).grid(row=0, column=2, pady=5)
 
     output_entry = row("输出目录", 1)
     output_entry.configure(textvariable=output_dir_var)
@@ -65,7 +68,7 @@ def main() -> None:
         if path:
             output_dir_var.set(path)
 
-    tk.Button(frame, text="选择", command=choose_output_dir).grid(row=1, column=2, sticky="ew", pady=5)
+    FileSelectButton(frame, text="选择输出目录", command=choose_output_dir).grid(row=1, column=2, pady=5)
 
     tk.Label(frame, text="价差阈值", anchor="w").grid(row=2, column=0, sticky="w", pady=5)
     threshold_entry = tk.Entry(frame, textvariable=threshold_var, width=12)
@@ -88,7 +91,7 @@ def main() -> None:
         for path in selected_files:
             write_log(f"已选择: {path}")
 
-    tk.Button(frame, text="选择原始数据", command=choose_files).grid(row=3, column=2, sticky="ew", pady=(10, 5))
+    FileSelectButton(frame, text="选择原始数据", command=choose_files).grid(row=3, column=2, pady=(10, 5))
 
     log = scrolledtext.ScrolledText(frame, height=20, wrap=tk.WORD)
     log.grid(row=4, column=0, columnspan=3, sticky="nsew", pady=(8, 8))

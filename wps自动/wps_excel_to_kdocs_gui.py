@@ -46,6 +46,7 @@ from toolbox_storage import data_path
 from toolbox_wps_config import (_document_config_from_dict, _region_config_from_dict, _string_list, build_config_export, load_config_export, normalize_runtime_config, runtime_config_from_export_payload, save_config_export)
 from toolbox_log_console import LogConsole, explain_error, redact
 from toolbox_choices import SegmentedGroup
+from toolbox_file_button import FileSelectButton
 from toolbox_wps_urls import url_choices
 
 DATA_DIR = data_path(BASE_DIR)
@@ -1547,7 +1548,7 @@ class MappingDialog(tk.Toplevel):
             if key == "local_file":
                 button_frame = ttk.Frame(self)
                 button_frame.grid(row=row, column=2, padx=10, pady=6)
-                ttk.Button(button_frame, text="选择文件", command=self.browse_local_file).pack(side="left")
+                FileSelectButton(button_frame, text="选择文件", command=self.browse_local_file).pack(side="left")
                 ttk.Button(button_frame, text="刷新工作表", command=self.refresh_local_sheets).pack(side="left", padx=(6, 0))
             elif key == "target_sheet":
                 ttk.Button(self, text="刷新目标工作表", command=self.refresh_online_sheets).grid(
@@ -1863,7 +1864,7 @@ class DocumentConfigDialog(tk.Toplevel):
         ttk.Entry(docs, textvariable=self.local_file).grid(row=5, column=1, padx=8, pady=6, sticky="ew")
         file_buttons = ttk.Frame(docs)
         file_buttons.grid(row=5, column=2, padx=8, pady=6)
-        ttk.Button(file_buttons, text="选择文件", command=self.browse_local_file).pack(side="left")
+        FileSelectButton(file_buttons, text="选择文件", command=self.browse_local_file).pack(side="left")
         ttk.Button(file_buttons, text="刷新工作表", command=self.refresh_local_sheets).pack(side="left", padx=(6, 0))
         ttk.Label(docs, textvariable=self.read_status, style="Muted.TLabel").grid(
             row=6, column=0, columnspan=3, padx=8, pady=(0, 6), sticky="w"
