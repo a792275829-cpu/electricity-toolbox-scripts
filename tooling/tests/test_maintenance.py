@@ -27,7 +27,7 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(unregistered, [], 'Register new tool suites in tooling/run_tests.py')
 
     def test_market_contract_snapshot_and_leap_year_dates(self):
-        from toolbox_market_contracts import MARKET_SERIES
+        from toolbox_shared.market_contracts import MARKET_SERIES
         from openpyxl.utils import column_index_from_string
         snapshot = json.loads((ROOT / "tooling/fixtures/market_contract.json").read_text())
         actual = {k: dict(source_days=v.source_days, sheet=v.sheet,
@@ -47,7 +47,7 @@ class MaintenanceTests(unittest.TestCase):
             MARKET_SERIES['new'] = None
 
     def test_wps_values_import_without_gui_and_contracts(self):
-        from toolbox_wps_values import (normalize_cell_value, compare_matrix,
+        from toolbox_shared.wps_values import (normalize_cell_value, compare_matrix,
                                        range_shape, rects_overlap, target_range_from_start)
         self.assertEqual(normalize_cell_value(datetime(2026, 1, 1, 12)), '2026-01-01 12:00:00')
         self.assertEqual(compare_matrix([[0, None, .125]], [['0', '', '.125']], 1, 3), [])
@@ -57,7 +57,7 @@ class MaintenanceTests(unittest.TestCase):
         self.assertFalse(rects_overlap((1, 1, 2, 2), (3, 1, 4, 2)))
 
     def test_batch_preflight_fail_fast_and_partial_completion(self):
-        from toolbox_trade_batch import iter_batch_reports
+        from toolbox_shared.trade_batch import iter_batch_reports
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             output = root / 'output'
@@ -96,10 +96,10 @@ class MaintenanceTests(unittest.TestCase):
     def test_packaged_runtime_includes_extracted_modules(self):
         sys.path.insert(0, str(ROOT/'packaging/tauri'))
         from prepare_payload import runtime_source
-        names = ('toolbox_market_contracts.py', 'toolbox_wps_values.py',
-                     'toolbox_atomic_output.py', 'toolbox_wps_browser.py', 'toolbox_wps_service.py', 'toolbox_wps_paths.py',
-                     'toolbox_trade_report.py', 'toolbox_province_excel.py',
-                     'toolbox_trade_batch.py', '500kV断面分析/src/map_html_view.py',
+        names = ('toolbox_shared/market_contracts.py', 'toolbox_shared/wps_values.py',
+                     'toolbox_shared/atomic_output.py', 'toolbox_shared/wps_browser.py', 'toolbox_shared/wps_service.py', 'toolbox_shared/wps_paths.py',
+                     'toolbox_shared/trade_report.py', 'toolbox_shared/province_excel.py',
+                     'toolbox_shared/trade_batch.py', '500kV断面分析/src/map_html_view.py',
                      '南方分公司电力市场日报/gd_power_report/clearing_table_view.py')
         for name in names:
             self.assertTrue(runtime_source(Path(name)), name)
@@ -114,9 +114,9 @@ class MaintenanceTests(unittest.TestCase):
             check = subprocess.run([sys.executable, '-B', '-c',
                 "import sys; from pathlib import Path; "
                 "sys.path[:0]=['.', '电力工具箱', '500kV断面分析', '南方分公司电力市场日报']; "
-                "import toolbox_trade_batch, toolbox_market_contracts, toolbox_wps_values; "
-                "import toolbox_trade_report, toolbox_province_excel; "
-                "import toolbox_wps_browser, toolbox_wps_service; "
+                "from toolbox_shared import trade_batch as toolbox_trade_batch, market_contracts as toolbox_market_contracts, wps_values as toolbox_wps_values; "
+                "from toolbox_shared import trade_report as toolbox_trade_report, province_excel as toolbox_province_excel; "
+                "from toolbox_shared import wps_browser as toolbox_wps_browser, wps_service as toolbox_wps_service; "
                 "from src.build_500kv_map_html import _render_html; "
                 "from gd_power_report.company_clearing_xlsx import _display_value; "
                 "assert _display_value(.125, '0.0%') == '12.5%'; "

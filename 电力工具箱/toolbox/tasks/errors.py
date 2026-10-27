@@ -56,7 +56,7 @@ class UserFacingError:
 
 def classify_error(exc: BaseException, output: str = "") -> UserFacingError:
     import re
-    from toolbox_log_console import explain_error, redact
+    from toolbox_shared.log_console import explain_error, redact
 
     if isinstance(exc, TaskCancelled):
         return UserFacingError(ErrorCategory.CANCELLED, "任务已取消", "可以调整参数后重新运行。", exc)

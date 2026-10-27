@@ -8,7 +8,7 @@ from unittest import mock
 from openpyxl import load_workbook
 
 import export_online_energy as report_export
-from toolbox_storage import data_path
+from toolbox_shared.storage import data_path
 
 
 class ReportExportReuseTests(unittest.TestCase):

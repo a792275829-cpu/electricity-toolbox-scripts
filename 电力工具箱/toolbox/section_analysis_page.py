@@ -6,7 +6,7 @@ import webbrowser
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from toolbox_file_button import FileSelectButton
+from toolbox_shared.file_button import FileSelectButton
 
 from .file_dialogs import FileDialogState
 from .page_support import add_path_row, open_directory

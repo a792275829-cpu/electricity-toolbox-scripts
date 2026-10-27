@@ -11,7 +11,7 @@ import pandas as pd
 from pandas.testing import assert_frame_equal
 from openpyxl import Workbook
 from toolbox.runtime import load_module
-import toolbox_native_excel as excel
+from toolbox_shared import native_excel as excel
 
 ROOT = Path(__file__).resolve().parents[2]
 

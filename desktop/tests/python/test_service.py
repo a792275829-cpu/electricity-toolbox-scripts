@@ -199,7 +199,7 @@ class ServiceTaskTests(unittest.TestCase):
         module = Mock()
         module.read_online_ranges.return_value = [[[1, 2]]]
         requests = [['https://example.invalid/doc', 'Sheet1', 'A1:B1', 1, 2]]
-        with patch.dict(sys.modules, {'toolbox_wps_service': module}):
+        with patch.dict(sys.modules, {'toolbox_shared.wps_service': module}):
             result = execute_wps(ToolPaths(ROOT), 'inspect', dict(operation=json.dumps(dict(method='read_online_ranges', arguments=dict(requests=requests, browser_mode='cdp', cdp_url='http://127.0.0.1:9222')))), lambda _: None)
         self.assertEqual(result, [[[1, 2]]])
         self.assertEqual(module.read_online_ranges.call_args.kwargs['requests'], requests)

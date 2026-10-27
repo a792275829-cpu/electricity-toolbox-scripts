@@ -4,7 +4,7 @@ import shlex
 import queue
 import threading
 import tkinter as tk
-from toolbox_choices import SegmentedGroup
+from toolbox_shared.choices import SegmentedGroup
 
 from datetime import date, timedelta
 from pathlib import Path

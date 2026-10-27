@@ -19,7 +19,7 @@ from functools import wraps
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from toolbox_native_compute import unmix as native_unmix, with_native_session
+from toolbox_shared.native_compute import unmix as native_unmix, with_native_session
 
 _pdf_inputs = ContextVar("pdf_inputs", default=None)
 

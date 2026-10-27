@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class ExcelStreamReadTests(unittest.TestCase):
     def test_sparse_read_preserves_values_formats_and_scans_each_sheet_once(self):
-        reader = load_module("excel_stream_reader_test", ROOT / "toolbox_excel_read.py")
+        reader = load_module("excel_stream_reader_test", ROOT / "toolbox_shared/excel_read.py")
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "input.xlsx"
             workbook = Workbook()

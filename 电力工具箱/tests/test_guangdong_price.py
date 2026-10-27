@@ -242,7 +242,7 @@ class GuangdongForecastTests(unittest.TestCase):
                 self.forecast, "run_pipeline", return_value={"mae": 0.0}
             ) as pipeline, mock.patch("builtins.print"):
                 self.forecast.main()
-            from toolbox_storage import data_path
+            from toolbox_shared.storage import data_path
             self.assertEqual((data_path(PROJECT / "自选/总表.xlsx"), data_path(PROJECT / "自选/预测")), pipeline.call_args.args)
 
     def test_pipeline_exports_actual_workbook_and_rejects_unsupported_days(self) -> None:

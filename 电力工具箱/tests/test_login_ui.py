@@ -19,7 +19,7 @@ from toolbox.runtime import ToolPaths
 
 class LoginFlowTests(unittest.TestCase):
     def test_manual_login_waits_for_browser_without_reading_stdin(self):
-        import toolbox_auth_loader
+        from toolbox_shared import auth_loader as toolbox_auth_loader
         check = mock.Mock(side_effect=(False, True))
         with mock.patch("builtins.input", side_effect=AssertionError("No terminal input in GUI")), mock.patch.object(toolbox_auth_loader.time, "sleep"):
             toolbox_auth_loader.wait_for_login(check)
@@ -47,7 +47,7 @@ class LoginFlowTests(unittest.TestCase):
         return auth, context
 
     def test_standalone_login_prefers_saved_credentials(self):
-        import toolbox_auth_loader
+        from toolbox_shared import auth_loader as toolbox_auth_loader
         auth, context = self._standalone_auth(auto_login=True)
         log = mock.Mock()
         with mock.patch("playwright.sync_api.sync_playwright"):
@@ -61,7 +61,7 @@ class LoginFlowTests(unittest.TestCase):
         log.assert_called_once_with("自动登录成功，独立登录态已保存。")
 
     def test_standalone_login_falls_back_to_manual_login(self):
-        import toolbox_auth_loader
+        from toolbox_shared import auth_loader as toolbox_auth_loader
         auth, context = self._standalone_auth(auto_login=False)
         page = mock.Mock()
         context.new_page.return_value = page

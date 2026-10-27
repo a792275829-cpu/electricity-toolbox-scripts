@@ -1,13 +1,14 @@
 """GUI-independent validation and execution of the toolbox's existing tools."""
 from __future__ import annotations
 
+import importlib
 import json
 import math
 import subprocess
 from pathlib import Path
 
-from toolbox_dates import normalize_date_input, parse_date_input
-from toolbox_storage import data_path
+from toolbox_shared.dates import normalize_date_input, parse_date_input
+from toolbox_shared.storage import data_path
 from . import commands
 from .file_rules import default_output_for_pdf
 from .runtime import load_module, node_executable, python_executable
@@ -93,7 +94,7 @@ def plan(paths, tool_id, action, p):
     if tool_id == "trade-analysis":
         sources = selected_files(p)
         output = required_path(p, "output_dir", exists=False)
-        from toolbox_trade_batch import plan_batch_outputs
+        from toolbox_shared.trade_batch import plan_batch_outputs
         plan_batch_outputs(sources, output)
     elif tool_id == "market-table":
         return [(commands.market_table(paths, day("run_date"), required_path(p, "workbook")), paths.market_table_update_dir)]
@@ -216,7 +217,7 @@ def execute(paths, tool_id, action, p):
         return dict(message="任务已完成，请核对日志及输出文件", outputs=outputs)
     log = lambda text: print(str(text), flush=True)
     if tool_id == "trade-analysis":
-        from toolbox_trade_report import batch_reports
+        from toolbox_shared.trade_report import batch_reports
         output_dir = Path(p["output_dir"]).expanduser()
         output_dir.mkdir(parents=True, exist_ok=True)
         outputs = []
@@ -255,7 +256,8 @@ def execute(paths, tool_id, action, p):
 
 
 def execute_wps(paths, action, p, log):
-    import toolbox_wps_service as module
+    # Imported by name so tests can substitute the module before the WPS stack loads.
+    module = importlib.import_module("toolbox_shared.wps_service")
     operation = json.loads(p.get("operation", "{}"))
     if action == "inspect":
         method = operation.get("method")

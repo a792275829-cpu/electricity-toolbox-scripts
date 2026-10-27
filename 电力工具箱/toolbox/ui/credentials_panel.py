@@ -9,8 +9,8 @@ from tkinter import ttk
 WORKSPACE = Path(__file__).resolve().parents[3]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
-from toolbox_credentials import CredentialStore
-from toolbox_choices import SettingCheckbutton
+from toolbox_shared.credentials import CredentialStore
+from toolbox_shared.choices import SettingCheckbutton
 
 
 class CredentialsPanel(ttk.Frame):

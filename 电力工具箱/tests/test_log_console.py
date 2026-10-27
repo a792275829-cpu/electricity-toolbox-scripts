@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from toolbox_log_console import LogConsole, _LogBuffer, explain_error, redact
+from toolbox_shared.log_console import LogConsole, _LogBuffer, explain_error, redact
 
 
 class DiagnosisTests(unittest.TestCase):

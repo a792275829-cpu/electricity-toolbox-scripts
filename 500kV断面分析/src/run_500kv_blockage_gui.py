@@ -21,7 +21,7 @@ DEFAULT_OUTPUT_DIR = Path.home() / "Downloads"
 
 def main() -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from toolbox_file_button import FileSelectButton
+    from toolbox_shared.file_button import FileSelectButton
 
     root = tk.Tk()
     root.title("500kV 断面分析")

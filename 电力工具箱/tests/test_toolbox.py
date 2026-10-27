@@ -144,7 +144,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(module.playwright_proxy(), {"server": "http://127.0.0.1:7890"})
 
     def test_login_state_paths_are_separate_for_parallel_tools(self) -> None:
-        from toolbox_storage import data_path
+        from toolbox_shared.storage import data_path
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
@@ -1203,7 +1203,7 @@ class PageAdapterTests(unittest.TestCase):
     def test_wps_writer_imports_exported_config_payload(self) -> None:
         from toolbox.runtime import load_module
 
-        module = importlib.import_module('toolbox_wps_service')
+        module = importlib.import_module('toolbox_shared.wps_service')
         payload = {
             "schema": "wps_excel_to_kdocs_config_export",
             "version": 1,
@@ -1242,7 +1242,7 @@ class PageAdapterTests(unittest.TestCase):
     def test_wps_writer_exports_runtime_config_with_schema(self) -> None:
         from toolbox.runtime import load_module
 
-        module = importlib.import_module('toolbox_wps_service')
+        module = importlib.import_module('toolbox_shared.wps_service')
         runtime_config = {
             "recent_urls": ["https://www.kdocs.cn/l/target"],
             "browser_mode": "persistent",

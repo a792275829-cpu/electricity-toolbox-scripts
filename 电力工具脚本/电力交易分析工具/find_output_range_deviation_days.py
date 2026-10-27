@@ -16,8 +16,8 @@ WORKSPACE = SCRIPT_DIR.parents[1]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
 
-from toolbox_trade_report import ReportBuilder, THERMAL_COMPANIES, fmt
-from toolbox_native_excel import load_value_workbook
+from toolbox_shared.trade_report import ReportBuilder, THERMAL_COMPANIES, fmt
+from toolbox_shared.native_excel import load_value_workbook
 
 
 DEFAULT_INPUT_DIR = Path.home() / "Downloads" / "haimen shouxian"

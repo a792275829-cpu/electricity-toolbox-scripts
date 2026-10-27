@@ -16,9 +16,9 @@ from openpyxl.utils.datetime import CALENDAR_MAC_1904
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT), str(ROOT / "500kV断面分析"), str(ROOT / "广东电价预测"), str(ROOT / "广东运行日报PDF解析")]
 from toolbox.runtime import load_module
-from toolbox_native_excel import native_binary, read_model_frame
-import toolbox_native_compute as compute
-import toolbox_native_write as writer
+from toolbox_shared.native_excel import native_binary, read_model_frame
+from toolbox_shared import native_compute as compute
+from toolbox_shared import native_write as writer
 from src.deduplicate_500kv_prices import _indexed_topology_matcher, match_topology_node
 from gd_price_forecast.features import build_features, FORECAST_COLUMNS
 from gd_pdf_tool.parser import _unmix_bar_colors_python

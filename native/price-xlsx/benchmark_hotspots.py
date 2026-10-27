@@ -16,8 +16,8 @@ from pandas.testing import assert_frame_equal
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT), str(ROOT/'电力工具箱'),str(ROOT/'电力工具脚本/电力交易分析工具')]
 from toolbox.runtime import load_module
-import toolbox_native_excel as excel
-import toolbox_native_write as writer
+from toolbox_shared import native_excel as excel
+from toolbox_shared import native_write as writer
 
 
 def snapshot(path):

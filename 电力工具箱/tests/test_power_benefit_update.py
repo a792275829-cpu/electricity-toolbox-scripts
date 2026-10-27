@@ -174,7 +174,7 @@ class PowerBenefitTests(unittest.TestCase):
             self.assertFalse(list(Path(folder).glob(".*.xlsx")))
 
     def test_auth_profile_and_lock_are_independent(self):
-        from toolbox_storage import data_path
+        from toolbox_shared.storage import data_path
         m=self.module; auth=m.load_auth_module()
         self.assertEqual(auth.AUTH_STATE_PATH,data_path(m.SCRIPT_DIR/"auth_state.json"))
         self.assertEqual(auth.AUTH_LOCK_PATH,data_path(m.SCRIPT_DIR/"auth_state.json.lock"))

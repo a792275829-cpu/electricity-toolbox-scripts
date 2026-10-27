@@ -45,7 +45,7 @@ def legacy_module():
 
 class TradeEngineTests(unittest.TestCase):
     def test_outputs_match_pre_refactor_contract_in_both_backends(self):
-        from toolbox_trade_report import ReportBuilder, generate_report
+        from toolbox_shared.trade_report import ReportBuilder, generate_report
         legacy = legacy_module()
         self.assertIs(legacy.ReportBuilder, ReportBuilder)
         cases = json.loads(Path(__file__).with_name('trade_render_contract.json').read_text())

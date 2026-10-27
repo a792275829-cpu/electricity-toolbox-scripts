@@ -11,7 +11,7 @@ import sys
 WORKSPACE = Path(__file__).resolve().parent.parent
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
-from toolbox_dates import parse_date_input
+from toolbox_shared.dates import parse_date_input
 
 from gd_power_report.company_clearing_xlsx import (
     infer_day_ahead_comparison_date,

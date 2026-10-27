@@ -18,14 +18,14 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = SCRIPT_DIR.parent
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
-from toolbox_auth_loader import load_login_module, standalone_login
-from toolbox_credentials import apply_credentials
-from toolbox_dates import normalize_date_input
+from toolbox_shared.auth_loader import load_login_module, standalone_login
+from toolbox_shared.credentials import apply_credentials
+from toolbox_shared.dates import normalize_date_input
 
 BASE_URL = "https://xhxt.chng.com.cn"
 APP_URL = f"{BASE_URL}/gdfire/PrivateDataManageCE/SpotBasicInfoSubmit"
 API_URL = f"{BASE_URL}/gdfire/api/data/personal/newEnergy/basic/query/v1"
-from toolbox_storage import data_path, wind_forecast_output_dir
+from toolbox_shared.storage import data_path, wind_forecast_output_dir
 
 PROFILE_DIR = data_path(SCRIPT_DIR / ".browser-profile")
 AUTH_STATE_PATH = data_path(SCRIPT_DIR / "auth_state.json")

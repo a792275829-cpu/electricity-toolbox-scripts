@@ -301,7 +301,7 @@ def main() -> None:
     import tkinter as tk
     from tkinter import filedialog, messagebox, scrolledtext
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from toolbox_file_button import FileSelectButton
+    from toolbox_shared.file_button import FileSelectButton
 
     root = tk.Tk()
     root.title("500kV节点电价去重")

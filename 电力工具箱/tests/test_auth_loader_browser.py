@@ -9,7 +9,7 @@ from unittest import mock
 
 from playwright.sync_api import sync_playwright
 
-from toolbox_auth_loader import load_login_module
+from toolbox_shared.auth_loader import load_login_module
 
 
 class FreshBrowserStateTests(unittest.TestCase):

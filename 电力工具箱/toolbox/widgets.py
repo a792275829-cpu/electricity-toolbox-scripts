@@ -11,7 +11,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Callable, TypeVar
 
-from toolbox_log_console import LogConsole
+from toolbox_shared.log_console import LogConsole
 
 from .runtime import TaskRegistry, utf8_environment
 from .tasks import TaskSnapshot, TaskState, classify_error

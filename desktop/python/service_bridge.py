@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT), str(ROOT / "电力工具箱")]
 from toolbox.service import ToolboxService
 from toolbox.tasks import TaskEvent, TaskEventKind
-from toolbox_redaction import redact
+from toolbox_shared.redaction import redact
 from github_update import GitHubUpdater
 
 

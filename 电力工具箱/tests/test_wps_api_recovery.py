@@ -17,7 +17,7 @@ def load_writer():
 
 class WpsOperationRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.module = importlib.import_module('toolbox_wps_service')
+        self.module = importlib.import_module('toolbox_shared.wps_service')
         self.page = mock.Mock()
         self.ready = {"ready": True, "title": "Test document", "url": "about:blank"}
 
@@ -119,7 +119,7 @@ class WpsBrowserRecoveryTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.module = importlib.import_module('toolbox_wps_service')
+        cls.module = importlib.import_module('toolbox_shared.wps_service')
         if cls.module.sync_playwright is None:
             raise unittest.SkipTest("Playwright is unavailable")
         cls.playwright = cls.module.sync_playwright().start()

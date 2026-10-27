@@ -27,10 +27,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = SCRIPT_DIR.parent
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
-from toolbox_credentials import mark_browser_session, prepare_browser_session, read_login_config
-from toolbox_auth_loader import wait_for_login
-from toolbox_dates import normalize_date_input
-from toolbox_province_excel import (
+from toolbox_shared.credentials import mark_browser_session, prepare_browser_session, read_login_config
+from toolbox_shared.auth_loader import wait_for_login
+from toolbox_shared.dates import normalize_date_input
+from toolbox_shared.province_excel import (
     number_or_none,
     format_formula_number,
     replace_capacity_in_formula,
@@ -55,7 +55,7 @@ DEFAULT_DAILY_REPORT_TEMPLATE_ID = "e4dccaa498651f38019877e865fe0022"
 REPORT_API_TIMEOUT_MS = 60000
 DAY_REPORT_TENANT_NAMES = ("广东分公司", "中国华能集团有限公司广东分公司", "华能广东分公司")
 
-from toolbox_storage import data_path
+from toolbox_shared.storage import data_path
 
 PROFILE_DIR = data_path(SCRIPT_DIR / ".browser-profile")
 AUTH_STATE_PATH = data_path(SCRIPT_DIR / "auth_state.json")
@@ -1685,7 +1685,7 @@ def run_gui() -> None:
 
     actions = ttk.Frame(outer)
     actions.pack(fill="x", pady=(0, 10))
-    from toolbox_file_button import FileSelectButton
+    from toolbox_shared.file_button import FileSelectButton
     choose_button = FileSelectButton(actions, text="选择文件", command=choose_files)
     choose_button.pack(side="left")
     upload_button = ttk.Button(actions, text="开始上传", command=start_upload)

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from toolbox_workbook_commit import commit_workbooks, workbook_commit_lock, workbook_fingerprint
+from toolbox_shared.workbook_commit import commit_workbooks, workbook_commit_lock, workbook_fingerprint
 
 
 class WorkbookCommitTests(unittest.TestCase):
@@ -53,7 +53,7 @@ class WorkbookCommitTests(unittest.TestCase):
             root = Path(directory)
             item = self.prepare(root, "a")
             script = (
-                "from pathlib import Path; from toolbox_workbook_commit import workbook_commit_lock; "
+                "from pathlib import Path; from toolbox_shared.workbook_commit import workbook_commit_lock; "
                 "import sys; "
                 "lock=workbook_commit_lock([Path(sys.argv[1])]); lock.__enter__(); lock.__exit__(None,None,None)"
             )

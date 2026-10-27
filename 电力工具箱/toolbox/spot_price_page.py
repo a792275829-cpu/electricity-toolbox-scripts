@@ -3,7 +3,7 @@ from __future__ import annotations
 from . import commands
 
 import tkinter as tk
-from toolbox_choices import OptionCheckbutton, SettingCheckbutton
+from toolbox_shared.choices import OptionCheckbutton, SettingCheckbutton
 
 from datetime import date, timedelta
 from pathlib import Path

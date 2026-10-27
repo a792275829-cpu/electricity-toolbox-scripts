@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 import unittest
 
-from toolbox_choices import OptionCheckbutton, SettingCheckbutton, SegmentedGroup
+from toolbox_shared.choices import OptionCheckbutton, SettingCheckbutton, SegmentedGroup
 from toolbox.ui.theme import configure_theme
 
 

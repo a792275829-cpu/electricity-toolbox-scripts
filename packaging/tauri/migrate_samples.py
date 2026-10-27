@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT), str(ROOT / "电力工具箱")]
 from toolbox.catalog import default_catalog
-from toolbox_credentials import write_private_json
+from toolbox_shared.credentials import write_private_json
 
 ONLINE_ONLY = {"online-energy", "wind-forecast"}
 ALLOWED_SUFFIXES = {".xlsx", ".xls", ".xlsm", ".docx", ".pdf", ".md", ".json", ".csv", ".txt"}

@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from openpyxl import Workbook, load_workbook
-import toolbox_province_excel as province
+from toolbox_shared import province_excel as province
 
 
 class ProvinceExcelTests(unittest.TestCase):

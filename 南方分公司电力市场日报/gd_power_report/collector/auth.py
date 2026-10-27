@@ -9,7 +9,7 @@ from types import ModuleType
 WORKSPACE = Path(__file__).resolve().parents[3]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
-from toolbox_auth_loader import load_login_module
+from toolbox_shared.auth_loader import load_login_module
 
 
 def load_toolbox_auth_module(workspace: Path, state_dir: Path) -> ModuleType:

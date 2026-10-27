@@ -10,15 +10,15 @@ import sys
 import tempfile
 import threading
 import tkinter as tk
-from toolbox_choices import OptionCheckbutton, SettingCheckbutton
-from toolbox_file_button import FileSelectButton
+from toolbox_shared.choices import OptionCheckbutton, SettingCheckbutton
+from toolbox_shared.file_button import FileSelectButton
 
 from collections.abc import Mapping
 from datetime import date, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from toolbox_storage import data_path
+from toolbox_shared.storage import data_path
 from .file_dialogs import FileDialogState
 from .runtime import (
     TaskRegistry,
@@ -269,7 +269,7 @@ class TradeAnalysisPage(ToolPage):
         self.clear_log()
 
         def worker() -> list[Path]:
-            from toolbox_trade_report import batch_reports
+            from toolbox_shared.trade_report import batch_reports
             outputs: list[Path] = []
             for source, output, _, _ in batch_reports(selected_files, output_dir):
                 outputs.append(output)

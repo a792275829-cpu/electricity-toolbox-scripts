@@ -58,7 +58,7 @@ def worker(args):
             detail.update(verify_seconds=sum(verify_time),cells=len(prepared.expectations))
             result=lambda:xml_digest(prepared.temporary)
         elif args.job=='transport':
-            import toolbox_native_excel as excel
+            from toolbox_shared import native_excel as excel
             if before:
                 excel=module('all_trial_old_excel',args.baseline_dir/'toolbox_native_excel.py')
                 excel.native_binary=lambda: args.baseline_dir/'bin/toolbox-price-xlsx'
@@ -81,7 +81,7 @@ def worker(args):
             detail.update(shape=list(frame.shape),incremental_used=bool(selected and selected[0]))
             result=lambda:frame_digest(frame)
         else:
-            import toolbox_native_excel as excel
+            from toolbox_shared import native_excel as excel
             from toolbox.runtime import load_module
             m=load_module('all_trial_report',ROOT/'电力工具脚本/电力交易分析工具/generate_electricity_report.py')
             paths=args.batch_inputs
@@ -109,7 +109,7 @@ def run(args):
     with tempfile.TemporaryDirectory(prefix='forecast-merge-input-') as folder:
         cache=Path(folder)/'frame.pkl'
         sys.path.insert(0,str(ROOT))
-        from toolbox_native_excel import read_model_frame
+        from toolbox_shared.native_excel import read_model_frame
         read_model_frame(args.forecast).to_pickle(cache)
         for job in args.jobs:
             values={'before':[],'after':[]};reference=None

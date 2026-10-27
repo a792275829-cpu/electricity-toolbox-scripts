@@ -11,7 +11,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from toolbox_native_excel import call, native_binary
+from toolbox_shared.native_excel import call, native_binary
 
 
 @dataclass(frozen=True)

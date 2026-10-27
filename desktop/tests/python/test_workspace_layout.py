@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT), str(ROOT / "packaging/tauri")]
 import workspace_layout as layout
 import prepare_workspace as installer
-from toolbox_storage import data_path
+from toolbox_shared.storage import data_path
 
 
 class LayoutTests(unittest.TestCase):
@@ -184,7 +184,7 @@ class StoragePathTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("payload_layout_test", ROOT / "packaging/tauri/prepare_payload.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        for name in ("desktop/python/native_bridge.py", "toolbox_storage.py", "风力预测截图/fonts/NotoSerifSC.ttf",
+        for name in ("desktop/python/native_bridge.py", "toolbox_shared/storage.py", "风力预测截图/fonts/NotoSerifSC.ttf",
                      "每日生产经营情况汇报自动生成工具/模板/每日生产经营情况汇报（自动）.docx", "500kV断面分析/500kV节点拓扑.md"):
             self.assertTrue(module.runtime_source(Path(name)), name)
         for name in ("desktop/tests/python/test_desktop.py", "desktop/src/App.tsx", "packaging/tauri/prepare_payload.py",

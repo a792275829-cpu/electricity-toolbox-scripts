@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from toolbox_storage import data_path
+from toolbox_shared.storage import data_path
 
 MODULE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_MASTER_WORKBOOK = data_path(MODULE_DIR) / "输出" / "广东电价数据总表.xlsx"

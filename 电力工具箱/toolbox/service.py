@@ -9,9 +9,9 @@ from collections import deque
 from dataclasses import asdict
 from pathlib import Path
 
-from toolbox_credentials import CredentialStore
-from toolbox_redaction import redact
-from toolbox_storage import data_path
+from toolbox_shared.credentials import CredentialStore
+from toolbox_shared.redaction import redact
+from toolbox_shared.storage import data_path
 from .runtime import ToolPaths, TaskRegistry, python_executable, utf8_environment
 from .service_catalog import desktop_catalog
 from .tasks import ProcessRunner, ProcessExecutionError, TaskEvent, TaskEventKind
@@ -154,7 +154,7 @@ class ToolboxService:
             return list(self._tools.values())
         if method == "auto_match":
             from datetime import date, timedelta
-            from toolbox_dates import parse_date_input
+            from toolbox_shared.dates import parse_date_input
             from . import file_rules
             tool = params.get("tool_id")
             if tool == "trade-analysis":
@@ -202,7 +202,7 @@ class ToolboxService:
             path = data_path(self.paths.wps_writer_dir) / "wps_excel_to_kdocs_config.json"
             if not path.is_file():
                 path = self.paths.wps_writer_dir / "wps_excel_to_kdocs_config.defaults.json"
-            from toolbox_wps_config import normalize_runtime_config
+            from toolbox_shared.wps_config import normalize_runtime_config
             raw = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
             raw.setdefault("browser_mode", "managed_cdp")
             return normalize_runtime_config(raw)
@@ -210,11 +210,11 @@ class ToolboxService:
             config = params.get("config")
             if not isinstance(config, dict) or not isinstance(config.get("configs"), list):
                 raise ValueError("WPS 配置格式无效")
-            from toolbox_credentials import write_private_json
+            from toolbox_shared.credentials import write_private_json
             write_private_json(data_path(self.paths.wps_writer_dir) / "wps_excel_to_kdocs_config.json", config)
             return True
         if method in {"wps.import", "wps.export"}:
-            from toolbox_wps_config import load_config_export, save_config_export
+            from toolbox_shared.wps_config import load_config_export, save_config_export
             path = Path(str(params.get("path", ""))).expanduser()
             if path.suffix.lower() != ".json":
                 raise ValueError("请选择 JSON 配置文件")

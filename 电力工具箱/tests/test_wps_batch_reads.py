@@ -15,7 +15,7 @@ from toolbox.runtime import load_module
 class WpsBatchReadTests(unittest.TestCase):
     def test_multiple_ranges_use_one_open_and_keep_values_in_mapping_order(self) -> None:
         root = Path(__file__).resolve().parents[2]
-        module = importlib.import_module('toolbox_wps_service')
+        module = importlib.import_module('toolbox_shared.wps_service')
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.xlsx"
             workbook = Workbook()
@@ -60,7 +60,7 @@ class WpsBatchReadTests(unittest.TestCase):
 
     def test_online_and_excel_sources_keep_original_mapping_order(self) -> None:
         root = Path(__file__).resolve().parents[2]
-        module = importlib.import_module('toolbox_wps_service')
+        module = importlib.import_module('toolbox_shared.wps_service')
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.xlsx"
             workbook = Workbook()
@@ -88,7 +88,7 @@ class WpsBatchReadTests(unittest.TestCase):
 
     def test_online_regions_share_context_and_preserve_order(self) -> None:
         root = Path(__file__).resolve().parents[2]
-        module = importlib.import_module('toolbox_wps_service')
+        module = importlib.import_module('toolbox_shared.wps_service')
         requests = [
             ("https://example.invalid/a", "数据", "B2", 1, 1),
             ("https://example.invalid/b", "补充", "A1:B1", 1, 2),
@@ -107,7 +107,7 @@ class WpsBatchReadTests(unittest.TestCase):
 
     def test_online_failure_closes_owned_context_and_stops_remaining_reads(self) -> None:
         root = Path(__file__).resolve().parents[2]
-        module = importlib.import_module('toolbox_wps_service')
+        module = importlib.import_module('toolbox_shared.wps_service')
         requests = [("https://example.invalid/a", "数据", "A1", 1, 1)] * 3
         for owned in (False, True):
             with self.subTest(owned=owned):

@@ -16,13 +16,13 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-import toolbox_credentials as accounts
+from toolbox_shared import credentials as accounts
 from toolbox.runtime import load_module
 
 
 class CredentialStoreTests(unittest.TestCase):
     def test_empty_desktop_data_root_has_independent_working_locks(self):
-        from toolbox_auth_loader import load_login_module
+        from toolbox_shared.auth_loader import load_login_module
 
         tools = ("市场表更新", "现货价格更新", "交易系统信息更新", "功率调整收益统计表更新",
                  "风力预测截图", "广东运行日报PDF解析", "每日生产经营情况汇报自动生成工具/scripts")

@@ -17,11 +17,11 @@ from tkinter import filedialog, messagebox, ttk
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR.parent) not in sys.path:
     sys.path.insert(0, str(BASE_DIR.parent))
-from toolbox_log_console import LogConsole, explain_error, redact
-from toolbox_choices import SegmentedGroup
-from toolbox_file_button import FileSelectButton
-from toolbox_wps_urls import url_choices
-from toolbox_wps_paths import (
+from toolbox_shared.log_console import LogConsole, explain_error, redact
+from toolbox_shared.choices import SegmentedGroup
+from toolbox_shared.file_button import FileSelectButton
+from toolbox_shared.wps_urls import url_choices
+from toolbox_shared.wps_paths import (
     BASE_DIR,
     DATA_DIR,
     CONFIG_PATH,
@@ -38,8 +38,8 @@ from toolbox_wps_paths import (
     WPS_LOGIN_STATUS_URL,
     LOGIN_STATUS_POLL_MS,
 )
-from toolbox_wps_config import (CONFIG_EXPORT_SCHEMA, CONFIG_EXPORT_VERSION, _document_config_from_dict, _region_config_from_dict, _string_list, build_config_export, load_config_export, normalize_runtime_config, runtime_config_from_export_payload, save_config_export)
-from toolbox_wps_values import (
+from toolbox_shared.wps_config import (CONFIG_EXPORT_SCHEMA, CONFIG_EXPORT_VERSION, _document_config_from_dict, _region_config_from_dict, _string_list, build_config_export, load_config_export, normalize_runtime_config, runtime_config_from_export_payload, save_config_export)
+from toolbox_shared.wps_values import (
     normalize_cell_value,
     normalize_for_compare,
     values_equivalent,
@@ -56,7 +56,7 @@ from toolbox_wps_values import (
     compare_matrix,
 )
 
-from toolbox_wps_browser import (
+from toolbox_shared.wps_browser import (
     browser_has_page,
     ensure_background_cdp_target,
     find_or_open_page,
@@ -84,7 +84,7 @@ from toolbox_wps_browser import (
     ensure_wps_dedicated_chrome,
     open_browser_context,
 )
-from toolbox_wps_service import (
+from toolbox_shared.wps_service import (
     MappingRow,
     RegionRow,
     DocumentConfig,
@@ -109,7 +109,7 @@ from toolbox_wps_service import (
     read_online_ranges,
     WPS_APPLICATION_GUARD,
 )
-import toolbox_wps_service as _wps_service
+from toolbox_shared import wps_service as _wps_service
 
 _REMOTE_BUSINESS = None
 

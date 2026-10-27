@@ -32,18 +32,20 @@ class PriceXlsxPackagingTests(unittest.TestCase):
             staged = payload / "app" / name
             staged.parent.mkdir(parents=True)
             shutil.copy2(binary, staged)
-            adapter_name = "toolbox_native_excel.py"
-            self.assertTrue(prepare_payload.runtime_source(Path(adapter_name)))
-            shutil.copy2(ROOT / adapter_name, payload / "app" / adapter_name)
-            helpers = ["toolbox_native_compute.py", "toolbox_native_write.py", "toolbox_workbook_inspection.py"]
-            for helper in helpers:
-                self.assertTrue(prepare_payload.runtime_source(Path(helper)))
-                shutil.copy2(ROOT / helper, payload / "app" / helper)
+            modules = sorted(path for path in (ROOT / "toolbox_shared").glob("*.py"))
+            module_files = []
+            for module in modules:
+                relative = module.relative_to(ROOT).as_posix()
+                self.assertTrue(prepare_payload.runtime_source(Path(relative)), relative)
+                target_file = payload / "app" / relative
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(module, target_file)
+                module_files.append(relative)
             (payload / "manifest.json").write_text(json.dumps({
                 "version": "test", "build": "native-test",
                 "files": {name: prepare_workspace.digest(staged),
-                          adapter_name: prepare_workspace.digest(payload / "app" / adapter_name),
-                          **{helper: prepare_workspace.digest(payload / "app" / helper) for helper in helpers}},
+                          **{relative: prepare_workspace.digest(payload / "app" / relative)
+                             for relative in module_files}},
             }))
             installed = base / "installed"
             prepare_workspace.install(payload, installed)
@@ -64,7 +66,7 @@ class PriceXlsxPackagingTests(unittest.TestCase):
             # installed binary without consulting the source checkout.
             subprocess.run([sys.executable, "-c",
                 "import sys; from pathlib import Path; sys.path.insert(0, str(Path.cwd())); "
-                "from toolbox_native_excel import load_value_workbook; "
+                "from toolbox_shared.native_excel import load_value_workbook; "
                 "b=load_value_workbook(sys.argv[1]); "
                 "assert b.active['B1'].value == 123.45; b.close()", str(workbook)],
                 cwd=installed, env=dict(os.environ, TOOLBOX_XLSX_BACKEND="rust"),
@@ -72,8 +74,8 @@ class PriceXlsxPackagingTests(unittest.TestCase):
             subprocess.run([sys.executable, "-c",
                 "import sys; from pathlib import Path; sys.path.insert(0, str(Path.cwd())); "
                 "import numpy as np; from openpyxl import Workbook,load_workbook; "
-                "from toolbox_native_write import save_workbook,save_frame; "
-                "from toolbox_native_compute import unmix,native_session; "
+                "from toolbox_shared.native_write import save_workbook,save_frame; "
+                "from toolbox_shared.native_compute import unmix,native_session; "
                 "b=Workbook(); b.active['A1']='installed'; save_workbook(b,sys.argv[1]); "
                 "assert load_workbook(sys.argv[1]).active['A1'].value=='installed'; "
                 "ctx=native_session(); ctx.__enter__(); "
@@ -81,7 +83,7 @@ class PriceXlsxPackagingTests(unittest.TestCase):
                 "assert np.count_nonzero(r)==0;ctx.__exit__(None,None,None); "
                 "import pandas as pd; assert save_frame(pd.DataFrame({'比例':[.125]}),sys.argv[1],'整合数据',{}); "
                 "assert load_workbook(sys.argv[1]).active['A2'].value==.125; "
-                "from toolbox_workbook_inspection import load_inspection_pair; "
+                "from toolbox_shared.workbook_inspection import load_inspection_pair; "
                 "a,c=load_inspection_pair(sys.argv[1],columns=(1,),target_columns=(),sheet_filter=lambda n: True); "
                 "assert a['整合数据']['A2'].value==.125; a.close(); c.close()", str(workbook)],
                 cwd=installed, env=dict(os.environ, TOOLBOX_XLSX_BACKEND="rust",TOOLBOX_COMPUTE_BACKEND="rust"),

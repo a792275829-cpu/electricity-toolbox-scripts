@@ -10,8 +10,8 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from pandas.testing import assert_frame_equal
 from toolbox.runtime import load_module
-from toolbox_native_excel import native_binary
-from toolbox_native_write import read_table_layout
+from toolbox_shared.native_excel import native_binary
+from toolbox_shared.native_write import read_table_layout
 ROOT = Path(__file__).resolve().parents[2]
 
 @unittest.skipUnless(native_binary(), "optional Rust helper is not installed")
@@ -87,7 +87,7 @@ class NativeUpdateTests(unittest.TestCase):
             self.assertEqual(layout["空列"]["data_style"]["number_format"], "General")
 
     def test_native_failure_preserves_destination_and_auto_falls_back(self):
-        import toolbox_native_write as writer
+        from toolbox_shared import native_write as writer
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "output.xlsx"; path.write_bytes(b"existing-output")
             frame = pd.DataFrame({"值": [1.25]})
@@ -120,7 +120,7 @@ class NativeUpdateTests(unittest.TestCase):
             self.assertEqual(layout["无数据列"]["data_style"]["number_format"], "General")
 
     def test_auto_preserves_faster_streaming_reader_when_requested(self):
-        import toolbox_native_excel as reader
+        from toolbox_shared import native_excel as reader
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "input.xlsx"
             book = Workbook(); book.active["A1"] = .125; book.save(path); book.close()

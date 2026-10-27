@@ -11,7 +11,7 @@ from unittest import mock
 from PIL import Image
 
 from toolbox.runtime import ToolPaths, load_module
-from toolbox_storage import wind_forecast_output_dir
+from toolbox_shared.storage import wind_forecast_output_dir
 
 
 ROOT = Path(__file__).resolve().parents[2]

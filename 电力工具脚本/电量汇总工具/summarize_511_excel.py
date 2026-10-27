@@ -30,8 +30,8 @@ from openpyxl.utils import get_column_letter
 WORKSPACE = Path(__file__).resolve().parents[2]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
-from toolbox_native_excel import load_value_workbook, prefetch_workbooks
-from toolbox_native_write import save_workbook as save_native_workbook
+from toolbox_shared.native_excel import load_value_workbook, prefetch_workbooks
+from toolbox_shared.native_write import save_workbook as save_native_workbook
 
 FILE_TYPE_PATTERNS = {
     "realtime": "实时交易结果查询",
@@ -592,7 +592,7 @@ class SummaryApp(tk.Tk):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        from toolbox_file_button import FileSelectButton
+        from toolbox_shared.file_button import FileSelectButton
 
         container = ttk.Frame(self, padding=14)
         container.pack(fill="both", expand=True)

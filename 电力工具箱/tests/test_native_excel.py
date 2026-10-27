@@ -9,7 +9,7 @@ import zipfile
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils.datetime import CALENDAR_MAC_1904
 
-import toolbox_native_excel as native
+from toolbox_shared import native_excel as native
 
 
 def snapshot(book):

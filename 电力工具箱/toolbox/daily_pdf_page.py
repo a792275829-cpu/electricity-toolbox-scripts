@@ -5,7 +5,7 @@ from .file_rules import default_output_for_pdf
 
 import re
 import tkinter as tk
-from toolbox_choices import SegmentedGroup
+from toolbox_shared.choices import SegmentedGroup
 
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk

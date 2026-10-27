@@ -81,7 +81,7 @@ def build_upload_plan(pdf_path: str | Path, excel_path: str | Path) -> UploadPla
 def load_auth_module():
     if str(WORKSPACE) not in sys.path:
         sys.path.insert(0, str(WORKSPACE))
-    from toolbox_auth_loader import load_login_module
+    from toolbox_shared.auth_loader import load_login_module
 
     return load_login_module(
         WORKSPACE, module_name="daily_pdf_upload_auth", state_dir=TOOL_DIR,
@@ -92,7 +92,7 @@ def load_auth_module():
 def load_upload_config():
     if str(WORKSPACE) not in sys.path:
         sys.path.insert(0, str(WORKSPACE))
-    from toolbox_credentials import read_login_config
+    from toolbox_shared.credentials import read_login_config
     from types import SimpleNamespace
 
     raw = read_login_config(CONFIG_PATH, WORKSPACE / "上网电量抓取" / "config.json")

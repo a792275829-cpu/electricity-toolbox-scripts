@@ -25,9 +25,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE = SCRIPT_DIR.parent
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
-from toolbox_auth_loader import load_login_module
-from toolbox_excel_read import read_cell_snapshots
-from toolbox_workbook_commit import assert_workbook_unchanged, workbook_commit_lock, workbook_fingerprint
+from toolbox_shared.auth_loader import load_login_module
+from toolbox_shared.excel_read import read_cell_snapshots
+from toolbox_shared.workbook_commit import assert_workbook_unchanged, workbook_commit_lock, workbook_fingerprint
 
 ONLINE_SCRIPTS_DIR = WORKSPACE / "上网电量抓取"
 REPORT_SCRIPTS_DIR = WORKSPACE / "每日生产经营情况汇报自动生成工具" / "scripts"
@@ -51,7 +51,7 @@ validate_date = online_export_module.validate_date
 from fetch_load_compare import select_load_type  # noqa: E402
 
 
-from toolbox_market_contracts import (
+from toolbox_shared.market_contracts import (
     MARKET_SHEET_NAME,
     COST_SHEET_NAME,
     DAY_AHEAD_LOAD_START_COLUMN,

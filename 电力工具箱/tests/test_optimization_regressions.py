@@ -51,7 +51,7 @@ class OptimizationRegressionTests(unittest.TestCase):
 
     def test_commit_restores_all_files_when_post_replace_verification_fails(self):
         commit_module = load_module(
-            "workbook_commit_regression", ROOT / "toolbox_workbook_commit.py"
+            "workbook_commit_regression", ROOT / "toolbox_shared/workbook_commit.py"
         )
         commit_workbooks = commit_module.commit_workbooks
         with tempfile.TemporaryDirectory() as directory:

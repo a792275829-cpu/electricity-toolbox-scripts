@@ -8,9 +8,9 @@ import threading
 WORKSPACE = pathlib.Path(__file__).resolve().parents[2]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
-from toolbox_native_excel import load_value_workbook
-from toolbox_trade_batch import plan_batch_outputs, iter_batch_reports
-from toolbox_trade_report import (
+from toolbox_shared.native_excel import load_value_workbook
+from toolbox_shared.trade_batch import plan_batch_outputs, iter_batch_reports
+from toolbox_shared.trade_report import (
     THERMAL_COMPANIES,
     RENEWABLE_UNITS,
     POINT_TYPE_ORDER,
@@ -56,7 +56,7 @@ def _load_gui():
     global tk, filedialog, messagebox, ttk, FileSelectButton
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
-    from toolbox_file_button import FileSelectButton
+    from toolbox_shared.file_button import FileSelectButton
 
 
 class ReportApp:

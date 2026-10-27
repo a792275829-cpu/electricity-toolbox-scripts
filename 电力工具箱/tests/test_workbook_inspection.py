@@ -13,7 +13,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils.datetime import CALENDAR_MAC_1904, to_excel
 from toolbox.runtime import load_module
-from toolbox_workbook_inspection import UnsupportedInspection
+from toolbox_shared.workbook_inspection import UnsupportedInspection
 
 ROOT = Path(__file__).resolve().parents[2]
 

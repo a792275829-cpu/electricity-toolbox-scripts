@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from toolbox_storage import data_path, online_energy_output_dir, wind_forecast_output_dir
+from toolbox_shared.storage import data_path, online_energy_output_dir, wind_forecast_output_dir
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -35,7 +35,7 @@ class ToolPaths:
 
     @property
     def online_energy_output_dir(self) -> Path:
-        from toolbox_credentials import read_json
+        from toolbox_shared.credentials import read_json
 
         config = read_json(data_path(self.online_energy_dir / "config.json"))
         return online_energy_output_dir(config.get("outputDir"))
@@ -50,7 +50,7 @@ class ToolPaths:
 
     @property
     def wind_forecast_output_dir(self) -> Path:
-        from toolbox_credentials import read_json
+        from toolbox_shared.credentials import read_json
 
         config = read_json(data_path(self.wind_forecast_dir / "config.json"))
         return wind_forecast_output_dir(config.get("outputDir"), script_dir=self.wind_forecast_dir)
@@ -252,6 +252,23 @@ def _module_is_local(module: object, roots: tuple[Path, ...]) -> bool:
     return any(resolved == root or root in resolved.parents for root in roots)
 
 
+SHARED_PACKAGE = "toolbox_shared"
+
+
+def _is_shared_module(module_name: str, module_file: str | None, root: Path) -> bool:
+    """Workspace libraries keep one identity even after a tool module is dropped."""
+    if not module_file:
+        return False
+    resolved = Path(module_file).resolve()
+    if module_name == SHARED_PACKAGE:
+        return resolved.parent == (root / SHARED_PACKAGE)
+    if module_name.startswith(SHARED_PACKAGE + "."):
+        return resolved.parent == (root / SHARED_PACKAGE).resolve()
+    if module_name.startswith("toolbox_"):
+        return resolved == root / f"{module_name}.py"
+    return False
+
+
 def _restore_local_imports(
     before: dict[str, ModuleType],
     *,
@@ -265,10 +282,9 @@ def _restore_local_imports(
         current = sys.modules.get(module_name, _MISSING_MODULE)
         if previous is current:
             continue
-        shared_file = Path(__file__).resolve().parents[2] / f"{module_name}.py"
-        if (previous is _MISSING_MODULE and module_name.startswith("toolbox_")
-                and getattr(current, "__file__", None)
-                and Path(current.__file__).resolve() == shared_file):
+        shared_root = Path(__file__).resolve().parents[2]
+        if (previous is _MISSING_MODULE
+                and _is_shared_module(module_name, getattr(current, "__file__", None), shared_root)):
             # Ordinary workspace libraries keep one module/class/lock identity.
             # Standalone tools and their local helper names remain isolated.
             continue

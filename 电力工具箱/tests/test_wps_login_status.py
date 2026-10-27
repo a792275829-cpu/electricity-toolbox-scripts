@@ -21,7 +21,7 @@ def load_writer():
 
 class WpsLoginStatusTests(unittest.TestCase):
     def setUp(self):
-        self.module = importlib.import_module('toolbox_wps_service')
+        self.module = importlib.import_module('toolbox_shared.wps_service')
         self.context = mock.Mock()
 
     def response(self, status, data):
@@ -92,7 +92,7 @@ class WpsLoginStatusTests(unittest.TestCase):
         self.context.close.assert_called_once()
 
     def test_check_does_not_switch_visible_login_browser_to_headless(self):
-        self.module = importlib.import_module("toolbox_wps_browser")
+        self.module = importlib.import_module("toolbox_shared.wps_browser")
         playwright = mock.Mock()
         browser = playwright.chromium.connect_over_cdp.return_value
         browser.contexts = [self.context]
@@ -110,7 +110,7 @@ class WpsLoginStatusTests(unittest.TestCase):
         self.assertEqual(result, (browser, self.context, False))
 
     def test_failed_check_does_not_restart_browser_during_login(self):
-        self.module = importlib.import_module("toolbox_wps_browser")
+        self.module = importlib.import_module("toolbox_shared.wps_browser")
         playwright = mock.Mock()
         playwright.chromium.connect_over_cdp.side_effect = self.module.PlaywrightTimeoutError("连接超时")
         with (

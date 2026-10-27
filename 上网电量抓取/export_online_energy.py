@@ -24,16 +24,16 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE = SCRIPT_DIR.parent
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
-from toolbox_credentials import mark_browser_session, prepare_browser_session, read_login_config
-from toolbox_auth_loader import wait_for_login
-from toolbox_dates import normalize_date_input
+from toolbox_shared.credentials import mark_browser_session, prepare_browser_session, read_login_config
+from toolbox_shared.auth_loader import wait_for_login
+from toolbox_shared.dates import normalize_date_input
 
 APP_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name in {"scripts", "\u811a\u672c"} else SCRIPT_DIR
 BASE_URL = "https://xhxt.chng.com.cn"
 FIRE_APP_URL = f"{BASE_URL}/gdfire/PrivateDataManage/PowerSituationReport"
 ENERGY_APP_URL = f"{BASE_URL}/gdfire/PrivateDataManageCE/PowerSituationReport"
 LOGIN_URL = f"{BASE_URL}/usercenter/#/login"
-from toolbox_storage import data_path, online_energy_output_dir
+from toolbox_shared.storage import data_path, online_energy_output_dir
 
 PROFILE_DIR = data_path(SCRIPT_DIR / ".browser-profile")
 AUTH_STATE_PATH = data_path(SCRIPT_DIR / "auth_state.json")

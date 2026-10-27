@@ -90,7 +90,7 @@ class WpsToolbarLayoutTests(unittest.TestCase):
         self.assertEqual(page.actions.winfo_manager(), "")
         self.assertIsNot(page.log_text, page.writer_frame.log_text)
 
-        from toolbox_log_console import LogConsole
+        from toolbox_shared.log_console import LogConsole
 
         visible_consoles = [widget for widget in descendants(page)
                             if isinstance(widget, LogConsole) and widget.winfo_ismapped()]

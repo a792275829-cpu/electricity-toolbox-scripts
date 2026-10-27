@@ -6,7 +6,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from toolbox_native_excel import read_model_frame
+from toolbox_shared.native_excel import read_model_frame
 
 TARGET = "全省日前平均电价"
 

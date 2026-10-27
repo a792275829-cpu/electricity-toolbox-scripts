@@ -18,11 +18,11 @@ WORKSPACE = APP_ROOT.parent
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
 
-from toolbox_auth_loader import load_login_module
-from toolbox_credentials import read_login_config
+from toolbox_shared.auth_loader import load_login_module
+from toolbox_shared.credentials import read_login_config
 
 
-from toolbox_storage import data_path
+from toolbox_shared.storage import data_path
 
 CONFIG_PATH = data_path(SCRIPT_DIR / "config.json")
 OUTPUT_DIR = data_path(APP_ROOT / "输出")

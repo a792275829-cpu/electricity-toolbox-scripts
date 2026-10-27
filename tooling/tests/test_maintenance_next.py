@@ -53,14 +53,14 @@ class MaintenanceNextTests(unittest.TestCase):
     def test_runtime_retains_shared_wps_service_class_and_lock_identity(self):
         from toolbox.runtime import load_module
         gui = load_module('shared_wps_identity_regression', ROOT/'wps自动/wps_excel_to_kdocs_gui.py')
-        service = importlib.import_module('toolbox_wps_service')
-        browser = importlib.import_module('toolbox_wps_browser')
+        service = importlib.import_module('toolbox_shared.wps_service')
+        browser = importlib.import_module('toolbox_shared.wps_browser')
         self.assertIs(gui._wps_service, service)
         self.assertIs(gui.MappingRow, service.MappingRow)
         self.assertIs(gui.WPS_CHROME_START_LOCK, browser.WPS_CHROME_START_LOCK)
 
     def test_native_exclusive_publish_and_unsupported_rename_fallback(self):
-        import toolbox_atomic_output as atomic
+        from toolbox_shared import atomic_output as atomic
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             source, target = root/'source', root/'target'
@@ -118,7 +118,7 @@ class NoTk(importlib.abc.MetaPathFinder):
         if name == 'tkinter' or name.startswith('tkinter.'):
             raise AssertionError(name)
 sys.meta_path.insert(0, NoTk())
-import toolbox_wps_service as service, toolbox_wps_browser as browser
+from toolbox_shared import wps_service as service, wps_browser as browser
 assert service.PROFILE_DIR == browser.PROFILE_DIR
 assert service.PROFILE_DIR.name == 'wps-browser-profile'
 from toolbox import workflows

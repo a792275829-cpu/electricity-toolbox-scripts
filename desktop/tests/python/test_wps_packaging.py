@@ -79,7 +79,7 @@ class WpsPackagedConfigurationTests(unittest.TestCase):
         self.assertFalse(any((self.root / 'user').rglob('wps-browser-profile')))
 
     def test_source_mode_uses_defaults_without_writing_over_user_settings(self):
-        module = importlib.import_module('toolbox_wps_service')
+        module = importlib.import_module('toolbox_shared.wps_service')
         runtime = self.root / 'local/wps_excel_to_kdocs_config.json'
         with mock.patch.object(module, 'CONFIG_PATH', runtime):
             self.assertEqual(module.load_config(), self.seed)

@@ -27,7 +27,7 @@ def backend_mode() -> str:
 # Shared transport also serves summary and market-report readers.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from toolbox_native_excel import native_binary, call as _call
+from toolbox_shared.native_excel import native_binary, call as _call
 
 
 def _fallback_warning(operation, exc):

@@ -12,8 +12,8 @@ from tkinter import ttk
 from unittest import mock
 
 from toolbox.runtime import load_module
-from toolbox_wps_config import build_config_export, runtime_config_from_export_payload
-from toolbox_wps_urls import url_choices
+from toolbox_shared.wps_config import build_config_export, runtime_config_from_export_payload
+from toolbox_shared.wps_urls import url_choices
 
 ROOT = Path(__file__).resolve().parents[2]
 FIRST = 'https://www.kdocs.cn/l/first'
@@ -115,7 +115,7 @@ class WpsTitleDialogTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             config_path = Path(directory) / 'config.json'
             with (mock.patch.object(self.module, 'load_config', return_value={}),
-                  mock.patch.object(importlib.import_module('toolbox_wps_service'), 'CONFIG_PATH', config_path)):
+                  mock.patch.object(importlib.import_module('toolbox_shared.wps_service'), 'CONFIG_PATH', config_path)):
                 frame = self.module.WpsWriterFrame(self.root)
                 try:
                     frame.remember_document_title(FIRST, TITLE)

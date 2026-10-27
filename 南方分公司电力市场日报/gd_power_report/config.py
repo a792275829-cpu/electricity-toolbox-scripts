@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from toolbox_storage import data_path
+from toolbox_shared.storage import data_path
 
 
 @dataclass(frozen=True)

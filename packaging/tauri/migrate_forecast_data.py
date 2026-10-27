@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from toolbox_credentials import read_json, write_private_json
+from toolbox_shared.credentials import read_json, write_private_json
 
 
 def digest(path: Path) -> str:

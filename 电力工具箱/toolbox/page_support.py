@@ -13,9 +13,9 @@ WORKSPACE = Path(__file__).resolve().parents[2]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
 from .file_rules import clearing_file_date
-from toolbox_dates import DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
-from toolbox_date_input import DateInput
-from toolbox_file_button import FileSelectButton
+from toolbox_shared.dates import DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
+from toolbox_shared.date_input import DateInput
+from toolbox_shared.file_button import FileSelectButton
 
 
 def open_directory(path: Path) -> None:
