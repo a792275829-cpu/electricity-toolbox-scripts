@@ -3,7 +3,6 @@ from __future__ import annotations
 import tkinter as tk
 import json
 from datetime import date, timedelta
-from math import isfinite
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -27,8 +26,6 @@ class MarketReportPage(ToolPage):
         self.day_report = tk.StringVar(master=self)
         self.previous_report = tk.StringVar(master=self)
         self.d2_report = tk.StringVar(master=self)
-        self.dongguan_operation = tk.StringVar(master=self)
-        self.realtime_maintenance = tk.StringVar(master=self)
         self.manual_market = tk.StringVar(master=self, value="")
         self.market_editor = None
         self._manual_date = self.report_date.get()
@@ -50,10 +47,6 @@ class MarketReportPage(ToolPage):
                 form, row=row, label=label, variable=variable,
                 command=lambda value=variable: self.choose_file(value), button_text="选择文件",
             ))
-        ttk.Label(form, text="东莞运行方式修正（可选）").grid(row=4, column=0, sticky="w", pady=5)
-        ttk.Entry(form, textvariable=self.dongguan_operation).grid(row=4, column=1, sticky="ew", pady=5)
-        ttk.Label(form, text="实时检修容量（可选，万千瓦）").grid(row=5, column=0, sticky="w", pady=5)
-        ttk.Entry(form, textvariable=self.realtime_maintenance, width=18).grid(row=5, column=1, sticky="w", pady=5)
 
         self.run_button = ttk.Button(self.actions, text="生成日报", command=self.start_report)
         self.run_button.pack(side="left")
@@ -111,15 +104,6 @@ class MarketReportPage(ToolPage):
             "--day-report", str(sources[0]), "--previous-report", str(sources[1]),
             "--d2-report", str(sources[2]),
         ]
-        operation = self.dongguan_operation.get().strip()
-        if operation:
-            command.extend(["--dongguan-operation", operation])
-        maintenance = self.realtime_maintenance.get().strip()
-        if maintenance:
-            value = float(maintenance)
-            if not isfinite(value) or value < 0:
-                raise ValueError("实时检修容量必须是不小于 0 的有限数值。")
-            command.extend(["--realtime-maintenance", str(value)])
         if self.manual_market.get():
             data = market_module().normalize_manual_market(json.loads(self.manual_market.get()), selected)
             command.extend(["--manual-market", json.dumps(data, ensure_ascii=False)])

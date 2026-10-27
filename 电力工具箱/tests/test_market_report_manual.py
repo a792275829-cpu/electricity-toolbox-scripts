@@ -253,7 +253,7 @@ class ManualUiTests(unittest.TestCase):
                 path.touch(); var.set(str(path.resolve()))
             command = self.page.build_command()
             values = {key: getattr(self.page, key).get() for key in (
-                "report_date", "day_report", "previous_report", "d2_report", "dongguan_operation", "realtime_maintenance", "manual_market")}
+                "report_date", "day_report", "previous_report", "d2_report", "manual_market")}
             validated = workflows.validate(ToolPaths(ROOT), "market-report", "run", values)
             service_command = workflows.plan(ToolPaths(ROOT), "market-report", "run", validated)[0][0]
             self.assertEqual(command, service_command)

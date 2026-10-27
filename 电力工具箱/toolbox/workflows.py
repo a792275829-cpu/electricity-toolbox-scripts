@@ -134,10 +134,6 @@ def plan(paths, tool_id, action, p):
         sources = [required_path(p, key) for key in ("day_report", "previous_report", "d2_report")]
         command = [py, str(paths.market_report_runner), day("report_date").isoformat(),
                    "--day-report", str(sources[0]), "--previous-report", str(sources[1]), "--d2-report", str(sources[2])]
-        if str(p["dongguan_operation"]).strip():
-            command.extend(("--dongguan-operation", str(p["dongguan_operation"]).strip()))
-        if str(p["realtime_maintenance"]).strip():
-            command.extend(("--realtime-maintenance", str(number(p["realtime_maintenance"], "实时检修容量"))))
         if str(p.get("manual_market", "")).strip():
             from .market_editor import market_module
             data = market_module().normalize_manual_market(json.loads(p["manual_market"]), day("report_date"))
