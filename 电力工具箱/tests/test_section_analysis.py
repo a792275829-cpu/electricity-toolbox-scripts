@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call, patch
 
 
 WORKSPACE = Path(__file__).resolve().parents[2]
@@ -110,6 +110,9 @@ class SectionAnalysisPageTests(unittest.TestCase):
             80.0,
         )
 
+        actions = [widget.cget("text") for widget in page.actions.winfo_children()]
+        self.assertEqual(actions[-2:], ["开始分析", "打开结果目录"])
+        self.assertFalse(hasattr(page, "open_latest_button"))
         self.assertEqual(page.threshold.get(), "80")
         self.assertIn("全天累计至少4个时点", page.rule_summary.get())
         self.assertEqual(Path(page.output_root.get()), Path.home() / "Downloads")
@@ -119,6 +122,41 @@ class SectionAnalysisPageTests(unittest.TestCase):
         self.assertNotIn("--keep-processed", command)
         self.assertNotIn("--no-keep-processed", command)
         self.assertEqual(command[-1], "/tmp/prices.xlsx")
+
+    def test_success_opens_all_generated_html_in_default_browser(self) -> None:
+        from toolbox.section_analysis_page import SectionAnalysisPage, result_html_name
+
+        page = SectionAnalysisPage(self.root, self.paths, self.registry)
+        with TemporaryDirectory() as tmp:
+            output = Path(tmp) / "结果 目录"
+            output.mkdir()
+            sources = [Path("日前节点电价.xlsx"), Path("实时节点电价.xlsx")]
+            for source in sources:
+                (output / result_html_name(source)).write_text("<html></html>")
+            page.set_files(sources)
+            page.output_root.set(str(output))
+            page.run_process = Mock()
+            page.start_analysis()
+            with patch("toolbox.section_analysis_page.webbrowser.open_new_tab", return_value=True) as browser:
+                browser.assert_not_called()
+                page.run_process.call_args.kwargs["on_success"](0)
+            self.assertEqual(browser.call_args_list, [
+                call((output / result_html_name(source)).resolve().as_uri())
+                for source in sources
+            ])
+
+    def test_success_does_not_open_missing_html(self) -> None:
+        from toolbox.section_analysis_page import SectionAnalysisPage
+
+        page = SectionAnalysisPage(self.root, self.paths, self.registry)
+        with TemporaryDirectory() as tmp:
+            page.set_files([Path("未生成.xlsx")])
+            page.output_root.set(tmp)
+            page.run_process = Mock()
+            page.start_analysis()
+            with patch("toolbox.section_analysis_page.webbrowser.open_new_tab") as browser:
+                page.run_process.call_args.kwargs["on_success"](0)
+                browser.assert_not_called()
 
 
 if __name__ == "__main__":

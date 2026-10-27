@@ -2,25 +2,15 @@ from __future__ import annotations
 
 from . import commands
 
-import os
-import subprocess
-import sys
+import webbrowser
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .file_dialogs import FileDialogState
 from .page_support import add_path_row, open_directory
-from .runtime import TaskRegistry, ToolPaths, python_executable
+from .runtime import TaskRegistry, ToolPaths
 from .widgets import ToolPage
-
-
-def open_path(path: Path) -> None:
-    path = Path(path)
-    if sys.platform == "darwin":
-        subprocess.run(["open", str(path)], check=False)
-    else:
-        subprocess.run(["xdg-open", str(path)], check=False)
 
 
 def result_html_name(source: Path) -> str:
@@ -52,7 +42,6 @@ class SectionAnalysisPage(ToolPage):
             value=str(paths.section_analysis_topology),
         )
         self.threshold = tk.StringVar(master=self, value="80")
-        self.latest_html: Path | None = None
 
         self.add_button = ttk.Button(self.actions, text="添加电价文件", command=self.add_files)
         self.add_button.pack(side="left")
@@ -62,6 +51,12 @@ class SectionAnalysisPage(ToolPage):
         self.clear_button.pack(side="left", padx=(8, 0))
         self.run_button = ttk.Button(self.actions, text="开始分析", command=self.start_analysis)
         self.run_button.pack(side="left", padx=(16, 0))
+        self.open_output_button = ttk.Button(
+            self.actions,
+            text="打开结果目录",
+            command=lambda: open_directory(Path(self.output_root.get()).expanduser()),
+        )
+        self.open_output_button.pack(side="left", padx=(8, 0))
 
         files_frame = ttk.LabelFrame(self.content, text="节点电价文件（支持批量）", padding=10)
         files_frame.grid(row=0, column=0, sticky="nsew")
@@ -99,21 +94,6 @@ class SectionAnalysisPage(ToolPage):
         ttk.Label(settings, text="元/MWh（严格大于）", style="Muted.TLabel").grid(
             row=2, column=1, sticky="w", padx=(105, 0), pady=5
         )
-        result_actions = ttk.Frame(settings)
-        result_actions.grid(row=3, column=1, sticky="w", pady=(10, 0))
-        ttk.Button(
-            result_actions,
-            text="打开结果目录",
-            command=lambda: open_directory(Path(self.output_root.get()).expanduser()),
-        ).pack(side="left")
-        self.open_latest_button = ttk.Button(
-            result_actions,
-            text="打开最近网页",
-            command=self.open_latest,
-            state="disabled",
-        )
-        self.open_latest_button.pack(side="left", padx=(8, 0))
-
         rules = ttk.LabelFrame(self.content, text="当前判定规则", padding=10)
         rules.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         self.rule_summary = tk.StringVar(master=self)
@@ -230,8 +210,6 @@ class SectionAnalysisPage(ToolPage):
         output_root = Path(self.output_root.get().strip()).expanduser()
         output_root.mkdir(parents=True, exist_ok=True)
         selected_files = list(self.files)
-        self.latest_html = None
-        self.open_latest_button.configure(state="disabled")
         self.clear_log()
         command = self.build_command(
             selected_files,
@@ -241,14 +219,19 @@ class SectionAnalysisPage(ToolPage):
         )
 
         def on_success(_code: int) -> None:
-            self.latest_html = output_root / result_html_name(selected_files[-1])
-            if self.latest_html.is_file():
-                self.open_latest_button.configure(state="normal")
-            messagebox.showinfo(
-                "分析完成",
-                f"已生成 {len(selected_files)} 个分析网页。",
-                parent=self,
-            )
+            self.append_log(f"已生成 {len(selected_files)} 个分析网页。")
+            for source in selected_files:
+                html = output_root / result_html_name(source)
+                if not html.is_file():
+                    self.append_log(f"未找到分析网页，无法自动打开：{html}")
+                    continue
+                try:
+                    opened = webbrowser.open_new_tab(html.resolve().as_uri())
+                except (OSError, webbrowser.Error) as exc:
+                    self.append_log(f"自动打开网页失败：{exc}；网页位置：{html}")
+                else:
+                    if not opened:
+                        self.append_log(f"浏览器未能打开网页，请从结果目录访问：{html}")
 
         self.run_process(
             command,
@@ -256,9 +239,3 @@ class SectionAnalysisPage(ToolPage):
             status="正在生成500kV断面分析...",
             on_success=on_success,
         )
-
-    def open_latest(self) -> None:
-        if self.latest_html is None or not self.latest_html.is_file():
-            messagebox.showwarning("尚无网页", "请先成功运行一次分析。", parent=self)
-            return
-        open_path(self.latest_html)
