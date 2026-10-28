@@ -610,6 +610,8 @@ def main() -> int:
                        start_date=args.start_date, create_backup=not args.no_backup, headed=args.headed)
         return 0
     except Exception as exc:
+        from toolbox_shared.cli_login import emit_login_error
+        emit_login_error(exc)
         log(f"更新失败：{exc}")
         return 1
 

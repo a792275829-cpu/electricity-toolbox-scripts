@@ -9,6 +9,17 @@ from pathlib import Path
 from .runtime import python_executable
 
 
+def login(paths, tool_id):
+    from toolbox_shared.login_tools import STATE_DIRS
+    if tool_id == "summary-upload":
+        from .runtime import node_executable
+        return [node_executable(), str(paths.private_uploader), "--login", "--headed"]
+    if tool_id not in STATE_DIRS:
+        raise ValueError("当前工具不使用清能网站登录。")
+    return [python_executable(), str(paths.workspace / "toolbox_shared/login_tools.py"),
+            "--workspace", str(paths.workspace), "--tool", tool_id]
+
+
 def dated_script(script: Path, run_date: str) -> list[str]:
     return [python_executable(), str(script), run_date]
 

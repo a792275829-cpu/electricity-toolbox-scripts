@@ -407,9 +407,6 @@ class ToolboxApp(tk.Tk):
         if remaining:
             messagebox.showwarning("无法立即关闭", "仍有不可安全中断的写入任务。请等待任务结束后再关闭。", parent=self)
             return False
-        if self.credentials_panel.dirty and not self.credentials_panel.save():
-            messagebox.showwarning("账号尚未保存", self.credentials_panel.status_var.get(), parent=self)
-            return False
         self.destroy()
         return True
 

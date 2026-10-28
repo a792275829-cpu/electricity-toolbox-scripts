@@ -1,20 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import base64
 from copy import copy
 from datetime import date
 import hashlib
-import http.cookiejar
 import json
 import os
 from pathlib import Path
-import ssl
-import subprocess
 import sys
-import tempfile
-import urllib.parse
-import urllib.request
 
 import pandas as pd
 from openpyxl import Workbook
@@ -85,88 +78,48 @@ ACTUAL_LOAD_COLUMNS = {
 
 
 class GDFireClient:
+    """Forecast-local browser state with the same login policy as the other tools."""
     def __init__(self) -> None:
-        context = ssl.create_default_context()
-        self.cookies = http.cookiejar.CookieJar()
-        self.opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(self.cookies),
-            urllib.request.HTTPSHandler(context=context),
-        )
+        from contextlib import ExitStack
+        from toolbox_shared.auth_loader import load_login_module
+        self.auth = load_login_module(SCRIPT_DIR.parent, module_name="forecast_data_auth", state_dir=SCRIPT_DIR)
+        self._stack = ExitStack()
+        self.context = None
 
-    def _json_request(
-        self,
-        path: str,
-        *,
-        params: dict[str, object] | None = None,
-        method: str = "GET",
-        data: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        url = BASE_URL + path
-        if params:
-            url += "?" + urllib.parse.urlencode(params, doseq=True)
-        body = None if data is None else json.dumps(data).encode("utf-8")
-        request = urllib.request.Request(
-            url,
-            data=body,
-            method=method,
-            headers={
-                "Accept": "application/json, text/plain, */*",
-                "Content-Type": "application/json;charset=UTF-8",
-                "Origin": BASE_URL,
-                "Referer": BASE_URL + "/gdfire/SpotDecisionSupport/InfoCompare",
-            },
-        )
-        with self.opener.open(request, timeout=120) as response:
-            payload = json.load(response)
-        if payload.get("retCode") != "T200":
-            raise RuntimeError(
-                f"{path}: {payload.get('retCode')} {payload.get('retMsg')} "
-                f"{payload.get('data')}"
-            )
-        return payload
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return self._stack.__exit__(exc_type, exc, tb)
+        finally:
+            self.context = None
+
+    def close(self):
+        try:
+            self._stack.close()
+        finally:
+            self.context = None
 
     def login(self, username: str, password: str) -> None:
-        public_key = self._json_request(
-            "/usercenter/web/pf/login/info/publicKey"
-        )["data"]
-        pem = (
-            "-----BEGIN PUBLIC KEY-----\n"
-            + "\n".join(
-                public_key[index : index + 64]
-                for index in range(0, len(public_key), 64)
-            )
-            + "\n-----END PUBLIC KEY-----\n"
-        )
-        with tempfile.NamedTemporaryFile("w", delete=False) as handle:
-            handle.write(pem)
-            key_path = Path(handle.name)
+        from playwright.sync_api import sync_playwright
+        from types import SimpleNamespace
         try:
-            encrypted = subprocess.run(
-                [
-                    "openssl",
-                    "pkeyutl",
-                    "-encrypt",
-                    "-pubin",
-                    "-inkey",
-                    str(key_path),
-                    "-pkeyopt",
-                    "rsa_padding_mode:pkcs1",
-                ],
-                input=password.encode("utf-8"),
-                capture_output=True,
-                check=True,
-            ).stdout
-        finally:
-            key_path.unlink(missing_ok=True)
-        self._json_request(
-            "/usercenter/web/login",
-            method="POST",
-            params={
-                "loginMode": 2,
-                "username": username,
-                "password": base64.b64encode(encrypted).decode("ascii"),
-            },
-        )
+            if self.context is None:
+                self._stack.enter_context(self.auth.AuthStateLock())
+                playwright = self._stack.enter_context(sync_playwright())
+                self.context = self.auth.launch_context(playwright, headless=True)
+                self._stack.callback(self.context.close)
+            self.auth.ensure_login(self.context, SimpleNamespace(username=username, password=password))
+        except BaseException:
+            self.__exit__(*sys.exc_info())
+            raise
+
+    def _json_request(self, path: str, *, params=None, method="GET", data=None):
+        if self.context is None:
+            raise RuntimeError("请先登录后读取预测数据。")
+        return self.auth.request_json_with_retry(self.context, method, BASE_URL + path, "读取预测数据",
+                params=params, **({"data": data} if data is not None else {}), timeout=30000)
 
     def get(self, path: str, params: dict[str, object]) -> dict[str, object]:
         return self._json_request(path, params=params)
@@ -511,14 +464,14 @@ def update_master_workbook(
     # merge_data_frames takes the latest non-empty value per field.
     start = min(gaps).isoformat()
     end = max(gaps).isoformat()
-    client = GDFireClient()
-    client.login(str(config["username"]), str(config["password"]))
-    common = {"startDate": start, "endDate": end, "provinceAreaId": PROVINCE_AREA_ID}
-    load_payload = client.get("/gdfire/api/data/net/load", common)
-    price_payload = client.get(
-        "/gdfire/api/data/price/avg/node/price",
-        {"startDate": start, "endDate": end},
-    )
+    with GDFireClient() as client:
+        client.login(str(config["username"]), str(config["password"]))
+        common = {"startDate": start, "endDate": end, "provinceAreaId": PROVINCE_AREA_ID}
+        load_payload = client.get("/gdfire/api/data/net/load", common)
+        price_payload = client.get(
+            "/gdfire/api/data/price/avg/node/price",
+            {"startDate": start, "endDate": end},
+        )
     increment = build_increment(start, end, load_payload, price_payload)
     increment = increment.reindex(columns=current.columns)
 

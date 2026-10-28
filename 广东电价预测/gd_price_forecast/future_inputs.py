@@ -43,9 +43,9 @@ def fetch_forecast_snapshot(target_date, output_dir, cutoff=None):
     output_dir=Path(output_dir); output_dir.mkdir(parents=True,exist_ok=True)
     cutoff=cutoff or datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()
     config=updater.load_config()
-    client=updater.GDFireClient()
-    client.login(str(config['username']),str(config['password']))
-    payload=client.get('/gdfire/api/data/net/load',dict(startDate=target_date,endDate=target_date,provinceAreaId=updater.PROVINCE_AREA_ID))
+    with updater.GDFireClient() as client:
+        client.login(str(config['username']),str(config['password']))
+        payload=client.get('/gdfire/api/data/net/load',dict(startDate=target_date,endDate=target_date,provinceAreaId=updater.PROVINCE_AREA_ID))
     (output_dir/'预测日负荷接口原始.json').write_text(json.dumps(payload,ensure_ascii=False),encoding='utf-8')
     filtered,publications=filter_forecast_payload(payload,target_date,cutoff)
     frame=updater.build_increment(target_date,target_date,filtered,{'data':{}})

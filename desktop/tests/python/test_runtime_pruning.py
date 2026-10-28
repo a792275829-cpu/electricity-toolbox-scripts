@@ -73,7 +73,7 @@ class RuntimePruningTests(unittest.TestCase):
                 sdk.chromium.launch_persistent_context.side_effect = [Error("first launch failed"), context]
                 with patch.object(module, "PROFILE_DIR", Path(directory) / name), \
                      patch.object(module, "prepare_browser_session", return_value=True):
-                    self.assertIs(module.launch_context(sdk, headless=True), context)
+                    self.assertIs(module.launch_context(sdk, headless=True)._context, context)
                 self.assertEqual(len(sdk.chromium.launch_persistent_context.call_args_list), 2)
                 for call in sdk.chromium.launch_persistent_context.call_args_list:
                     self.assertNotIn("channel", call.kwargs)

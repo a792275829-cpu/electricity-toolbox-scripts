@@ -9,6 +9,7 @@ from pathlib import Path
 
 from toolbox_shared.dates import normalize_date_input, parse_date_input
 from toolbox_shared.storage import data_path
+from toolbox_shared.cli_login import script_command
 from . import commands
 from .file_rules import default_output_for_pdf
 from .runtime import load_module, node_executable, python_executable
@@ -76,6 +77,8 @@ def plan(paths, tool_id, action, p):
     """Return existing CLI invocations, or validate an existing Python workflow."""
     py = python_executable()
     if action == "login" and tool_id != "wps-writer":
+        if tool_id not in {"online-energy", "wind-forecast", "market-table", "group-upload", "spot-price", "transaction-info"}:
+            return [(commands.login(paths, tool_id), paths.workspace)]
         script = {"online-energy": paths.online_energy, "wind-forecast": paths.wind_forecast,
                   "market-table": paths.market_table_update, "group-upload": paths.group_upload,
                   "spot-price": paths.spot_price_update, "transaction-info": paths.transaction_info_update}[tool_id]
@@ -193,7 +196,7 @@ def execute(paths, tool_id, action, p):
     """Run in an owned worker process; its children share its process group."""
     command_list = plan(paths, tool_id, action, p)
     for command, cwd in command_list:
-        subprocess.run(command, cwd=cwd, check=True)
+        subprocess.run(script_command(command), cwd=cwd, check=True)
     if command_list:
         outputs = []
         if tool_id == "daily-pdf-parser":

@@ -97,7 +97,9 @@ class ToolboxService:
                     if line.startswith(RESULT_PREFIX):
                         result = json.loads(line[len(RESULT_PREFIX):])
                     elif line.startswith(ERROR_PREFIX):
-                        failure_detail = json.loads(line[len(ERROR_PREFIX):])
+                        incoming = json.loads(line[len(ERROR_PREFIX):])
+                        if not failure_detail or not failure_detail.get("login_kind"):
+                            failure_detail = incoming
                     else:
                         safe_line = redact(line)
                         if (first_trace or "Traceback (most recent call last)" in line) and trace_size < 16000:
@@ -117,6 +119,8 @@ class ToolboxService:
                         result = dict(message=no_data, outputs=[])
                     return result
                 except ProcessExecutionError as exc:
+                    if getattr(exc, "error_detail", {}).get("login_kind"):
+                        failure_detail = {**exc.error_detail, "tool_id": tool_id, "action": action}
                     if failure_detail:
                         failure_detail["exit_code"] = exc.returncode
                         raise RemoteTaskError(f"{exc}\n{''.join(first_trace)}".rstrip(), details=failure_detail) from exc

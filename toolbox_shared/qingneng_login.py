@@ -15,6 +15,16 @@ class LoginError(RuntimeError):
         self.kind = kind
 
 
+def close_preserving_error(resource):
+    import sys
+    original = sys.exc_info()[1]
+    try:
+        resource.close()
+    except Exception:
+        if original is None:
+            raise
+
+
 def rsa_encrypt_password(public_key: str, password: str) -> str:
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import padding
@@ -122,7 +132,7 @@ def api_login(auth, context, username: str, password: str, *, app_url: str) -> b
             auth.save_auth_state(context)
         return logged_in
     finally:
-        page.close()
+        close_preserving_error(page)
 
 
 def ui_login(auth, context, username: str, password: str) -> bool:
@@ -137,8 +147,8 @@ def ui_login(auth, context, username: str, password: str) -> bool:
             page.locator("button:has-text('登 录'), button:has-text('登录'), button[type='submit']").first.click(timeout=5000)
         except PlaywrightError:
             pass
-        auth.log("请在登录窗口中完成人工验证（最长等待45秒）。")
-        deadline = time.monotonic() + 45
+        auth.log("请在登录窗口中完成人工验证（最长等待5分钟）。")
+        deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
             if auth.is_logged_in(context):
                 auth.save_auth_state(context)
@@ -146,7 +156,7 @@ def ui_login(auth, context, username: str, password: str) -> bool:
             time.sleep(1)
         return False
     finally:
-        page.close()
+        close_preserving_error(page)
 
 
 def auto_login(auth, context, username: str, password: str) -> bool:

@@ -59,6 +59,15 @@ class LoginPolicyTests(unittest.TestCase):
             login.api_login(auth, context, "account", "secret", app_url="https://example.test/app")
         context.new_page.return_value.close.assert_called_once()
 
+    def test_cleanup_failure_keeps_first_navigation_error(self):
+        context = mock.Mock()
+        context.new_page.return_value.goto.side_effect = PlaywrightError("first navigation error")
+        context.new_page.return_value.close.side_effect = PlaywrightError("cleanup error")
+        auth = SimpleNamespace(BASE_URL="https://example.test", rsa_encrypt_password=mock.Mock(),
+                               is_logged_in=mock.Mock(return_value=False))
+        with mock.patch.object(login, "submit_api_login"), self.assertRaisesRegex(PlaywrightError, "first navigation"):
+            login.api_login(auth, context, "account", "secret", app_url="https://example.test/app")
+
     def test_rejected_password_is_not_retried_or_echoed(self):
         request = mock.Mock()
         request.get.return_value = response({"retCode": "T200", "data": "key"})
@@ -178,6 +187,7 @@ class AccountVerificationTests(unittest.TestCase):
                 root.credentials_panel = panel = CredentialsPanel(root, Path(folder))
                 registry = mock.Mock()
                 page = ToolPage(root, registry=registry)
+                page.tool_id = "online-energy"
                 panel.username_var.set("draft")
                 panel.password_var.set("secret")
                 registry.start_callable.side_effect = lambda *_args, **_kwargs: self.assertEqual(panel.store.load()["username"], "draft")
@@ -205,7 +215,7 @@ class AccountVerificationTests(unittest.TestCase):
                 panel.username_var.set("account")
                 panel.password_var.set("secret")
                 panel.save()
-                root._visible_page = SimpleNamespace(start_login=mock.Mock())
+                root._visible_page = SimpleNamespace(tool_id="online-energy", start_login=mock.Mock())
                 panel._verification_queue.put((("account", "secret"), panel.store.load()["revision"], ("需要人工验证", "verification")))
                 panel._poll_verification()
                 self.assertEqual(panel.manual_login_button.winfo_manager(), "pack")

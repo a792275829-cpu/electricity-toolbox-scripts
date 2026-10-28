@@ -8,6 +8,7 @@ import codecs
 import io
 import select
 import time
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
@@ -47,12 +48,17 @@ class ProcessRunner:
         token: CancellationToken,
         on_output: Callable[[str], None],
     ) -> ProcessResult:
+        from toolbox_shared.cli_login import script_command, ERROR_PREFIX
+        command = script_command(command)
+        login_detail = None
         token.raise_if_cancelled()
+        process_env = dict(env) if env is not None else dict(os.environ)
+        process_env["TOOLBOX_CLI_PROTOCOL"] = "1"
         lines: Queue[str | None] = Queue()
         process = subprocess.Popen(
             list(command), cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-            errors="replace", env=dict(env) if env is not None else None,
+            errors="replace", env=process_env,
             start_new_session=True,
             close_fds=True, bufsize=1,
         )
@@ -108,12 +114,26 @@ class ProcessRunner:
                 if line is None:
                     stream_closed = True
                 else:
-                    on_output(line)
+                    if line.startswith(ERROR_PREFIX):
+                        try:
+                            incoming = json.loads(line[len(ERROR_PREFIX):])
+                        except ValueError:
+                            on_output(line)
+                            continue
+                        if isinstance(incoming, dict) and incoming.get("login_kind"):
+                            login_detail = incoming
+                        else:
+                            on_output(line)
+                    else:
+                        on_output(line)
             returncode = process.wait()
             if token.cancelled:
                 raise TaskCancelled("任务已取消")
             if returncode != 0:
-                raise ProcessExecutionError(returncode)
+                exc = ProcessExecutionError(returncode)
+                if login_detail:
+                    exc.error_detail = {**login_detail, "exit_code": returncode}
+                raise exc
             return ProcessResult(returncode)
         finally:
             if process.poll() is None:

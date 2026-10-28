@@ -3,6 +3,20 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 
+def requires_qingneng(tool_id, action="run", values=None):
+    values = values or {}
+    if tool_id in {"wps-writer", "section-analysis", "trade-analysis"}:
+        return False
+    if tool_id == "daily-pdf-parser":
+        return action == "login" or values.get("mode", "both") != "parse"
+    if tool_id == "summary-upload":
+        return action == "login" or (action != "preview" and values.get("mode", "summary") != "summary")
+    if tool_id == "report":
+        return action == "login" or values.get("fetch_data", True)
+    return tool_id in {"online-energy", "wind-forecast", "market-table", "transaction-info", "power-benefit",
+                       "spot-price", "market-report", "guangdong-price", "group-upload"}
+
+
 @dataclass(frozen=True)
 class PageBinding:
     tool_id: str

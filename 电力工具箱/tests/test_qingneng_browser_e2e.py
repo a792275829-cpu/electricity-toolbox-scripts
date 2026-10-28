@@ -31,6 +31,11 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.posts = 0
         self.pages = 0
+        self.expire_next = False
+        self.reads = 0
+        self.tenants = []
+        self.captcha = False
+        self.server_failure = False
         self.key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         public = base64.b64encode(self.key.public_key().public_bytes(
             serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)).decode()
@@ -40,8 +45,8 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
             def log_message(self, *_args):
                 pass
 
-            def reply(self, payload, cookie=False):
-                self.send_response(200)
+            def reply(self, payload, cookie=False, status=200):
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 if cookie:
                     self.send_header("Set-Cookie", "session=fixture; Path=/; HttpOnly")
@@ -49,7 +54,24 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
                 self.wfile.write(json.dumps(payload).encode())
 
             def do_GET(self):
-                if self.path.endswith("/publicKey"):
+                path = urlsplit(self.path).path
+                if path == "/usercenter/":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(b'''<input id="username"><input id="password" type="password">
+                        <button type="submit" onclick="fetch('/complete-verification',{method:'POST'})">Login</button>''')
+                elif path == "/usercenter/web/switchTenant":
+                    owner.tenants.append(parse_qs(urlsplit(self.path).query)["tenantId"][0])
+                    self.reply({"retCode": "T200"})
+                elif path == "/gdfire/api/unit/list":
+                    owner.reads += 1
+                    if owner.expire_next:
+                        owner.expire_next = False
+                        self.reply({"retCode": "F401", "retMsg": "登录已过期"})
+                    else:
+                        self.reply({"retCode": "T200", "data": [{"id": "fixture"}]})
+                elif self.path.endswith("/publicKey"):
                     self.reply({"retCode": "T200", "data": public})
                 elif self.path.endswith("/info"):
                     valid = "session=fixture" in self.headers.get("Cookie", "")
@@ -59,6 +81,16 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
                     self.reply({})
 
             def do_POST(self):
+                if owner.server_failure:
+                    self.reply({"retCode": "T500"}, status=503)
+                    return
+                if self.path == "/complete-verification":
+                    owner.captcha = False
+                    self.reply({"retCode": "T200"}, cookie=True)
+                    return
+                if owner.captcha:
+                    self.reply({"retCode": "F403", "retMsg": "需要验证码"})
+                    return
                 params = parse_qs(urlsplit(self.path).query)
                 password = owner.key.decrypt(base64.b64decode(params["password"][0]), padding.PKCS1v15()).decode()
                 valid = params.get("username") == ["fixture"] and password == "fixture-secret"
@@ -144,6 +176,87 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
         self.assertEqual(self.posts, 1)
         self.assertEqual((self.folder / "auth_state.json").stat().st_mode & 0o777, 0o600)
         self.assertEqual(json.loads((self.folder / "auth_state.json").read_text())["cookies"][0]["value"], "fixture")
+        # A fresh headed session must recover only the explicit captcha response.
+        config.update(authStatePath=str(self.folder / "manual/auth_state.json"), userDataDir=str(self.folder / "manual/profile"))
+        config.pop("sourceDir")
+        config_path.write_text(json.dumps(config))
+        self.captcha = True
+        from toolbox.tasks import ProcessRunner, ProcessExecutionError, CancellationToken
+        with self.assertRaises(ProcessExecutionError) as error:
+            ProcessRunner().run([node, str(tool / "scripts/upload-private-data.mjs"), "--login", "--headless", "--config", str(config_path)],
+                                cwd=tool, env=env, token=CancellationToken(), on_output=lambda _: None)
+        self.assertEqual(error.exception.error_detail["login_kind"], "verification")
+        self.assertFalse((self.folder / "manual/auth_state.json.lock").exists())
+        self.assertFalse((self.folder / "manual/auth_state.json").exists())
+        self.server_failure = True
+        with self.assertRaises(ProcessExecutionError) as error:
+            ProcessRunner().run([node, str(tool / "scripts/upload-private-data.mjs"), "--login", "--headless", "--config", str(config_path)],
+                                cwd=tool, env=env, token=CancellationToken(), on_output=lambda _: None)
+        self.assertEqual(error.exception.error_detail["login_kind"], "server")
+        self.assertFalse((self.folder / "manual/auth_state.json.lock").exists())
+        self.server_failure = False
+        result = subprocess.run([node, str(tool / "scripts/upload-private-data.mjs"), "--login", "--headed", "--config", str(config_path)],
+                                cwd=tool, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.captcha)
+        self.assertFalse((self.folder / "manual/auth_state.json.lock").exists())
+        self.assertEqual(json.loads((self.folder / "manual/auth_state.json").read_text())["cookies"][0]["value"], "fixture")
+
+    def test_python_captcha_opens_form_and_saves_completed_manual_login(self):
+        store = credentials.CredentialStore(self.folder)
+        store.save("fixture", "fixture-secret")
+        auth = load_login_module(ROOT, module_name="manual_captcha_e2e", state_dir=self.folder / "manual")
+        auth.BASE_URL = self.url
+        auth.LOGIN_URL = self.url + "/usercenter/"
+        self.captcha = True
+        with mock.patch.object(credentials, "credentials_path", return_value=store.path), sync_playwright() as playwright:
+            with auth.AuthStateLock(timeout_seconds=0):
+                context = auth.launch_context(playwright, headless=True)
+                context._qingneng_headless = False
+                try:
+                    auth.ensure_login(context, auth.Config(username="fixture", password="fixture-secret"))
+                    self.assertFalse(self.captcha)
+                    self.assertTrue(auth.is_logged_in(context))
+                    self.assertTrue(auth.AUTH_STATE_PATH.is_file())
+                finally:
+                    context.close()
+            self.assertFalse(auth.AUTH_LOCK_PATH.exists())
+
+    def test_real_browser_recovers_expired_read_and_restores_tenant(self):
+        store = credentials.CredentialStore(self.folder)
+        store.save("fixture", "fixture-secret")
+        auth = load_login_module(ROOT, module_name="read_recovery_e2e", state_dir=self.folder / "read")
+        auth.BASE_URL = self.url
+        with mock.patch.object(credentials, "credentials_path", return_value=store.path), sync_playwright() as playwright:
+            with auth.AuthStateLock(timeout_seconds=0):
+                context = auth.launch_context(playwright, headless=True)
+                try:
+                    auth.ensure_login(context, auth.Config(username="fixture", password="fixture-secret"))
+                    auth.switch_company(context, "fixture-tenant")
+                    self.expire_next = True
+                    result = context.request.get(self.url + "/gdfire/api/unit/list").json()
+                    self.assertEqual(result["retCode"], "T200")
+                    self.assertEqual(self.posts, 2)
+                    self.assertEqual(self.reads, 2)
+                    self.assertEqual(self.tenants, ["fixture-tenant", "fixture-tenant"])
+                finally:
+                    context.close()
+            self.assertFalse(auth.AUTH_LOCK_PATH.exists())
+
+    def test_forecast_client_uses_shared_login_and_reuses_forecast_local_state(self):
+        with mock.patch.dict(os.environ, TOOLBOX_CODE_ROOT=str(ROOT), TOOLBOX_DATA_ROOT=str(self.folder / "data")):
+            credentials.CredentialStore(ROOT).save("fixture", "fixture-secret")
+            updater = load_module("forecast_login_e2e", ROOT / "广东电价预测/update_gdfire_data.py")
+            with mock.patch.object(updater, "BASE_URL", self.url):
+                for _ in range(2):
+                    with updater.GDFireClient() as client:
+                        client.auth.BASE_URL = self.url
+                        client.login("fixture", "fixture-secret")
+                        self.assertEqual(client.get("/gdfire/api/unit/list", {})["retCode"], "T200")
+                        lock = client.auth.AUTH_LOCK_PATH
+                        self.assertTrue(client.auth.AUTH_STATE_PATH.resolve().is_relative_to(self.folder.resolve()))
+                    self.assertFalse(lock.exists())
+            self.assertEqual(self.posts, 1)
 
 
 if __name__ == "__main__":

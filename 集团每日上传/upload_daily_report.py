@@ -342,7 +342,8 @@ def launch_context(playwright, *, headless: bool):
     context._qingneng_headless = headless
     if not prepare_browser_session(context, AUTH_STATE_PATH):
         load_saved_auth_state(context)
-    return context
+    from toolbox_shared.auth_requests import AuthenticatedContext
+    return AuthenticatedContext(context, sys.modules[__name__])
 
 
 def is_logged_in(context) -> bool:
@@ -366,6 +367,7 @@ def try_auto_login(context, username: str, password: str) -> bool:
 
 
 def ensure_login(context, config: Config) -> None:
+    context._qingneng_credentials = (config.username, config.password)
     if getattr(context, "_qingneng_account_changed", False) is not True and is_logged_in(context):
         return
     if not config.username or not config.password:
@@ -625,6 +627,8 @@ def main() -> int:
         print("\n已取消。")
         return 130
     except Exception as exc:
+        from toolbox_shared.cli_login import emit_login_error
+        emit_login_error(exc)
         print(f"\n失败：{exc}", file=sys.stderr)
         return 1
 

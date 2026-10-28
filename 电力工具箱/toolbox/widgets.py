@@ -22,6 +22,22 @@ T = TypeVar("T")
 
 
 class ToolPage(ttk.Frame):
+    def start_login(self):
+        from .commands import login
+        command = login(self.paths, self.tool_id)
+        self.run_process(command, cwd=self.paths.workspace, action="login", status="正在打开登录窗口...")
+
+    def _save_login_draft(self, action):
+        from .page_contracts import requires_qingneng
+        values = {key: getattr(self, key).get() for key in ("mode", "fetch_data") if hasattr(self, key)}
+        if not requires_qingneng(getattr(self, "tool_id", None), action, values):
+            return True
+        panel = getattr(self.winfo_toplevel(), "credentials_panel", None)
+        if panel is not None and not panel.save_if_dirty():
+            messagebox.showwarning("账号尚未保存", panel.status_var.get(), parent=self)
+            return False
+        return True
+
     def __init__(
         self,
         parent: tk.Misc,
@@ -205,9 +221,7 @@ class ToolPage(ttk.Frame):
     ) -> None:
         if self.busy:
             return
-        panel = getattr(self.winfo_toplevel(), "credentials_panel", None)
-        if panel is not None and not panel.save_if_dirty():
-            messagebox.showwarning("账号尚未保存", panel.status_var.get(), parent=self)
+        if not self._save_login_draft(action):
             return
         if getattr(self.registry, "remote_business", False) is True and not getattr(worker, "_remote_business", False):
             worker = self.registry.prepare_page_worker(self, status, action=action)
@@ -294,14 +308,12 @@ class ToolPage(ttk.Frame):
     ) -> None:
         if self.busy:
             return
-        panel = getattr(self.winfo_toplevel(), "credentials_panel", None)
-        if panel is not None and not panel.save_if_dirty():
-            messagebox.showwarning("账号尚未保存", panel.status_var.get(), parent=self)
+        if not self._save_login_draft(action):
             return
         if getattr(self.registry, "remote_business", False) is True:
             worker = self.registry.prepare_page_worker(self, status, command=command, process=True, action=action)
             self.append_log(f"工作目录：{cwd}\n> {shlex.join(command)}")
-            self.run_in_thread(worker, status=status, on_success=on_success, cancellable=cancellable)
+            self.run_in_thread(worker, status=status, on_success=on_success, cancellable=cancellable, action=action)
             return
         if not self.log_console._initialized or self.log_console.finished:
             self.log_console.begin(status)

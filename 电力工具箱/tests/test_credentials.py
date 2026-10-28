@@ -242,9 +242,9 @@ class CredentialsPanelTests(unittest.TestCase):
             self.assertLessEqual(app.diagnostic_center.winfo_rooty() + app.diagnostic_center.winfo_height(), app.status_bar.winfo_rooty())
             panel.username_var.set("last-edit")
             panel.password_var.set("secret")
-            # Close before the debounce fires still persists a complete edit.
+            # Closing never commits an unverified draft.
             app._on_close()
-            self.assertEqual(accounts.CredentialStore(Path(directory)).load()["username"], "last-edit")
+            self.assertEqual(accounts.CredentialStore(Path(directory)).load(), {})
             self.root = tk.Tk()
             self.root.withdraw()
 

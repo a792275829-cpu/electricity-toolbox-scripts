@@ -60,7 +60,7 @@ def desktop_catalog(paths):
                         f("selected_indexes", "执行配置序号（从 1 开始，用逗号分隔）", default="1"),
                         f("operation", "在线文档读取参数", "json", "{}")], [("preview", "预览"), ("run", "写入并回读"), ("login", "登录 WPS"), ("status", "刷新登录状态"), ("inspect", "读取文档信息")]),
     }
-    for tool_id in ("spot-price", "transaction-info"):
+    for tool_id in ("spot-price", "transaction-info", "daily-pdf-parser", "power-benefit", "guangdong-price", "report", "market-report", "summary-upload"):
         forms[tool_id][1].append(("login", "登录"))
     notes = {
         "section-analysis": "相邻节点一涨一跌＋价差严格大于阈值＋全天累计至少4个时点。",

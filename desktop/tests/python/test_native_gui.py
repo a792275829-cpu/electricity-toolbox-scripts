@@ -61,13 +61,14 @@ class NativeLifecycleTests(unittest.TestCase):
         self.assertEqual(self.app.current_page, "导出上网电量")
         self.assertEqual(list(self.app.pages), ["导出上网电量"])
 
-    def test_failed_account_save_blocks_update(self):
+    def test_update_does_not_save_unverified_account_draft(self):
         with (
             patch.object(self.app.credentials_panel, "dirty", True),
             patch.object(self.app.credentials_panel, "save", return_value=False),
         ):
-            with self.assertRaises(ValueError):
-                self.service.call("prepare_update", {})
+            self.service.call("prepare_update", {})
+            self.app.credentials_panel.save.assert_not_called()
+            self.service.call("abort_update", {})
         self.assertNotEqual(self.app.state(), "withdrawn")
 
     def test_download_failure_restores_original_window_and_form_values(self):

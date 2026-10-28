@@ -520,6 +520,8 @@ def main() -> int:
         print("\n已取消。")
         return 130
     except Exception as exc:
+        from toolbox_shared.cli_login import emit_login_error
+        emit_login_error(exc)
         print(f"\n失败：{exc}", file=sys.stderr)
         return 1
 

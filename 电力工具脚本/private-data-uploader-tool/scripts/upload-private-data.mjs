@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadSharedAccount, markAccountSession, prepareAccountSession, writePrivateJson } from './qingneng-account.mjs';
 import { dataPath } from './storage-paths.mjs';
+import { acquireAuthLock } from './auth-lock.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -65,6 +66,12 @@ function safeErrorMessage(error) {
   return String(error?.message || error || '未知错误').split('\nCall log:')[0].trim();
 }
 
+function loginFailure(kind, message) {
+  const error = new Error(message);
+  error.login_kind = kind;
+  return error;
+}
+
 function parseArgs(argv) {
   const args = {
     mode: 'plan',
@@ -102,6 +109,8 @@ async function loadConfig(args) {
   const loginConfigPath = dataPath(path.resolve(config.loginConfigPath ?? path.join(dataDir, 'config.json')));
   const loginConfig = await readJson(loginConfigPath, {});
   const sharedAccount = await loadSharedAccount(path.resolve(rootDir, '../..'));
+  const sourceDir = args.source ?? config.sourceDir;
+  if (args.mode !== 'login' && !sourceDir) throw new Error('请选择复盘文件夹或配置 sourceDir。');
   return {
     ...config,
     loginConfigPath,
@@ -109,7 +118,7 @@ async function loadConfig(args) {
     password: sharedAccount.password ?? loginConfig.password,
     accountRevision: sharedAccount.revision ?? '',
     headless: args.headless ?? config.headless ?? loginConfig.headless ?? true,
-    sourceDir: path.resolve(args.source ?? config.sourceDir),
+    sourceDir: path.resolve(sourceDir ?? dataDir),
     authStatePath: dataPath(path.resolve(config.authStatePath ?? path.join(dataDir, 'auth_state.json'))),
     userDataDir: dataPath(path.resolve(config.userDataDir ?? path.join(dataDir, '.browser-profile-uploader'))),
     chromeExecutablePath: config.chromeExecutablePath,
@@ -146,59 +155,6 @@ async function defaultChromeExecutablePath() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isProcessAlive(pid) {
-  if (!pid || !Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function acquireAuthLock(config, timeoutMs = 15 * 60 * 1000) {
-  const lockPath = `${config.authStatePath}.lock`;
-  const startedAt = Date.now();
-  let notified = false;
-
-  while (true) {
-    try {
-      const handle = await fs.open(lockPath, 'wx');
-      await handle.writeFile(JSON.stringify({
-        pid: process.pid,
-        startedAt: new Date().toISOString(),
-        script: 'private-data-uploader',
-      }, null, 2), 'utf8');
-      log(`已获得登录态锁：${lockPath}`);
-      return async () => {
-        await handle.close().catch(() => {});
-        await fs.unlink(lockPath).catch(() => {});
-      };
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      let owner;
-      try {
-        owner = JSON.parse(await fs.readFile(lockPath, 'utf8'));
-      } catch {
-        owner = {};
-      }
-      const lockAgeMs = Date.now() - (Date.parse(owner.startedAt ?? '') || 0);
-      if (lockAgeMs > 6 * 60 * 60 * 1000 || (owner.pid && !isProcessAlive(Number(owner.pid)))) {
-        await fs.unlink(lockPath).catch(() => {});
-        continue;
-      }
-      if (Date.now() - startedAt > timeoutMs) {
-        throw new Error(`等待登录态锁超时，请确认没有其他上传/抓取脚本仍在运行：${lockPath}`);
-      }
-      if (!notified) {
-        log(`检测到其他脚本正在使用同一登录态，等待其完成：${lockPath}`);
-        notified = true;
-      }
-      await sleep(2000);
-    }
-  }
 }
 
 function isExcelFile(name) {
@@ -315,13 +271,13 @@ async function saveAuthState(context, config) {
   await markAccountSession(context, config);
 }
 
-async function isLoggedIn(context, config) {
-  log('检查登录态...');
+async function isLoggedIn(context, config, quiet = false) {
+  if (!quiet) log('检查登录态...');
   const response = await context.request.get(`${config.baseUrl}/usercenter/web/pf/tenant/user/info`, {
     timeout: 8_000,
   }).catch(() => undefined);
   if (!response || response.status() >= 500) {
-    throw new Error('登录服务暂不可达，请检查内网、VPN 或代理后重试。');
+    throw loginFailure('network', '登录服务暂不可达，请检查内网、VPN 或代理后重试。');
   }
   if (response.status() >= 400) return false;
   const body = await response.json().catch(() => undefined);
@@ -342,7 +298,7 @@ function encryptPassword(publicKeyBase64, password) {
 
 async function apiLogin(context, config) {
   if (!config.username || !config.password) {
-    throw new Error('config.json 缺少 username/password，无法自动登录。');
+    throw loginFailure('credentials', '请先保存完整的账号密码。');
   }
 
   log('获取登录公钥...');
@@ -352,16 +308,18 @@ async function apiLogin(context, config) {
       timeout: 15_000,
     });
   } catch (error) {
-    throw new Error('获取登录公钥失败，请确认内网/VPN/代理可访问登录服务。');
+    throw loginFailure('network', '获取登录公钥失败，请确认内网/VPN/代理可访问登录服务。');
   }
   if (keyResponse.status() >= 400) {
-    throw new Error(`获取登录公钥失败 HTTP ${keyResponse.status()}`);
+    throw loginFailure('server', `获取登录公钥失败 HTTP ${keyResponse.status()}`);
   }
-  const keyBody = await keyResponse.json();
+  const keyBody = await keyResponse.json().catch(() => { throw loginFailure('protocol', '登录服务返回格式异常。'); });
   const publicKey = keyBody?.data;
-  if (!publicKey) throw new Error('登录公钥为空。');
+  if (typeof publicKey !== 'string' || !publicKey) throw loginFailure('protocol', '登录公钥无效。');
 
-  const encryptedPassword = encryptPassword(publicKey, config.password);
+  let encryptedPassword;
+  try { encryptedPassword = encryptPassword(publicKey, config.password); }
+  catch { throw loginFailure('protocol', '登录公钥格式异常。'); }
   log('提交登录请求...');
   const loginResponse = await context.request.post(`${config.baseUrl}/usercenter/web/login`, {
     params: {
@@ -370,10 +328,16 @@ async function apiLogin(context, config) {
       password: encryptedPassword,
     },
     timeout: 20_000,
-  }).catch(() => { throw new Error('提交登录请求失败，请检查网络后重试。'); });
-  const loginBody = await loginResponse.json().catch(async () => ({ text: await loginResponse.text() }));
+  }).catch(() => { throw loginFailure('network', '提交登录请求失败，请检查网络后重试。'); });
+  const loginBody = await loginResponse.json().catch(() => null);
+  if (loginResponse.status() >= 500 || loginResponse.status() === 429) {
+    throw loginFailure('server', `登录服务暂不可用（HTTP ${loginResponse.status()}），请稍后重试。`);
+  }
+  if (!loginBody || typeof loginBody !== 'object') throw loginFailure('protocol', '登录服务返回格式异常。');
   if (loginResponse.status() >= 400 || loginBody.retCode !== 'T200') {
-    throw new Error(`自动登录被拒绝（HTTP ${loginResponse.status()}），请检查账号、密码或账户状态。`);
+    const verification = /验证|滑块|短信|captcha/i.test(String(loginBody.retMsg || ''));
+    throw loginFailure(verification ? 'verification' : 'credentials', verification
+      ? '网站需要人工验证，请打开当前工具登录窗口。' : `自动登录被拒绝（HTTP ${loginResponse.status()}），请检查账号、密码或账户状态。`);
   }
 }
 
@@ -383,9 +347,30 @@ async function ensureLogin(context, config) {
     return;
   }
   log('登录态失效，正在自动登录...');
-  await apiLogin(context, config);
+  try {
+    await apiLogin(context, config);
+  } catch (error) {
+    if (error.login_kind !== 'verification' || config.headless) throw error;
+    const page = await context.newPage();
+    try {
+      await page.goto(`${config.baseUrl}/usercenter/#/login`, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+      await page.locator('#username, input[placeholder*="账号"]').first().fill(config.username, { timeout: 5000 }).catch(() => {});
+      await page.locator('input[type="password"]').first().fill(config.password, { timeout: 5000 }).catch(() => {});
+      await page.locator('button[type="submit"], button:has-text("登录")').first().click({ timeout: 5000 }).catch(() => {});
+      log('请在登录窗口完成人工验证（最长等待5分钟）。');
+      const deadline = Date.now() + 300_000;
+      while (Date.now() < deadline && !page.isClosed()) {
+        if (await isLoggedIn(context, config, true)) {
+          await saveAuthState(context, config);
+          return;
+        }
+        await sleep(1000);
+      }
+    } finally { await page.close().catch(() => {}); }
+    throw error;
+  }
   if (!await isLoggedIn(context, config)) {
-    throw new Error('自动登录后仍未检测到有效登录态。');
+    throw loginFailure('session', '自动登录后仍未检测到有效登录态。');
   }
   await saveAuthState(context, config);
   log('自动登录成功。');
@@ -496,7 +481,7 @@ async function uploadFile(page, filePath, current, total) {
 }
 
 async function executeUpload(plan, config) {
-  const releaseLock = await acquireAuthLock(config);
+  const releaseLock = await acquireAuthLock(config, undefined, log);
   let browser;
   let context;
   try {
@@ -522,7 +507,7 @@ async function executeUpload(plan, config) {
 }
 
 async function loginOnly(config) {
-  const releaseLock = await acquireAuthLock(config);
+  const releaseLock = await acquireAuthLock(config, undefined, log);
   let browser;
   let context;
   try {
@@ -563,6 +548,8 @@ async function main() {
 }
 
 main().catch((error) => {
+  if (error.login_kind && process.env.TOOLBOX_CLI_PROTOCOL === '1') console.log('TOOLBOX_ERROR=' + JSON.stringify({ code: ['network', 'server'].includes(error.login_kind) ? 'network' : 'authentication',
+    stage: 'login', login_kind: error.login_kind, exception_type: 'LoginError', message: error.message }));
   const detail = error?.stack || error?.message || String(error);
   console.error(detail.split('\nCall log:')[0]);
   process.exitCode = 1;

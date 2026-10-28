@@ -95,8 +95,8 @@ class NativeService:
         if method == "prepare_update":
             if app.registry.has_running_tasks():
                 raise ValueError("请等待正在运行的任务完成后更新")
-            if app.credentials_panel.dirty and not app.credentials_panel.save():
-                raise ValueError(app.credentials_panel.status_var.get())
+            if app.credentials_panel._verification_id is not None:
+                raise ValueError("请等待账号验证完成后更新")
             self.maintenance = True
             app.suspend_page_loading()
             # Keep the footer visible while blocking business input.
@@ -113,8 +113,6 @@ class NativeService:
         if method in ("installer_close", "finish_update"):
             if app.registry.has_running_tasks():
                 raise ValueError("请等待正在运行的任务完成后安装")
-            if app.credentials_panel.dirty and not app.credentials_panel.save():
-                raise ValueError("账号保存失败，已阻止安装")
             app.after_idle(app.destroy)
             return True
         if method in ("request_close", "shutdown"):

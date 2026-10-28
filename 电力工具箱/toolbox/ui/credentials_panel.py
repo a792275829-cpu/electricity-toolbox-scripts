@@ -156,7 +156,9 @@ class CredentialsPanel(ttk.Frame):
     def offer_manual_login(self, callback=None) -> None:
         if callback is None:
             page = getattr(self.winfo_toplevel(), "_visible_page", None)
-            callback = getattr(page, "start_login", None)
+            from toolbox_shared.login_tools import STATE_DIRS
+            if getattr(page, "tool_id", None) in {*STATE_DIRS, "summary-upload", "group-upload"}:
+                callback = getattr(page, "start_login", None)
         if callback is not None:
             self.manual_login_button.configure(command=callback)
             self.manual_login_button.pack(fill="x", pady=(4, 0))

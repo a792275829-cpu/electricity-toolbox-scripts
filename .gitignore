@@ -3,6 +3,7 @@
 **/config.json
 **/auth_state.json
 **/auth_state.json.lock
+**/auth_state.json.lock.reap
 **/upload.config.json
 **/wps_excel_to_kdocs_config.json
 **/file_dialog_settings.json

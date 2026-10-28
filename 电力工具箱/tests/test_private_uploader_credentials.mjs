@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { loadSharedAccount, markAccountSession, prepareAccountSession, writePrivateJson } from '../../电力工具脚本/private-data-uploader-tool/scripts/qingneng-account.mjs';
+import { acquireAuthLock } from '../../电力工具脚本/private-data-uploader-tool/scripts/auth-lock.mjs';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'qingneng-test-'));
 try {
@@ -29,6 +30,22 @@ try {
   await fs.writeFile(path.join(workspace, 'tool/.qingneng-session/config.json'), 'broken metadata');
   assert.equal(await prepareAccountSession(context, config), true);
   assert.equal(config.authStatePath, path.join(workspace, 'tool/auth_state.json'));
+  const lockPath = `${config.authStatePath}.lock`;
+  const initializing = await fs.open(lockPath, 'wx');
+  const beforeLock = await initializing.stat();
+  await assert.rejects(acquireAuthLock(config, 0), /等待登录态锁超时/);
+  assert.equal((await fs.stat(lockPath)).ino, beforeLock.ino);
+  await initializing.close();
+  await fs.unlink(lockPath);
+  await fs.writeFile(lockPath, JSON.stringify({ pid: process.pid, startedAt: '2000-01-01T00:00:00Z' }));
+  await assert.rejects(acquireAuthLock(config, 0), /等待登录态锁超时/);
+  await fs.unlink(lockPath);
+  await fs.writeFile(lockPath, JSON.stringify({ pid: 2147483647, startedAt: '2000-01-01T00:00:00Z' }));
+  const release = await acquireAuthLock(config, 1000);
+  await assert.rejects(acquireAuthLock(config, 0), /等待登录态锁超时/);
+  await release();
+  await assert.rejects(fs.stat(lockPath), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(`${lockPath}.reap`), { code: 'ENOENT' });
   await writePrivateJson(config.authStatePath, { cookies: [{ name: 'sample' }] });
   assert.equal((await fs.stat(config.authStatePath)).mode & 0o777, 0o600);
   assert.equal(JSON.parse(await fs.readFile(config.authStatePath, 'utf8')).cookies[0].name, 'sample');

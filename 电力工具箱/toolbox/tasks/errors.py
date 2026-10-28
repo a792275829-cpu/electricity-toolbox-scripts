@@ -39,6 +39,7 @@ def error_detail(exc, *, tool_id="", action="", stage="execute"):
     if isinstance(exc, LoginError):
         return dict(code="network" if exc.kind in {"network", "server"} else "authentication",
                     tool_id=tool_id, action=action, stage="login", login_kind=exc.kind,
+                    message=str(exc),
                     exception_type=type(exc).__name__, exit_code=getattr(exc, "returncode", None))
     code = next((value for kind, value in (
         (TaskCancelled, "cancelled"), (PermissionError, "permission"),
@@ -72,7 +73,7 @@ def classify_error(exc: BaseException, output: str = "") -> UserFacingError:
                   "请检查账号、密码及账户状态后重试。" if kind == "credentials" else
                   "请打开对应工具的登录窗口完成人工验证后重试。" if kind == "verification" else
                   "请检查网站登录服务及账号权限后重试。")
-        summary = str(exc).strip().splitlines()[0]
+        summary = detail.get("message") or str(exc).strip().splitlines()[0]
         return UserFacingError(ErrorCategory.NETWORK if network else ErrorCategory.AUTHENTICATION,
                                redact(summary), advice, exc)
 
