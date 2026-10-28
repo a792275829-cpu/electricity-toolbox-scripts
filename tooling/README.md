@@ -43,7 +43,7 @@
 
 ## 安装包性能对比
 
-`benchmark_installer.py` 使用两个包内的解释器与依赖，在同一台 Mac 串行、交替执行 9 类离线场景；每项先预热，再各测 7 次。以新进程测导入／Tk 界面、合成 Excel 写后回读、项目预测模型、后台／可见／双浏览器、PDF 和 Node 上传浏览器。`before` 恢复优化前默认 headless shell 策略，`after` 使用包内 Chromium 策略；双方源码清单必须相同。
+`benchmark_installer.py` 使用两个包内的解释器与依赖，在同一台 Mac 串行、交替执行 9 类离线场景；每项先预热，再各测 7 次。以新进程测导入／Tk 界面、合成 Excel 写后回读、项目预测模型、后台／可见／双浏览器、PDF 和 Node 上传浏览器。`before` 恢复优化前默认 headless shell 策略，`after` 使用该包内的实际浏览器策略；双方业务源码必须相同，仅允许浏览器策略适配模块本身不同，以便验证策略恢复。
 
 ```sh
 .venv/bin/python tooling/benchmark_installer.py \

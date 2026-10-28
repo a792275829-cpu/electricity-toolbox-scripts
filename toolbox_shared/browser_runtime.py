@@ -1,12 +1,12 @@
-"""Use the bundled full Chromium for both visible and headless desktop tasks."""
+"""Keep source Chrome preference and packaged Playwright browser defaults."""
 from __future__ import annotations
 
 import os
 
 
 def chromium_launch_options(*, prefer_system: bool = False) -> dict[str, str]:
-    # An unspecified channel selects headless-shell for headless launches.
-    # Desktop ships only full Chromium; source launches retain their old policy.
+    # Leave the packaged channel unspecified: headless uses headless shell,
+    # visible windows use full Chromium. Node retains its own existing policy.
     if os.environ.get("TOOLBOX_PORTABLE") == "1":
-        return {"channel": "chromium"}
+        return {}
     return {"channel": "chrome"} if prefer_system else {}

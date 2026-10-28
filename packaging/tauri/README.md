@@ -28,7 +28,7 @@
 
 ## 安装包体积控制
 
-- `prune_runtime.py` 在签名前裁剪 staging 运行环境：移除 Node 开发头文件、Python pkgconfig、明确列出的依赖测试目录和 Chromium headless shell；保留许可证、包元数据、字体、模板及全部业务依赖。NumPy 的测试树存在运行时导入，必须保留；Python 头文件用于重复构建 Tk 扩展，同样保留。
-- 发行版通过 `toolbox_shared.browser_runtime` 为 Python 登录、取数和 PDF 启动指定 `channel="chromium"`，可见窗口与后台模式共用完整 Chromium。Node 上传工具继续使用同一浏览器目录里的完整 Chromium。各工具的 profile、登录态和锁仍相互独立。
-- 新环境使用 `playwright install --no-shell chromium`；复用旧环境时也执行相同裁剪。运行环境内保留 Node/npm、Python/pip，不依赖接收电脑预装环境。
+- `prune_runtime.py` 在签名前裁剪 staging 运行环境：移除 Node 开发头文件、Python pkgconfig、明确列出的依赖测试目录；保留许可证、包元数据、字体、模板及全部业务依赖。NumPy 的测试树存在运行时导入，必须保留；Python 头文件用于重复构建 Tk 扩展，同样保留。
+- 仅保留 A 方案。完整 Chromium 与 headless shell 同时打包，Python 后台／PDF 沿用 Playwright 默认 headless shell，可见窗口使用完整 Chromium。源码运行仍优先系统 Chrome，Node 上传逻辑不变；各工具的 profile、登录态和锁保持独立。
+- 新环境使用 `playwright install chromium`；复用曾按 B 裁剪的 staging 时自动补回缺失浏览器，跨平台传入不完整运行环境则拒绝构建。运行环境内保留 Node/npm、Python/pip，不依赖接收电脑预装环境。
 - 构建生成 `payload/runtime-pruning.json` 记录当次移除项及逻辑字节数。该数值不是 DMG 压缩收益。原生构建会执行 `validate_runtime.py`，离线验证科学计算、Python/Node 独立临时 profile、截图与 PDF。可用包内 Python 执行 `validate_runtime.py /绝对路径/payload --headed` 追加可见窗口验证；不会读取生产登录态或上传数据。

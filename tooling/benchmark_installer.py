@@ -1,7 +1,7 @@
 """Same-machine offline comparison of full and trimmed macOS installer runtimes.
 
 Before uses the pre-optimization Python policy (default headless shell); after
-uses the packaged Chromium channel. Node and headed Chrome are control groups.
+uses the after package's actual browser policy. Node and headed Chrome are control groups.
 No production data, credentials, installed app, or network requests are used.
 """
 from __future__ import annotations
@@ -84,6 +84,7 @@ def worker(args):
     source = args.app / "Contents/Resources/payload/app"
     sys.path[:0] = [str(source), str(source / "电力工具箱"), str(source / "广东电价预测")]
     metrics = {}
+    backend = None
     def measure(name, callback):
         start = time.perf_counter()
         value = callback()
@@ -148,6 +149,7 @@ def worker(args):
         assert prediction.shape == (96,) and np.isfinite(prediction).all()
         parity = prediction.round(8).tolist()
     elif case == "node":
+        backend = "chromium"
         module = source / '电力工具脚本/private-data-uploader-tool/node_modules/playwright/index.mjs'
         script = '''
 import fs from 'node:fs';
@@ -178,6 +180,7 @@ try {
         from toolbox_shared.browser_runtime import chromium_launch_options
         options = {} if before else chromium_launch_options()
         headed = case == 'browser_headed'
+        backend = 'chromium' if headed or options.get('channel') == 'chromium' else 'chromium-headless-shell'
         contexts = []
         with sync_playwright() as sdk:
             t = time.perf_counter()
@@ -234,7 +237,7 @@ try {
                 if browser:
                     browser.close()
     metrics['worker_s'] = time.perf_counter() - start
-    args.result.write_text(json.dumps({'metrics': metrics, 'parity': parity}, ensure_ascii=False))
+    args.result.write_text(json.dumps({'metrics': metrics, 'parity': parity, 'browser_backend': backend}, ensure_ascii=False))
 
 
 def execute(args, app, variant, case, folder):
@@ -335,16 +338,19 @@ def run(args):
             raise ValueError('Output must be outside application bundles')
     args.output.mkdir(parents=True, exist_ok=False)
     manifests = [json.loads((app / 'Contents/Resources/payload/manifest.json').read_text()) for app in apps.values()]
-    if manifests[0]['files'] != manifests[1]['files']:
-        raise ValueError('Compare the same business source files')
+    source_differences = [name for name in sorted(set(manifests[0]['files']) | set(manifests[1]['files']))
+                          if manifests[0]['files'].get(name) != manifests[1]['files'].get(name)]
+    if set(source_differences) - {'toolbox_shared/browser_runtime.py'}:
+        raise ValueError('Compare the same business source files (only browser policy helper may differ)')
     report = {'metadata':{'platform':platform.platform(), 'python_controller':sys.version,
               'cpu':subprocess.check_output(['sysctl','-n','machdep.cpu.brand_string'],text=True).strip(),
               'memory_bytes':int(subprocess.check_output(['sysctl','-n','hw.memsize'],text=True)),
               'power':subprocess.check_output(['pmset','-g','batt'],text=True).strip(),
+              'source_policy_differences':source_differences,
               'before':str(apps['before']), 'after':str(apps['after']), 'repeats':args.repeats,
               'warmups_per_case_variant':1, 'sample_interval_target_s':0.05, 'compute_threads':4,
               'isolate_bytecode_cache':args.isolate_bytecode_cache,
-              'browser_policy':'before=Python default headless shell; after=full Chromium channel; headed/Node=full Chromium in both',
+              'browser_policy':'before=Python default headless shell; after=actual packaged browser_runtime policy; see per-sample browser_backend; headed/Node=full Chromium',
               'timing_scope':'Fresh subprocess per sample, one discarded warmup, alternating before/after order. OS file cache is not purged; not a cold-boot benchmark.',
               'footprint_scope':'Sum of per-process ri_phys_footprint via macOS proc_pid_rusage v2; includes compressed/ledger charged memory, not whole-system memory pressure.',
               'rss_scope':'Sampled sum of worker and descendant RSS; shared pages can be counted more than once. Not physical memory pressure or total Tauri application memory.',

@@ -21,18 +21,19 @@ class RuntimePruningTests(unittest.TestCase):
             keep = ["python/bin/python3", "node/bin/node", "node/LICENSE", "python/include/Python.h",
                     f"{site}/pandas/data/example.csv", f"{site}/numpy/testing/helper.py", f"{site}/numpy/_core/tests/_natype.py",
                     f"{site}/scipy/special/_ufuncs.so", f"{site}/pandas-1.dist-info/LICENSE",
-                    "python/share/licenses/tcl-tk/tcl.txt", "ms-playwright/chromium-1187/browser"]
+                    "python/share/licenses/tcl-tk/tcl.txt", "ms-playwright/chromium-1187/browser",
+                    "ms-playwright/chromium_headless_shell-1187/browser"]
             remove = ["node/include/node.h",
                       "python/lib/pkgconfig/python.pc", f"{site}/pandas/tests/test_frame.py",
-                      f"{site}/scipy/special/tests/test_basic.py",
-                      "ms-playwright/chromium_headless_shell-1187/browser"]
+                      f"{site}/scipy/special/tests/test_basic.py"]
             for name in keep + remove:
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("fixture")
             registry = root / site / "playwright/driver/package/browsers.json"
             registry.parent.mkdir(parents=True)
-            registry.write_text(json.dumps({"browsers": [{"name": "chromium", "revision": "1187"}]}))
+            registry.write_text(json.dumps({"browsers": [{"name": "chromium", "revision": "1187"},
+                {"name": "chromium-headless-shell", "revision": "1187"}]}))
             report = prune(root)
             self.assertEqual(report["removed_bytes"], len(remove) * len("fixture"))
             for name in keep:
@@ -44,16 +45,21 @@ class RuntimePruningTests(unittest.TestCase):
             (root / "ms-playwright/chromium-1187").rmdir()
             with self.assertRaisesRegex(ValueError, "Chromium"):
                 prune(root)
+            (root / "ms-playwright/chromium-1187").mkdir()
+            (root / "ms-playwright/chromium_headless_shell-1187/browser").unlink()
+            (root / "ms-playwright/chromium_headless_shell-1187").rmdir()
+            with self.assertRaisesRegex(ValueError, "headless shell"):
+                prune(root)
 
-    def test_portable_launch_and_fallback_both_use_full_chromium(self):
+    def test_portable_launch_and_fallback_retain_browser_defaults(self):
         with patch.dict(os.environ, {"TOOLBOX_PORTABLE": "1"}):
-            self.assertEqual(chromium_launch_options(), {"channel": "chromium"})
-            self.assertEqual(chromium_launch_options(prefer_system=True), {"channel": "chromium"})
+            self.assertEqual(chromium_launch_options(), {})
+            self.assertEqual(chromium_launch_options(prefer_system=True), {})
         with patch.dict(os.environ, {"TOOLBOX_PORTABLE": "0"}):
             self.assertEqual(chromium_launch_options(), {})
             self.assertEqual(chromium_launch_options(prefer_system=True), {"channel": "chrome"})
 
-    def test_all_python_browser_consumers_select_full_browser_on_fallback(self):
+    def test_all_python_consumers_preserve_default_channel_on_fallback(self):
         from unittest.mock import Mock, patch
         from toolbox.runtime import load_module
         from playwright.sync_api import Error
@@ -70,10 +76,36 @@ class RuntimePruningTests(unittest.TestCase):
                     self.assertIs(module.launch_context(sdk, headless=True), context)
                 self.assertEqual(len(sdk.chromium.launch_persistent_context.call_args_list), 2)
                 for call in sdk.chromium.launch_persistent_context.call_args_list:
-                    self.assertEqual(call.kwargs["channel"], "chromium")
+                    self.assertNotIn("channel", call.kwargs)
             sdk = Mock()
             sdk.chromium.launch_persistent_context.side_effect = [Error("first launch failed"), Mock()]
             with patch.object(wps_browser, "PROFILE_DIR", Path(directory) / "wps"):
                 wps_browser.open_browser_context(sdk, "temporary", "", lambda _: None, for_login_check=True)
             for call in sdk.chromium.launch_persistent_context.call_args_list:
-                self.assertEqual(call.kwargs["channel"], "chromium")
+                self.assertNotIn("channel", call.kwargs)
+
+    def test_reused_b_runtime_restores_missing_headless_shell(self):
+        import prepare_payload
+        from prune_runtime import missing_browsers
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = root / 'python/lib/python3.11/site-packages/playwright/driver/package/browsers.json'
+            registry.parent.mkdir(parents=True)
+            registry.write_text(json.dumps({'browsers': [
+                {'name':'chromium','revision':'1187'},
+                {'name':'chromium-headless-shell','revision':'1187'}]}))
+            (root / 'ms-playwright/chromium-1187').mkdir(parents=True)
+            shell = root / 'ms-playwright/chromium_headless_shell-1187'
+            with patch.object(prepare_payload, 'run', side_effect=lambda *a, **kw: shell.mkdir()) as run:
+                prepare_payload.ensure_browser_runtime(root, native=True)
+                self.assertEqual(run.call_args.args[0][-2:], ['install', 'chromium'])
+                self.assertEqual(missing_browsers(root), [])
+                prepare_payload.ensure_browser_runtime(root, native=True)
+                run.assert_called_once()
+            shell.rmdir()
+            with patch.object(prepare_payload, 'run') as run:
+                with self.assertRaisesRegex(ValueError, '跨平台'):
+                    prepare_payload.ensure_browser_runtime(root, native=False)
+                run.assert_not_called()
+                with self.assertRaisesRegex(RuntimeError, '仍缺少'):
+                    prepare_payload.ensure_browser_runtime(root, native=True)

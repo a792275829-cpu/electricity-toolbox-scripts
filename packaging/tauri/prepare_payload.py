@@ -157,6 +157,19 @@ def prepare_price_xlsx(source: Path, target: str) -> Path:
     return binary
 
 
+def ensure_browser_runtime(runtime: Path, *, native: bool) -> None:
+    """Repair cached staging runtimes previously trimmed by the abandoned B policy."""
+    from prune_runtime import missing_browsers
+    if not missing_browsers(runtime):
+        return
+    if not native:
+        raise ValueError("跨平台运行环境缺少 Chromium / headless shell，请提供完整的 --runtime-from")
+    run([runtime / "python/bin/python3", "-m", "playwright", "install", "chromium"],
+        env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(runtime / "ms-playwright")})
+    if missing_browsers(runtime):
+        raise RuntimeError("Playwright 安装后仍缺少 Chromium / headless shell")
+
+
 def prepare(target: str, runtime_from: Path | None = None, forecast_workbook: Path | None = None):
     native = (
         "aarch64-apple-darwin"
@@ -251,8 +264,9 @@ def prepare(target: str, runtime_from: Path | None = None, forecast_workbook: Pa
                 **os.environ,
                 "PLAYWRIGHT_BROWSERS_PATH": str(runtime / "ms-playwright"),
             }
-            run([python, "-m", "playwright", "install", "--no-shell", "chromium"], env=env)
+            run([python, "-m", "playwright", "install", "chromium"], env=env)
         marker.write_text(target)
+    ensure_browser_runtime(runtime, native=target == native)
     from prepare_tk import prepare as prepare_tk
 
     prepare_tk(runtime / "python", cache)

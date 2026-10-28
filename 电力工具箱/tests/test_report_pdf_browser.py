@@ -28,13 +28,13 @@ class ReportPdfBrowserTests(unittest.TestCase):
             printing.assert_called_once_with(Path("print.html"), browser=browser)
             browser.close.assert_called_once()
 
-    def test_portable_pdf_uses_full_chromium_without_headless_shell(self):
+    def test_portable_pdf_retains_default_headless_shell(self):
         with mock.patch.dict(os.environ, {"TOOLBOX_PORTABLE": "1"}), \
              mock.patch.object(pdf_export, "sync_playwright") as playwright:
             sdk = playwright.return_value.__enter__.return_value
             with pdf_export.pdf_browser():
                 pass
-            sdk.chromium.launch.assert_called_once_with(headless=True, channel="chromium")
+            sdk.chromium.launch.assert_called_once_with(headless=True)
             sdk.chromium.launch.return_value.close.assert_called_once()
 
     def test_failed_page_export_keeps_callers_browser_open(self):

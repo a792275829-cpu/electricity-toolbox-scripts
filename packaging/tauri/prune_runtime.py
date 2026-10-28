@@ -22,23 +22,28 @@ def file_bytes(path: Path) -> int:
                if p.is_file() and not p.is_symlink())
 
 
+def missing_browsers(runtime: Path) -> list[Path]:
+    registry = runtime / "python/lib/python3.11/site-packages/playwright/driver/package/browsers.json"
+    browsers = {b["name"]: b for b in json.loads(registry.read_text())["browsers"]}
+    required = {"chromium": "chromium", "chromium-headless-shell": "chromium_headless_shell"}
+    paths = [runtime / "ms-playwright" / f'{prefix}-{browsers[name]["revision"]}'
+             for name, prefix in required.items()]
+    return [path for path in paths if not path.is_dir()]
+
+
 def prune(runtime: Path) -> dict:
-    """Remove an explicit set of development inputs and the unused headless shell."""
+    """Remove development inputs while retaining both browser executables."""
     runtime = runtime.resolve()
     if not (runtime / "python/bin/python3").is_file() or not (runtime / "node/bin/node").is_file():
         raise ValueError("待裁剪目录缺少 Python / Node 运行环境")
-    registry = runtime / "python/lib/python3.11/site-packages/playwright/driver/package/browsers.json"
-    chromium = next(b for b in json.loads(registry.read_text())["browsers"] if b["name"] == "chromium")
-    # Fail closed instead of leaving a release without its only browser.
-    if not (runtime / "ms-playwright" / f'chromium-{chromium["revision"]}').is_dir():
-        raise ValueError("缺少锁定版本的完整 Chromium，禁止移除 headless shell")
+    if missing_browsers(runtime):
+        raise ValueError("缺少锁定版本的 Chromium 或 headless shell，禁止交付不完整运行环境")
     # prepare_tk rebuilds _tkinter when the staging runtime is reused.
     # Keep Python headers (about 1 MiB) so a second build remains possible.
     candidates = [runtime / "node/include", runtime / "python/lib/pkgconfig"]
     site = runtime / "python/lib/python3.11/site-packages"
     for package in TEST_PACKAGES:
         candidates.extend(p for p in (site / package).rglob("tests") if p.is_dir())
-    candidates.extend((runtime / "ms-playwright").glob("chromium_headless_shell-*"))
     candidates.extend(runtime.rglob("__pycache__"))
     # Remove parents before children; repeated runs must be harmless.
     removed = []
