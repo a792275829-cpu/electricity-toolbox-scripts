@@ -16,6 +16,7 @@ try:
 except ImportError:
     PlaywrightTimeoutError = Exception
 
+from .browser_runtime import chromium_launch_options
 from .wps_paths import (
     BASE_DIR,
     DATA_DIR,
@@ -680,7 +681,7 @@ def open_browser_context(
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_DIR),
             headless=for_login_check,
-            channel=None if os.environ.get("TOOLBOX_PORTABLE") == "1" else "chrome",
+            **chromium_launch_options(prefer_system=True),
             viewport={"width": 1400, "height": 900},
         )
     except Exception:
@@ -688,6 +689,7 @@ def open_browser_context(
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_DIR),
             headless=for_login_check,
+            **chromium_launch_options(),
             viewport={"width": 1400, "height": 900},
         )
     return None, context, True

@@ -28,6 +28,7 @@ WORKSPACE_DIR = SCRIPT_DIR.parent
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
 from toolbox_shared.credentials import mark_browser_session, prepare_browser_session, read_login_config
+from toolbox_shared.browser_runtime import chromium_launch_options
 from toolbox_shared.auth_loader import wait_for_login
 from toolbox_shared.dates import normalize_date_input
 import upload_files as _upload_files
@@ -334,12 +335,13 @@ def launch_context(playwright, *, headless: bool):
     try:
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_DIR),
-            channel=None if os.environ.get("TOOLBOX_PORTABLE") == "1" else "chrome",
+            **chromium_launch_options(prefer_system=True),
             **launch_options,
         )
     except PlaywrightError:
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_DIR),
+            **chromium_launch_options(),
             **launch_options,
         )
     if not prepare_browser_session(context, AUTH_STATE_PATH):

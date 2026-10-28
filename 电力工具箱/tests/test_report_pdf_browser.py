@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -26,6 +27,15 @@ class ReportPdfBrowserTests(unittest.TestCase):
             phone.assert_called_once_with(Path("phone.html"), browser=browser)
             printing.assert_called_once_with(Path("print.html"), browser=browser)
             browser.close.assert_called_once()
+
+    def test_portable_pdf_uses_full_chromium_without_headless_shell(self):
+        with mock.patch.dict(os.environ, {"TOOLBOX_PORTABLE": "1"}), \
+             mock.patch.object(pdf_export, "sync_playwright") as playwright:
+            sdk = playwright.return_value.__enter__.return_value
+            with pdf_export.pdf_browser():
+                pass
+            sdk.chromium.launch.assert_called_once_with(headless=True, channel="chromium")
+            sdk.chromium.launch.return_value.close.assert_called_once()
 
     def test_failed_page_export_keeps_callers_browser_open(self):
         import tempfile

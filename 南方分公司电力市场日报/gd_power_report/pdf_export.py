@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 from playwright.sync_api import Browser, sync_playwright
+from toolbox_shared.browser_runtime import chromium_launch_options
 
 
 @contextmanager
@@ -12,7 +13,7 @@ def pdf_browser(browser: Browser | None = None):
         yield browser
         return
     with sync_playwright() as playwright:
-        owned_browser = playwright.chromium.launch(headless=True)
+        owned_browser = playwright.chromium.launch(headless=True, **chromium_launch_options())
         try:
             yield owned_browser
         finally:

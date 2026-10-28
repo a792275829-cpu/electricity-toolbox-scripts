@@ -251,7 +251,7 @@ def prepare(target: str, runtime_from: Path | None = None, forecast_workbook: Pa
                 **os.environ,
                 "PLAYWRIGHT_BROWSERS_PATH": str(runtime / "ms-playwright"),
             }
-            run([python, "-m", "playwright", "install", "chromium"], env=env)
+            run([python, "-m", "playwright", "install", "--no-shell", "chromium"], env=env)
         marker.write_text(target)
     from prepare_tk import prepare as prepare_tk
 
@@ -320,6 +320,11 @@ def prepare(target: str, runtime_from: Path | None = None, forecast_workbook: Pa
     (payload / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    from prune_runtime import prune
+    pruning = prune(runtime)
+    (payload / "runtime-pruning.json").write_text(
+        json.dumps(pruning, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     build_support.normalize_permissions(payload)
     if target == native:
         run(
@@ -330,6 +335,9 @@ def prepare(target: str, runtime_from: Path | None = None, forecast_workbook: Pa
                 'import openpyxl,playwright,pandas,sklearn,tkinter,PIL,pdfplumber,pypdfium2,docx; print("Bundled Python dependencies OK")',
             ]
         )
+        run([python, "-I", "-B", Path(__file__).with_name("validate_runtime.py"), payload],
+            env={**os.environ, "TOOLBOX_PORTABLE": "1",
+                 "PLAYWRIGHT_BROWSERS_PATH": str(runtime / "ms-playwright")})
     print(
         f"Payload ready: {payload} ({len(files)} managed files, {target})", flush=True
     )
