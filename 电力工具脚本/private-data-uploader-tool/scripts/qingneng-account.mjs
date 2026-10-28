@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { dataPath } from './storage-paths.mjs';
 
 async function readAccountJson(filePath) {
@@ -23,6 +24,23 @@ function markerPath(config) {
   return path.join(path.dirname(config.authStatePath), '.qingneng-session/config.json');
 }
 
+export async function writePrivateJson(target, value) {
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const temporary = path.join(path.dirname(target), `.auth-${randomUUID()}.tmp`);
+  try {
+    const handle = await fs.open(temporary, 'wx', 0o600);
+    try {
+      await handle.writeFile(JSON.stringify(value));
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(temporary, target);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
+}
+
 export async function prepareAccountSession(context, config) {
   const marker = await readAccountJson(markerPath(config)).catch(() => ({}));
   context.qingnengAccountChanged = Boolean(config.accountRevision) && marker.revision !== config.accountRevision;
@@ -33,7 +51,6 @@ export async function prepareAccountSession(context, config) {
 export async function markAccountSession(context, config) {
   if (!config.accountRevision) return;
   const target = markerPath(config);
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(target, JSON.stringify({ revision: config.accountRevision }), { mode: 0o600 });
+  await writePrivateJson(target, { revision: config.accountRevision });
   context.qingnengAccountChanged = false;
 }

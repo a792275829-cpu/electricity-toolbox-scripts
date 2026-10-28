@@ -4,7 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { loadSharedAccount, markAccountSession, prepareAccountSession } from './qingneng-account.mjs';
+import { loadSharedAccount, markAccountSession, prepareAccountSession, writePrivateJson } from './qingneng-account.mjs';
 import { dataPath } from './storage-paths.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -311,19 +311,21 @@ async function launchContext(config) {
 }
 
 async function saveAuthState(context, config) {
-  await fs.mkdir(path.dirname(config.authStatePath), { recursive: true });
-  await context.storageState({ path: config.authStatePath });
+  await writePrivateJson(config.authStatePath, await context.storageState());
   await markAccountSession(context, config);
 }
 
 async function isLoggedIn(context, config) {
   log('检查登录态...');
   const response = await context.request.get(`${config.baseUrl}/usercenter/web/pf/tenant/user/info`, {
-    timeout: 20_000,
+    timeout: 8_000,
   }).catch(() => undefined);
-  if (!response || response.status() >= 400) return false;
+  if (!response || response.status() >= 500) {
+    throw new Error('登录服务暂不可达，请检查内网、VPN 或代理后重试。');
+  }
+  if (response.status() >= 400) return false;
   const body = await response.json().catch(() => undefined);
-  return body?.retCode === 'T200';
+  return body?.retCode === 'T200' && Boolean(body?.data?.tenantId);
 }
 
 function encryptPassword(publicKeyBase64, password) {
@@ -347,10 +349,10 @@ async function apiLogin(context, config) {
   let keyResponse;
   try {
     keyResponse = await context.request.get(`${config.baseUrl}/usercenter/web/pf/login/info/publicKey`, {
-      timeout: 60_000,
+      timeout: 15_000,
     });
   } catch (error) {
-    throw new Error(`获取登录公钥失败：${safeErrorMessage(error)}。请确认内网/VPN/代理可访问 ${config.baseUrl}`);
+    throw new Error('获取登录公钥失败，请确认内网/VPN/代理可访问登录服务。');
   }
   if (keyResponse.status() >= 400) {
     throw new Error(`获取登录公钥失败 HTTP ${keyResponse.status()}`);
@@ -367,14 +369,12 @@ async function apiLogin(context, config) {
       username: config.username,
       password: encryptedPassword,
     },
-    timeout: 60_000,
-  });
+    timeout: 20_000,
+  }).catch(() => { throw new Error('提交登录请求失败，请检查网络后重试。'); });
   const loginBody = await loginResponse.json().catch(async () => ({ text: await loginResponse.text() }));
-  if (loginResponse.status() >= 400 || (loginBody.retCode && loginBody.retCode !== 'T200')) {
-    throw new Error(`自动登录失败 HTTP ${loginResponse.status()}: ${JSON.stringify(loginBody).slice(0, 300)}`);
+  if (loginResponse.status() >= 400 || loginBody.retCode !== 'T200') {
+    throw new Error(`自动登录被拒绝（HTTP ${loginResponse.status()}），请检查账号、密码或账户状态。`);
   }
-
-  await saveAuthState(context, config);
 }
 
 async function ensureLogin(context, config) {
@@ -387,6 +387,7 @@ async function ensureLogin(context, config) {
   if (!await isLoggedIn(context, config)) {
     throw new Error('自动登录后仍未检测到有效登录态。');
   }
+  await saveAuthState(context, config);
   log('自动登录成功。');
 }
 

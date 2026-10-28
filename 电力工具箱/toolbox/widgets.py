@@ -205,6 +205,10 @@ class ToolPage(ttk.Frame):
     ) -> None:
         if self.busy:
             return
+        panel = getattr(self.winfo_toplevel(), "credentials_panel", None)
+        if panel is not None and not panel.save_if_dirty():
+            messagebox.showwarning("账号尚未保存", panel.status_var.get(), parent=self)
+            return
         if getattr(self.registry, "remote_business", False) is True and not getattr(worker, "_remote_business", False):
             worker = self.registry.prepare_page_worker(self, status, action=action)
         if not self.log_console._initialized or self.log_console.finished:
@@ -270,6 +274,10 @@ class ToolPage(ttk.Frame):
                        else "".join(traceback.format_exception(snapshot.error)))
             self.append_log(details)
         self.set_busy(False, "执行失败")
+        kind = getattr(snapshot.error, "kind", None) or getattr(snapshot.error, "error_detail", {}).get("login_kind")
+        panel = getattr(self.winfo_toplevel(), "credentials_panel", None)
+        if kind == "verification" and panel is not None and callable(getattr(self, "start_login", None)):
+            panel.offer_manual_login(self.start_login)
         messagebox.showerror(
             "执行失败", f"{error.summary}\n\n{error.advice}", parent=self
         )
@@ -285,6 +293,10 @@ class ToolPage(ttk.Frame):
         action: str = "run",
     ) -> None:
         if self.busy:
+            return
+        panel = getattr(self.winfo_toplevel(), "credentials_panel", None)
+        if panel is not None and not panel.save_if_dirty():
+            messagebox.showwarning("账号尚未保存", panel.status_var.get(), parent=self)
             return
         if getattr(self.registry, "remote_business", False) is True:
             worker = self.registry.prepare_page_worker(self, status, command=command, process=True, action=action)

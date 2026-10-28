@@ -193,7 +193,7 @@ class CredentialsPanelTests(unittest.TestCase):
         self.root.destroy()
         gc.collect()
 
-    def test_prefill_auto_save_visibility_and_reopen(self):
+    def test_prefill_draft_save_visibility_and_reopen(self):
         from toolbox.ui.credentials_panel import CredentialsPanel
 
         with tempfile.TemporaryDirectory() as directory:
@@ -204,17 +204,21 @@ class CredentialsPanelTests(unittest.TestCase):
             panel.pack()
             self.assertEqual(panel.username_var.get(), "original")
             self.assertEqual(panel.password_var.get(), "old-secret")
-            self.assertEqual(panel.password_entry.cget("show"), "")
-            panel.show_password_var.set(False)
-            panel._toggle_password()
             self.assertNotEqual(panel.password_entry.cget("show"), "")
+            panel.show_password_var.set(True)
+            panel._toggle_password()
+            self.assertEqual(panel.password_entry.cget("show"), "")
             panel.username_var.set("edited")
             panel.password_var.set("new-secret")
             self.root.after(750, self.root.quit)
             self.root.mainloop()
+            self.assertEqual(store.load()["username"], "original")
+            self.assertEqual(store.load()["password"], "old-secret")
+            self.assertTrue(panel.dirty)
+            self.assertTrue(panel.save_if_dirty())
             self.assertEqual(store.load()["username"], "edited")
             self.assertEqual(store.load()["password"], "new-secret")
-            self.assertEqual(panel.status_var.get(), "已保存到本机")
+            self.assertEqual(panel.status_var.get(), "已保存到本机 · 未验证")
             self.assertFalse(panel.dirty)
             panel.destroy()
             reopened = CredentialsPanel(self.root, root)

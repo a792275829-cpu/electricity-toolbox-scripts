@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { loadSharedAccount, markAccountSession, prepareAccountSession } from '../../电力工具脚本/private-data-uploader-tool/scripts/qingneng-account.mjs';
+import { loadSharedAccount, markAccountSession, prepareAccountSession, writePrivateJson } from '../../电力工具脚本/private-data-uploader-tool/scripts/qingneng-account.mjs';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'qingneng-test-'));
 try {
@@ -29,6 +29,14 @@ try {
   await fs.writeFile(path.join(workspace, 'tool/.qingneng-session/config.json'), 'broken metadata');
   assert.equal(await prepareAccountSession(context, config), true);
   assert.equal(config.authStatePath, path.join(workspace, 'tool/auth_state.json'));
+  await writePrivateJson(config.authStatePath, { cookies: [{ name: 'sample' }] });
+  assert.equal((await fs.stat(config.authStatePath)).mode & 0o777, 0o600);
+  assert.equal(JSON.parse(await fs.readFile(config.authStatePath, 'utf8')).cookies[0].name, 'sample');
+  const blockedTarget = path.join(workspace, 'tool/blocked');
+  await fs.mkdir(blockedTarget);
+  await assert.rejects(writePrivateJson(blockedTarget, { cookies: [] }));
+  assert.equal((await fs.stat(blockedTarget)).isDirectory(), true);
+  assert.equal((await fs.readdir(path.dirname(blockedTarget))).some(name => name.endsWith('.tmp')), false);
   await fs.writeFile(accountPath, '{"password":"sensitive-value"');
   await assert.rejects(loadSharedAccount(workspace), error => !error.message.includes('sensitive-value'));
   console.log('Private uploader credentials: load, edit, session revision, isolation OK');

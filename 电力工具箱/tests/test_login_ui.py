@@ -41,7 +41,7 @@ class LoginFlowTests(unittest.TestCase):
             AuthStateLock=mock.MagicMock(),
             launch_context=mock.Mock(return_value=context),
             try_auto_login=mock.Mock(return_value=auto_login),
-            is_logged_in=mock.Mock(return_value=True),
+            is_logged_in=mock.Mock(side_effect=(False, True)),
             save_auth_state=mock.Mock(),
         )
         return auth, context
@@ -59,6 +59,18 @@ class LoginFlowTests(unittest.TestCase):
         context.new_page.assert_not_called()
         context.close.assert_called_once_with()
         log.assert_called_once_with("自动登录成功，独立登录态已保存。")
+
+    def test_standalone_login_reuses_valid_session_without_submitting_password(self):
+        from toolbox_shared import auth_loader
+        auth, context = self._standalone_auth(auto_login=True)
+        auth.is_logged_in.side_effect = None
+        auth.is_logged_in.return_value = True
+        with mock.patch("playwright.sync_api.sync_playwright"):
+            auth_loader.standalone_login(auth, SimpleNamespace(username="user", password="secret"),
+                                         app_url="https://example.test", log=mock.Mock())
+        auth.try_auto_login.assert_not_called()
+        context.new_page.assert_not_called()
+        context.close.assert_called_once()
 
     def test_standalone_login_falls_back_to_manual_login(self):
         from toolbox_shared import auth_loader as toolbox_auth_loader

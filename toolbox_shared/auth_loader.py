@@ -47,6 +47,9 @@ def standalone_login(
         with sync_playwright() as playwright:
             context = auth.launch_context(playwright, headless=False)
             try:
+                if getattr(context, "_qingneng_account_changed", False) is not True and auth.is_logged_in(context):
+                    log(f"{label}登录态有效，已复用。")
+                    return
                 if username and password and auth.try_auto_login(context, username, password):
                     auth.save_auth_state(context)
                     log(f"自动登录成功，{label}登录态已保存。")

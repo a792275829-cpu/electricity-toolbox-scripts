@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -100,13 +101,21 @@ class CredentialStore:
     def save(self, username: str, password: str) -> dict[str, Any]:
         username = username.strip()
         if not username or not password:
-            raise ValueError("账号和密码均不能为空；填写完整后自动保存。")
+            raise ValueError("账号和密码均不能为空；请填写完整后保存。")
         previous = read_json(self.path)
         if previous.get("username") == username and previous.get("password") == password:
             return previous
         saved = {"username": username, "password": password, "revision": uuid.uuid4().hex}
         write_private_json(self.path, saved)
         return saved
+
+    def mark_verified(self, revision: str) -> bool:
+        saved = read_json(self.path)
+        if not revision or saved.get("revision") != revision:
+            return False
+        saved["verified_at"] = datetime.now(timezone.utc).isoformat()
+        write_private_json(self.path, saved)
+        return True
 
 
 def session_marker_path(auth_state_path: Path) -> Path:

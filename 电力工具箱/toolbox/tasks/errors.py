@@ -35,6 +35,11 @@ def error_detail(exc, *, tool_id="", action="", stage="execute"):
     existing = getattr(exc, "error_detail", None)
     if existing:
         return dict(existing)
+    from toolbox_shared.qingneng_login import LoginError
+    if isinstance(exc, LoginError):
+        return dict(code="network" if exc.kind in {"network", "server"} else "authentication",
+                    tool_id=tool_id, action=action, stage="login", login_kind=exc.kind,
+                    exception_type=type(exc).__name__, exit_code=getattr(exc, "returncode", None))
     code = next((value for kind, value in (
         (TaskCancelled, "cancelled"), (PermissionError, "permission"),
         (FileNotFoundError, "input"), (ImportError, "dependency"),
@@ -57,6 +62,19 @@ class UserFacingError:
 def classify_error(exc: BaseException, output: str = "") -> UserFacingError:
     import re
     from toolbox_shared.log_console import explain_error, redact
+    from toolbox_shared.qingneng_login import LoginError
+
+    detail = getattr(exc, "error_detail", {})
+    kind = exc.kind if isinstance(exc, LoginError) else detail.get("login_kind")
+    if kind:
+        network = kind in {"network", "server"}
+        advice = ("检查内网、VPN 或代理后重试；无需修改已保存的密码。" if network else
+                  "请检查账号、密码及账户状态后重试。" if kind == "credentials" else
+                  "请打开对应工具的登录窗口完成人工验证后重试。" if kind == "verification" else
+                  "请检查网站登录服务及账号权限后重试。")
+        summary = str(exc).strip().splitlines()[0]
+        return UserFacingError(ErrorCategory.NETWORK if network else ErrorCategory.AUTHENTICATION,
+                               redact(summary), advice, exc)
 
     if isinstance(exc, TaskCancelled):
         return UserFacingError(ErrorCategory.CANCELLED, "任务已取消", "可以调整参数后重新运行。", exc)
