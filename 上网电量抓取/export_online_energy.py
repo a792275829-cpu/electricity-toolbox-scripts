@@ -24,6 +24,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE = SCRIPT_DIR.parent
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
+from toolbox_shared.auth_lock import AuthFileLock
 from toolbox_shared.credentials import mark_browser_session, prepare_browser_session, read_login_config, write_private_json
 from toolbox_shared import qingneng_login
 from toolbox_shared.browser_runtime import chromium_launch_options
@@ -98,69 +99,10 @@ def parse_lock_timestamp(value: Any) -> float | None:
         return None
 
 
-class AuthStateLock:
+class AuthStateLock(AuthFileLock):
     def __init__(self, timeout_seconds: int = 15 * 60) -> None:
-        self.timeout_seconds = timeout_seconds
-        self.path = AUTH_LOCK_PATH
-        self.acquired = False
-
-    def __enter__(self) -> "AuthStateLock":
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        started = time.time()
-        notified = False
-        while True:
-            try:
-                fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError:
-                owner: dict[str, Any] = {}
-                try:
-                    owner = json.loads(self.path.read_text(encoding="utf-8"))
-                except Exception:
-                    pass
-                created_at = parse_lock_timestamp(owner.get("startedAt"))
-                lock_age = time.time() - created_at if created_at else 0
-                owner_pid = int(owner.get("pid") or 0)
-                if lock_age > 6 * 60 * 60 or (owner_pid and not process_is_alive(owner_pid)):
-                    try:
-                        self.path.unlink()
-                    except FileNotFoundError:
-                        pass
-                    continue
-                if time.time() - started > self.timeout_seconds:
-                    raise RuntimeError(f"等待登录态锁超时，请确认没有其他上传/抓取脚本仍在运行：{self.path}")
-                if not notified:
-                    log(f"检测到其他脚本正在使用同一登录态，等待其完成：{self.path}")
-                    notified = True
-                time.sleep(2)
-                continue
-
-            with os.fdopen(fd, "w", encoding="utf-8") as lock_file:
-                json.dump(
-                    {
-                        "pid": os.getpid(),
-                        "startedAt": datetime.now().isoformat(),
-                        "script": "export_online_energy",
-                    },
-                    lock_file,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            self.acquired = True
-            log(f"已获得登录态锁：{self.path}")
-            return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        if not self.acquired:
-            return
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
-        except PermissionError as cleanup_error:
-            if exc_type is None:
-                raise
-            log(f"清理登录态锁失败，将保留原始错误：{cleanup_error}")
-        self.acquired = False
+        super().__init__(AUTH_LOCK_PATH, timeout_seconds=timeout_seconds, log=log,
+                         script="export_online_energy")
 
 
 def load_config() -> Config:
@@ -474,6 +416,8 @@ def collect_detail_rows(run_date: str, config: Config) -> list[dict[str, Any]]:
         try:
             ensure_login(context, config)
             companies = get_companies(context)
+            if not companies:
+                raise ValueError("未返回可采集公司，停止导出。")
             log(f"开始抓取 {run_date} 上网电量，共 {len(companies)} 家公司。")
 
             for index, company in enumerate(companies, start=1):
@@ -493,6 +437,19 @@ def collect_detail_rows(run_date: str, config: Config) -> list[dict[str, Any]]:
                     raw_rows = fetch_fire_rows(context, run_date, tenant_id)
 
                 power_items = [item for item in raw_rows if str(item.get("unitId") or "") != "-"]
+                if not unit_names or len(unit_names) != len(units):
+                    raise ValueError(f"{company_name} 机组列表为空、缺少ID或ID重复，停止导出。")
+                seen = set()
+                for item in power_items:
+                    unit_id = str(item.get("unitId") or "")
+                    if unit_id not in unit_names or unit_id in seen:
+                        raise ValueError(f"{company_name} 返回未知或重复机组 {unit_id}，停止导出。")
+                    if str(item.get("runDate") or "")[:10] != run_date:
+                        raise ValueError(f"{company_name} / {unit_id} 返回日期与 {run_date} 不符，停止导出。")
+                    seen.add(unit_id)
+                missing = set(unit_names) - seen
+                if missing:
+                    raise ValueError(f"{company_name} 缺少机组数据：{'、'.join(unit_names[key] for key in sorted(missing))}，停止导出。")
                 power_items.sort(
                     key=lambda item: (
                         unit_order.get(str(item.get("unitId") or ""), 999),

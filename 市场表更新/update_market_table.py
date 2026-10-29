@@ -25,6 +25,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE = SCRIPT_DIR.parent
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
+from toolbox_shared.dates import select_dated_record
 from toolbox_shared.auth_loader import load_login_module
 from toolbox_shared.excel_read import read_cell_snapshots
 from toolbox_shared.workbook_commit import assert_workbook_unchanged, workbook_commit_lock, workbook_fingerprint
@@ -422,7 +423,7 @@ def summarize_load_type(
         raise RuntimeError(
             f"{run_date.isoformat()} loadType={load_type} 没有返回{label}数据"
         )
-    summary = periods[0]
+    summary = select_dated_record(periods, run_date, label=f"loadType={load_type} {label}")
     fields = ("max", "min", "avg", "sum")
     if any(summary.get(field) in (None, "") for field in fields):
         raise RuntimeError(

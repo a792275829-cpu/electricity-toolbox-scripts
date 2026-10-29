@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import argparse
 from copy import copy
-from datetime import date
+from datetime import date, datetime, time as datetime_time, timedelta
 import hashlib
 import json
 import os
 from pathlib import Path
 import sys
+import math
+from uuid import uuid4
 
+import numpy as np
 import pandas as pd
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.cell import WriteOnlyCell
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.datetime import to_excel, time_to_days, timedelta_to_days
 
 
 BASE_URL = "https://xhxt.chng.com.cn"
@@ -23,6 +27,7 @@ if str(SCRIPT_DIR.parent) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR.parent))
 from toolbox_shared.credentials import read_login_config
 from toolbox_shared.dates import normalize_date_input
+from toolbox_shared.excel_read import read_cell_snapshots
 from toolbox_shared.native_excel import read_model_frame
 from toolbox_shared.native_write import apply_table_style, read_table_layout, save_frame
 
@@ -213,7 +218,7 @@ def build_increment(
             )
 
     frame["日前西电东送电力与B类竞价空间总加(MW)"] = (
-        frame.get("日前西电东送电力(MW)") + frame.get("日前B类竞价空间(MW)")
+        frame.get("日前西电东送电力(MW)", np.nan) + frame.get("日前B类竞价空间(MW)", np.nan)
     )
 
     price_data = price_payload["data"]
@@ -261,6 +266,9 @@ def deduplicate_columns(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[tuple[s
     """Keep the first repeated header/value column and report what was removed."""
     cleaned = frame.loc[:, ~frame.columns.duplicated(keep="first")].copy()
     duplicates = duplicate_data_columns(cleaned)
+    protected = {*FORECAST_LOAD_COLUMNS.values(), *ACTUAL_LOAD_COLUMNS.values(),
+                 "全省日前平均电价", "全省实时平均电价", "日前西电东送电力与B类竞价空间总加(MW)"}
+    duplicates = [(first, duplicate) for first, duplicate in duplicates if duplicate not in protected]
     if duplicates:
         cleaned = cleaned.drop(columns=[duplicate for _, duplicate in duplicates])
     return cleaned, duplicates
@@ -303,7 +311,7 @@ def merge_data_frames(base: pd.DataFrame, increment: pd.DataFrame) -> pd.DataFra
     base, _ = deduplicate_columns(base)
     base["日期"] = pd.to_datetime(base["日期"]).dt.normalize()
     increment["日期"] = pd.to_datetime(increment["日期"]).dt.normalize()
-    all_columns = list(base.columns)
+    all_columns = list(base.columns) + [column for column in increment.columns if column not in base.columns]
     base = base.reindex(columns=all_columns)
     increment = increment.reindex(columns=all_columns)
     value_columns = [column for column in all_columns if column not in ["日期", "时刻"]]
@@ -326,23 +334,31 @@ def merge_data_frames(base: pd.DataFrame, increment: pd.DataFrame) -> pd.DataFra
 
 
 def missing_dates(frame: pd.DataFrame, end_date: str) -> list[date]:
-    """Return dates through D that do not have all 96 quarter-hour rows."""
+    """Retry missing canonical slots, price labels and partially published curves."""
     if frame.empty:
         return []
     normalized = frame.copy()
     normalized["日期"] = pd.to_datetime(normalized["日期"], errors="raise").dt.normalize()
     end = pd.Timestamp(end_date).normalize()
     start = normalized["日期"].min()
-    if start > end:
-        return []
-    counts = (
-        normalized.loc[normalized["日期"].le(end)]
-        .drop_duplicates(["日期", "时刻"])
-        .groupby("日期", observed=True)["时刻"]
-        .nunique()
-    )
-    expected = pd.date_range(start, end, freq="D")
-    return [value.date() for value in expected if int(counts.get(value, 0)) != 96]
+    slots = {f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in (0, 15, 30, 45)}
+    # Optional curves may have no publication at all. Once a field has appeared,
+    # retry holes in it as well as the mandatory DA price label. Recent dates are
+    # refreshed separately so newly published optional fields can be discovered.
+    known = {*FORECAST_LOAD_COLUMNS.values(), *ACTUAL_LOAD_COLUMNS.values(), "全省实时平均电价"}
+    required = ["全省日前平均电价"] + [column for column in normalized.columns
+        if column in known and normalized[column].notna().any()]
+    groups = dict(tuple(normalized.groupby("日期", sort=False)))
+    missing = []
+    for day in pd.date_range(start, end, freq="D"):
+        rows = groups.get(day)
+        if rows is None or len(rows) != 96 or set(rows["时刻"]) != slots:
+            missing.append(day.date())
+            continue
+        values = rows.reindex(columns=required).apply(pd.to_numeric, errors="coerce")
+        if not np.isfinite(values.to_numpy(dtype=float)).all():
+            missing.append(day.date())
+    return missing
 
 
 def workbook_layout(path: Path, sheet_name: str = "整合数据") -> dict[str, dict[str, object]]:
@@ -350,19 +366,66 @@ def workbook_layout(path: Path, sheet_name: str = "整合数据") -> dict[str, d
     return read_table_layout(path, sheet_name)
 
 
-def write_large_xlsx(
+def write_large_xlsx(frame, path, sheet_name, *, format_source=None):
+    """Verify representative values/formats before atomically publishing the table."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.stem}.{uuid4().hex}.tmp.xlsx")
+    try:
+        _write_large_xlsx(frame, temporary, sheet_name, format_source=format_source)
+        book = load_workbook(temporary, read_only=True, data_only=False)
+        try:
+            sheet = book[sheet_name]
+            if [cell.value for cell in next(sheet.iter_rows(max_row=1))] != list(frame.columns):
+                raise RuntimeError("总表保存后表头回读不一致")
+            indexes = {0, len(frame) - 1} if len(frame) else set()
+            references = [(sheet_name, f"{get_column_letter(column + 1)}{index + 2}")
+                          for index in indexes for column in range(len(frame.columns))]
+            snapshots = read_cell_snapshots(book, references)
+            layout = workbook_layout(format_source) if format_source and Path(format_source).is_file() else {}
+            def excel_value(value):
+                if isinstance(value, datetime_time):
+                    return time_to_days(value)
+                if isinstance(value, timedelta):
+                    return timedelta_to_days(value)
+                if isinstance(value, (date, datetime)) and not pd.isna(value):
+                    return to_excel(value, book.epoch)
+                if isinstance(value, str):
+                    return ILLEGAL_CHARACTERS_RE.sub("", value)[:32767] or None
+                return value
+
+            for index in indexes:
+                for column, name in enumerate(frame.columns):
+                    expected = frame.iloc[index, column]
+                    actual, number_format = snapshots[(sheet_name, f"{get_column_letter(column + 1)}{index + 2}")]
+                    expected, actual = excel_value(expected), excel_value(actual)
+                    if pd.isna(expected):
+                        matches = actual is None
+                    elif isinstance(expected, (int, float, np.number)) and not isinstance(expected, (bool, np.bool_)):
+                        matches = isinstance(actual, (int, float)) and math.isclose(float(expected), float(actual), rel_tol=1e-12, abs_tol=1e-12)
+                    else:
+                        matches = actual == expected
+                    if not matches or (str(name) in layout and number_format != layout[str(name)]["data_style"]["number_format"]):
+                        raise RuntimeError(f"总表保存后数值或格式回读不一致：{name}，第{index + 2}行")
+        finally:
+            book.close()
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _write_large_xlsx(
     frame: pd.DataFrame,
     path: Path,
     sheet_name: str,
     *,
     format_source: Path | None = None,
 ) -> None:
-    """Stream a large data frame to a temporary XLSX, then replace atomically."""
+    """Serialize to the caller-owned temporary path through the selected backend."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    temporary_path = path
     layout = workbook_layout(format_source) if format_source and format_source.is_file() else {}
     if save_frame(frame, temporary_path, sheet_name, layout):
-        temporary_path.replace(path)
         return
     workbook = Workbook(write_only=True)
     sheet = workbook.create_sheet(title=sheet_name)
@@ -402,7 +465,6 @@ def write_large_xlsx(
             cleaned.append(cell)
         sheet.append(cleaned)
     workbook.save(temporary_path)
-    temporary_path.replace(path)
 
 
 def build_modeling_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -449,6 +511,13 @@ def update_master_workbook(
         current = empty_time_frame(initial_date, initial_date).drop(columns=["时点序号"])
 
     gaps = missing_dates(current, end_date)
+    refresh_days = config.get("refreshDays", 7)
+    if type(refresh_days) is not int or refresh_days < 0:
+        raise ValueError("refreshDays 必须是大于或等于0的整数")
+    if master_path.is_file() and refresh_days and not current.empty:
+        end = pd.Timestamp(end_date)
+        start = max(pd.to_datetime(current["日期"]).min().normalize(), end - pd.Timedelta(days=refresh_days - 1))
+        gaps = sorted(set(gaps) | {day.date() for day in pd.date_range(start, end, freq="D")})
     if not master_path.is_file() and not base_path.is_file():
         gaps = [value.date() for value in pd.date_range(initial_date, end_date, freq="D")]
     if not gaps:
@@ -473,7 +542,6 @@ def update_master_workbook(
             {"startDate": start, "endDate": end},
         )
     increment = build_increment(start, end, load_payload, price_payload)
-    increment = increment.reindex(columns=current.columns)
 
     merged = merge_data_frames(current, increment)
     write_large_xlsx(merged, master_path, "整合数据", format_source=master_path)

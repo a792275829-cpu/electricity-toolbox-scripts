@@ -79,7 +79,7 @@ class ReviewDataGuardsTests(unittest.TestCase):
             get_companies=lambda *a: [dict(tenantId="test", name="海门电厂")],
             switch_company=lambda *a: None, get_units=lambda *a: [dict(id="u", name="#1")],
             is_renewable_company=lambda *a: False,
-            fetch_fire_rows=lambda *a: [dict(unitId="u", onlineEle=values)],
+            fetch_fire_rows=lambda *a: [dict(unitId="u", runDate="2026-10-26", onlineEle=values)],
         )
         with patch.multiple(module, **overrides), patch.object(module.time, "sleep"):
             try:

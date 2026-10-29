@@ -145,7 +145,7 @@ npm install
 | 上网电量抓取 | `上网电量抓取/config.json` | `headless`、`unitIdsMode`、`skipExisting`、`requestDelaySeconds`、`outputDir`、`exportTimeoutSeconds`、`downloadDir` |
 | 风力预测截图 | `风力预测截图/config.json` | `headless`、`outputDir`、`orgId`、`orgName`、`unitId`、`unitName` |
 | 每日生产经营情况汇报自动生成工具 | `每日生产经营情况汇报自动生成工具/scripts/config.json` | `headless`、`unitIdsMode`、`skipExisting`、`requestDelaySeconds`、`exportTimeoutSeconds`、`downloadDir` |
-| 广东电价预测 | `广东电价预测/config.json` | `masterWorkbook`、`predictionOutputDir`、`initialWorkbook`、`initialDate` |
+| 广东电价预测 | `广东电价预测/config.json` | `masterWorkbook`、`predictionOutputDir`、`initialWorkbook`、`initialDate`、`refreshDays` |
 | 现货价格更新 | `现货价格更新/config.json` | `headless` |
 | 交易系统信息更新 | `交易系统信息更新/config.json` | `headless` |
 | 广东运行日报解析上传 | `广东运行日报PDF解析/config.json` | `headless` |
@@ -203,7 +203,8 @@ cp "广东电价预测/config.example.json" "广东电价预测/config.json"
 配置中的关键路径：
 
 - `masterWorkbook`：长期维护的唯一数据总表，也是默认建模输入。
-- `initialWorkbook`：只在首次创建总表时导入历史数据，后续不会替代总表。
+- `initialWorkbook`：只在首次创建总表时导入历史数据，后续不会替代总表；未提供历史表时，保留接口返回的全部业务字段创建总表。
+- `refreshDays`：已有总表默认重抓截至 D 的最近 7 天，以补入后续发布或修订的数据；设为 `0` 可关闭近期回看，历史缺口仍会补抓。
 
 ### 私有数据上传配置
 
@@ -323,7 +324,7 @@ wps自动/启动WPS专用Chrome.command
 1. 确认账号配置已完成。
 2. 填写“运行日 D”。
 3. 点击“补齐数据总表”。
-4. 工具检查截至 D 日缺少 96 个十五分钟时点的日期，只补抓空缺数据。
+4. 工具检查截至 D 日的标准96时点、日前电价及已出现的供需字段是否完整，补抓缺口，并按 `refreshDays` 回看近期日期；增量空值不覆盖已有有效值。
 5. 数据持续写入唯一的 `广东电价数据总表.xlsx`。
 
 运行预测：

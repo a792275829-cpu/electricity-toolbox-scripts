@@ -107,10 +107,11 @@ class SummarizeLoadTypeTests(unittest.TestCase):
         result = self.summarize(dataset())
         self.assertEqual(result, (1, 2, 3, 400_000))
 
-    def test_single_period_is_used_when_date_misses(self):
+    def test_single_period_is_rejected_when_date_misses(self):
         payload = {"data": {"dataNetLoadDTOList": [
             {"loadType": "1", "forecastPeriodList": [period_row(date(2026, 10, 9))]}]}}
-        self.assertEqual(self.summarize(payload), (1, 2, 3, 400_000))
+        with self.assertRaisesRegex(RuntimeError, "对应日期"):
+            self.summarize(payload)
 
     def test_missing_load_type_lists_available_types(self):
         with self.assertRaisesRegex(RuntimeError, "可用类型：1、2"):
@@ -120,7 +121,7 @@ class SummarizeLoadTypeTests(unittest.TestCase):
         payload = {"data": {"dataNetLoadDTOList": [
             {"loadType": "1", "forecastPeriodList": [period_row(date(2026, 10, 9)),
                                                      period_row(date(2026, 10, 8))]}]}}
-        with self.assertRaisesRegex(RuntimeError, "没有返回日前数据"):
+        with self.assertRaisesRegex(RuntimeError, "对应日期"):
             self.summarize(payload)
 
 

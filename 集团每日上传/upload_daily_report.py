@@ -27,6 +27,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = SCRIPT_DIR.parent
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
+from toolbox_shared.auth_lock import AuthFileLock
 from toolbox_shared.credentials import mark_browser_session, prepare_browser_session, read_login_config, write_private_json
 from toolbox_shared import qingneng_login
 from toolbox_shared.browser_runtime import chromium_launch_options
@@ -171,69 +172,10 @@ def parse_lock_timestamp(value: Any) -> float | None:
         return None
 
 
-class AuthStateLock:
+class AuthStateLock(AuthFileLock):
     def __init__(self, timeout_seconds: int = 15 * 60) -> None:
-        self.timeout_seconds = timeout_seconds
-        self.path = AUTH_LOCK_PATH
-        self.acquired = False
-
-    def __enter__(self) -> "AuthStateLock":
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        started = time.time()
-        notified = False
-        while True:
-            try:
-                fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError:
-                owner: dict[str, Any] = {}
-                try:
-                    owner = json.loads(self.path.read_text(encoding="utf-8"))
-                except Exception:
-                    pass
-                created_at = parse_lock_timestamp(owner.get("startedAt"))
-                lock_age = time.time() - created_at if created_at else 0
-                owner_pid = int(owner.get("pid") or 0)
-                if lock_age > 6 * 60 * 60 or (owner_pid and not process_is_alive(owner_pid)):
-                    try:
-                        self.path.unlink()
-                    except FileNotFoundError:
-                        pass
-                    continue
-                if time.time() - started > self.timeout_seconds:
-                    raise RuntimeError(f"等待登录态锁超时，请确认没有其他上传/抓取脚本仍在运行：{self.path}")
-                if not notified:
-                    log(f"检测到其他脚本正在使用同一登录态，等待其完成：{self.path}")
-                    notified = True
-                time.sleep(2)
-                continue
-
-            with os.fdopen(fd, "w", encoding="utf-8") as lock_file:
-                json.dump(
-                    {
-                        "pid": os.getpid(),
-                        "startedAt": datetime.now().isoformat(),
-                        "script": "upload_daily_report",
-                    },
-                    lock_file,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            self.acquired = True
-            log(f"已获得登录态锁：{self.path}")
-            return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        if not self.acquired:
-            return
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
-        except PermissionError as cleanup_error:
-            if exc_type is None:
-                raise
-            log(f"清理登录态锁失败，将保留原始错误：{cleanup_error}")
-        self.acquired = False
+        super().__init__(AUTH_LOCK_PATH, timeout_seconds=timeout_seconds, log=log,
+                         script="upload_daily_report")
 
 
 def load_config() -> Config:

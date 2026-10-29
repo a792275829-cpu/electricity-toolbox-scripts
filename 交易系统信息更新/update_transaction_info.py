@@ -25,7 +25,7 @@ WORKSPACE_DIR = SCRIPT_DIR.parent
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
 from toolbox_shared.auth_loader import load_login_module, standalone_login
-from toolbox_shared.dates import parse_date_input
+from toolbox_shared.dates import parse_date_input, select_dated_record
 from toolbox_shared.credentials import apply_credentials
 from toolbox_shared.excel_read import read_cell_snapshots
 from toolbox_shared.native_excel import load_value_workbook
@@ -195,14 +195,7 @@ def summarize_load_type(
     periods = series.get(period_list_key) or []
     if not isinstance(periods, list):
         periods = []
-    summary = next(
-        (row for row in periods if isinstance(row, dict) and _period_date(row.get("date")) == run_date),
-        None,
-    )
-    if summary is None and len(periods) == 1 and isinstance(periods[0], dict):
-        summary = periods[0]
-    if summary is None:
-        raise RuntimeError(f"{run_date.isoformat()} loadType={load_type}没有返回{label}数据。")
+    summary = select_dated_record(periods, run_date, label=f"loadType={load_type} {label}")
     values = tuple(
         _number(summary.get(field), label=f"{run_date.isoformat()} {label} loadType={load_type} {field}")
         for field in ("max", "min", "avg", "sum")

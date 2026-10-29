@@ -63,6 +63,7 @@ class GuangdongDataUpdateTests(unittest.TestCase):
                     {
                         "日期": day,
                         "时刻": f"{slot // 4:02d}:{slot % 4 * 15:02d}",
+                        "全省日前平均电价": 300.0,
                     }
                 )
 

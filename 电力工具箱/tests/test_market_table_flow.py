@@ -679,11 +679,11 @@ class MarketTableFlowTests(unittest.TestCase):
         dataset = {
             "data": {
                 "dataNetLoadDTOList": [
-                    {"loadType": "2", "actualPeriodList": [{"max": 41, "min": 42, "avg": 43, "sum": 44}]},
-                    {"loadType": "1", "actualPeriodList": [{"max": 11, "min": 12, "avg": 13, "sum": 14}]},
-                    {"loadType": "3", "actualPeriodList": [{"max": 51, "min": 52, "avg": 53, "sum": 54}]},
-                    {"loadType": "6", "actualPeriodList": [{"max": 21, "min": 22, "avg": 23, "sum": 24}]},
-                    {"loadType": "4", "actualPeriodList": [{"max": 31, "min": 32, "avg": 33, "sum": 34}]},
+                    {"loadType": "2", "actualPeriodList": [{"date": "2026-07-02", "max": 41, "min": 42, "avg": 43, "sum": 44}]},
+                    {"loadType": "1", "actualPeriodList": [{"date": "2026-07-02", "max": 11, "min": 12, "avg": 13, "sum": 14}]},
+                    {"loadType": "3", "actualPeriodList": [{"date": "2026-07-02", "max": 51, "min": 52, "avg": 53, "sum": 54}]},
+                    {"loadType": "6", "actualPeriodList": [{"date": "2026-07-02", "max": 21, "min": 22, "avg": 23, "sum": 24}]},
+                    {"loadType": "4", "actualPeriodList": [{"date": "2026-07-02", "max": 31, "min": 32, "avg": 33, "sum": 34}]},
                 ]
             }
         }
@@ -708,7 +708,7 @@ class MarketTableFlowTests(unittest.TestCase):
                 "dataNetLoadDTOList": [
                     {
                         "loadType": "1",
-                        "actualPeriodList": [{"max": None, "min": None, "avg": None, "sum": None}],
+                        "actualPeriodList": [{"date": "2026-07-05", "max": None, "min": None, "avg": None, "sum": None}],
                     }
                 ]
             }

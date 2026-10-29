@@ -31,3 +31,22 @@ def parse_date_input(value: str) -> date:
 
 def normalize_date_input(value: str) -> str:
     return parse_date_input(value).isoformat()
+
+
+def select_dated_record(records, target: date, *, label: str):
+    """Require one explicitly dated source record; never infer a missing date."""
+    matching = []
+    for record in records if isinstance(records, list) else ():
+        if not isinstance(record, dict):
+            continue
+        try:
+            source_date = date.fromisoformat(str(record.get("date") or "")[:10])
+        except ValueError:
+            continue
+        if source_date == target:
+            matching.append(record)
+    if not matching:
+        raise RuntimeError(f"{target.isoformat()} {label}没有返回对应日期数据。")
+    if len(matching) != 1:
+        raise RuntimeError(f"{target.isoformat()} {label}返回重复日期记录，无法唯一确定数据。")
+    return matching[0]
