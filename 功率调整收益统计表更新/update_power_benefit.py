@@ -252,6 +252,15 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
                                                     field, cell.number_format, cell.style_id))
         if not seen_days:
             raise ValueError(f"{path.name} 模板内未找到指定日期范围的完整小时块。")
+        first = start_date or min(seen_days)
+        missing = [first + timedelta(days=offset) for offset in range((end_date - first).days + 1)
+                   if first + timedelta(days=offset) not in seen_days]
+        if missing:
+            preview = "、".join(day.isoformat() for day in missing[:10])
+            raise ValueError(
+                f"{path.name} 模板缺少日期的完整0–23点块：{preview}"
+                f"（共 {len(missing)} 天）。请补齐对应月份模板后重试；未抓取或写入任何数据。"
+            )
     finally:
         workbook.close()
         if cached is not None:

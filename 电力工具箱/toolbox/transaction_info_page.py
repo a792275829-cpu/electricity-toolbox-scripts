@@ -66,7 +66,7 @@ class TransactionInfoUpdatePage(ToolPage):
         )
         ttk.Label(
             form,
-            text="留空时自动从 Sheet1 最后日前日期+1接续",
+            text="留空时优先补齐已有日期组的空值，再从表尾接续",
             style="Muted.TLabel",
         ).grid(row=1, column=2, columnspan=2, sticky="w", padx=(8, 0), pady=4)
         ttk.Label(form, text="日前结束日期").grid(row=2, column=0, sticky="w", pady=4)

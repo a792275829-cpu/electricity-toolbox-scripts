@@ -192,6 +192,9 @@ class TailWorkbookMixin:
                 row[3] = label
                 row[10] = label
                 sheet_object.append(row)
+                current_row = sheet_object.max_row
+                for column in (*(() if label == "西电" else range(5, 9)), *range(12, 16)):
+                    sheet_object.cell(current_row, column, 1)
         path = self.folder / "交易系统信息.xlsx"
         workbook.save(path)
         return path

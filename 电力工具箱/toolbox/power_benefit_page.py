@@ -57,6 +57,7 @@ class PowerBenefitUpdatePage(ToolPage):
             "归湖/鮀莲：C 原始功率；J 申报功率；K 日前电量；L 日前电价；M 上网电量；N 实时电价。\n"
             "海风：C 原始功率；R 申报功率；N 上网电量；M 日前电价；O 实时电价。覆盖所选日期内五列的值及公式。\n"
             "均按运行日期匹配 0–23 点，每列 24 个数。归湖、鮀莲非空单元格（含 0、公式）跳过。\n"
+            "模板缺少所选日期或月份时，列出缺失日期并停止，不会仅更新部分日期。\n"
             "保留模板格式及其他收益公式；未发布字段保留原值，后续运行继续更新。"),
             justify="left").grid(row=0, column=0, sticky="w")
         self.update_button = ttk.Button(self.actions, text="抓取并更新", command=self.start_update)

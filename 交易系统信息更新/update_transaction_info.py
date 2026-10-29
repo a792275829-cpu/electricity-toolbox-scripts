@@ -8,7 +8,7 @@ import re
 import sys
 import uuid
 import zipfile
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
@@ -61,6 +61,7 @@ LOAD_TYPE_BY_CATEGORY = {
     "粤港联络线": "5",
 }
 DAY_AHEAD_REQUIRED = ("统调", "B类", "A类", "地方电", "粤港联络线")
+INPUT_CELL_COUNT = (len(DAY_AHEAD_REQUIRED) + len(CATEGORY_ORDER)) * 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +94,8 @@ class PreparedWorkbook:
     first_row: int
     last_row: int
     pairs: tuple[DailyLoadPair, ...]
+    group_rows: tuple[int, ...] = ()
+    preserved_cells: dict[str, tuple[Any, str]] = field(default_factory=dict)
 
 
 def log(message: str) -> None:
@@ -357,8 +360,54 @@ def inspect_workbook_tail(path: Path) -> WorkbookTail:
         workbook.close()
 
 
+def inspect_workbook_groups(path: Path) -> dict[date, tuple[WorkbookTail, dict[str, tuple[Any, str]]]]:
+    """Keep dated template groups separate from completed input values."""
+    book = openpyxl.load_workbook(path, read_only=True, data_only=False)
+    groups = {}
+    active = None
+    try:
+        for row, cells in enumerate(book[SHEET_NAME].iter_rows(min_col=3, max_col=15), 1):
+            values = [cell.value for cell in cells]
+            if values[1] == "统调" and values[8] == "统调":
+                day, actual = (_as_date(values[index], epoch=book.epoch) for index in (0, 7))
+                if day and actual:
+                    if day in groups:
+                        raise RuntimeError("日期组重复，停止写入。")
+                    active = (WorkbookTail(row, day, actual), {})
+            if active is None:
+                continue
+            tail, populated = active
+            offset = row - tail.start_row
+            category = CATEGORY_ORDER[offset]
+            if values[1] != category or values[8] != category:
+                # Older report sections may use a different category layout.
+                # Only complete groups matching today's contract can be backfilled;
+                # inspect_workbook_tail still validates the latest group strictly.
+                active = None
+                continue
+            if tail.day_ahead_date - tail.actual_date != timedelta(days=DATE_OFFSET_DAYS):
+                active = None
+                continue
+            columns = (*(() if category == "西电" else (5, 6, 7, 8)), 12, 13, 14, 15)
+            for column in columns:
+                cell = cells[column - 3]
+                if cell.value not in (None, ""):
+                    populated[f"{get_column_letter(column)}{row}"] = (cell.value, cell.number_format)
+            if offset == len(CATEGORY_ORDER) - 1:
+                groups[tail.day_ahead_date] = (tail, populated)
+                active = None
+        if active is not None:
+            raise RuntimeError("日期组字段不完整，停止写入。")
+        return groups
+    finally:
+        book.close()
+
+
 def resolve_start_date(path: Path, requested: date | None) -> date:
-    expected = inspect_workbook_tail(path).day_ahead_date + timedelta(days=1)
+    tail = inspect_workbook_tail(path)
+    groups = inspect_workbook_groups(path)
+    pending = [day for day, (_, cells) in groups.items() if len(cells) < INPUT_CELL_COUNT]
+    expected = min(pending) if pending else tail.day_ahead_date + timedelta(days=1)
     if requested is not None and requested != expected:
         raise ValueError(
             f"为保持日期连续，开始日期必须是 {expected.isoformat()}；"
@@ -416,7 +465,7 @@ def _renumber_row(row_xml: str, source_row: int, target_row: int) -> str:
 
 def _cell_pattern(cell_ref: str) -> re.Pattern[str]:
     return re.compile(
-        rf'<c\b(?=[^>]*\br="{re.escape(cell_ref)}")[^>]*(?:>.*?</c>|/>)',
+        rf'<c\b(?=[^>]*\br="{re.escape(cell_ref)}")[^>]*?(?:/>|>.*?</c>)',
         re.DOTALL,
     )
 
@@ -467,30 +516,108 @@ def patch_sheet_xml(
     template_start: int,
     pairs: tuple[DailyLoadPair, ...],
     epoch,
+    group_rows: tuple[int, ...] = (),
+    preserved_cells: dict[str, tuple[Any, str]] | None = None,
 ) -> tuple[bytes, int, int]:
     xml_text = xml_bytes.decode("utf-8")
-    first_row = template_start + GROUP_HEIGHT
-    appended: list[str] = []
+    row_pattern = re.compile(r'<row\b[^>]*?\br="(\d+)"[^>]*?(?:/>|>.*?</row>)', re.S)
+    sheet_data = re.search(r'(<sheetData\b[^>]*>)(.*?)(</sheetData>)', xml_text, re.S)
+    if sheet_data is None:
+        raise RuntimeError("工作表 XML 缺少 sheetData。")
+    existing = {int(match[1]): match[0] for match in row_pattern.finditer(sheet_data[2])}
+    if len(existing) != len(list(row_pattern.finditer(sheet_data[2]))):
+        raise RuntimeError("工作表 XML 行号重复，停止写入。")
+    starts = group_rows or tuple(template_start + (index + 1) * GROUP_HEIGHT for index in range(len(pairs)))
+    first_row = min(starts)
+    preserved_cells = preserved_cells or {}
+    new_starts = []
     for index, pair in enumerate(pairs):
-        target_start = first_row + index * GROUP_HEIGHT
-        appended.append(
-            _build_group_rows(
-                xml_text,
-                template_start=template_start,
-                target_start=target_start,
-                pair=pair,
-                epoch=epoch,
-            )
-        )
-    if "</sheetData>" not in xml_text:
-        raise RuntimeError("工作表 XML 缺少 sheetData 结束标记。")
-    xml_text = xml_text.replace("</sheetData>", "".join(appended) + "</sheetData>", 1)
-    last_row = first_row + (len(pairs) - 1) * GROUP_HEIGHT + 5
+        target_start = starts[index]
+        for offset, category in enumerate(CATEGORY_ORDER):
+            row = target_start + offset
+            original = existing.get(row)
+            if original:
+                occupied = [cell[1] for cell in re.finditer(
+                    r'<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:/>|>.*?</c>)', original, re.S)
+                    if re.search(r'<(?:f|is)\b|<v\b[^>]*>[^<]+</v>', cell[0])]
+                # Existing dated groups are reused. A styled but empty row is a new template row.
+                dated_group = f"D{row}" in occupied
+                if occupied and not dated_group:
+                    raise RuntimeError(f"第 {row} 行已有其他内容，停止接续，未覆盖原数据。")
+            else:
+                dated_group = False
+            if offset == 0 and not dated_group:
+                new_starts.append(target_start)
+            if dated_group:
+                row_xml = original
+            else:
+                row_xml = _renumber_row(_row_xml(xml_text, template_start + offset), template_start + offset, row)
+                if original:
+                    # An empty formatted tail row may already have deliberate cell styles.
+                    for blank in re.finditer(r'<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:/>|>.*?</c>)', original, re.S):
+                        target = _cell_pattern(blank[1]).search(row_xml)
+                        style = re.search(r'\bs="([^"]+)"', blank[0])
+                        if target and style:
+                            cell_xml = re.sub(r'\s+s="[^"]+"', '', target[0], count=1)
+                            cell_xml = cell_xml.replace('<c ', f'<c s="{style[1]}" ', 1)
+                            row_xml = row_xml[:target.start()] + cell_xml + row_xml[target.end():]
+                        elif target is None:
+                            row_xml = row_xml.replace('</row>', blank[0] + '</row>', 1)
+            values = {}
+            if offset == 0 and not dated_group:
+                values.update({f"C{row}": to_excel(pair.day_ahead_date, epoch), f"J{row}": to_excel(pair.actual_date, epoch)})
+            if category != "西电":
+                values.update({f"{column}{row}": value for column, value in zip("EFGH", pair.day_ahead[category])})
+            values.update({f"{column}{row}": value for column, value in zip("LMNO", pair.actual[category])})
+            for coordinate, value in values.items():
+                if coordinate in preserved_cells:
+                    continue
+                if not _cell_pattern(coordinate).search(row_xml):
+                    source_cell = _cell_pattern(re.sub(r'\d+$', str(template_start + offset), coordinate)).search(
+                        _row_xml(xml_text, template_start + offset))
+                    style = re.search(r'\bs="([^"]+)"', source_cell[0]) if source_cell else None
+                    attribute = f' s="{style[1]}"' if style else ''
+                    cell_xml = f'<c r="{coordinate}"{attribute}><v>{format(float(value), ".15g")}</v></c>'
+                    # Keep native cell order, including unrelated columns after O.
+                    column = openpyxl.utils.cell.coordinate_from_string(coordinate)[0]
+                    number = openpyxl.utils.column_index_from_string(column)
+                    next_cell = next((cell for cell in re.finditer(r'<c\b[^>]*\br="([A-Z]+)\d+"', row_xml)
+                                      if openpyxl.utils.column_index_from_string(cell[1]) > number), None)
+                    position = next_cell.start() if next_cell else row_xml.index('</row>')
+                    row_xml = row_xml[:position] + cell_xml + row_xml[position:]
+                else:
+                    row_xml = _replace_numeric_cell(row_xml, coordinate, value)
+            existing[row] = row_xml
+    xml_text = (xml_text[:sheet_data.start(2)] + ''.join(existing[row] for row in sorted(existing))
+                + xml_text[sheet_data.end(2):])
+    merge_block = re.search(r'<mergeCells\b[^>]*>(.*?)</mergeCells>', xml_text, re.S)
+    if merge_block and new_starts:
+        from openpyxl.worksheet.cell_range import CellRange
+        ranges = [CellRange(reference) for reference in re.findall(r'<mergeCell\b[^>]*\bref="([^"]+)"', merge_block[1])]
+        templates = [area for area in ranges if template_start <= area.min_row
+                     and area.max_row < template_start + len(CATEGORY_ORDER)]
+        additions = []
+        for start in new_starts:
+            for area in templates:
+                translated = CellRange(str(area))
+                translated.shift(row_shift=start - template_start)
+                if translated in ranges:
+                    continue
+                if any(not translated.isdisjoint(other) for other in ranges):
+                    raise RuntimeError(f"接续日期组与合并单元格冲突：{translated}")
+                additions.append(f'<mergeCell ref="{translated}"/>')
+                ranges.append(translated)
+        if additions:
+            opening = re.sub(r'\s+count="\d+"', '', merge_block[0].split('>', 1)[0])
+            replacement = f'{opening} count="{len(ranges)}">{merge_block[1]}{"".join(additions)}</mergeCells>'
+            xml_text = xml_text[:merge_block.start()] + replacement + xml_text[merge_block.end():]
+    last_row = max(starts) + len(CATEGORY_ORDER) - 1
     dimension = re.search(r'<dimension\s+ref="([^"]+)"', xml_text)
     if dimension is None:
         raise RuntimeError("工作表 XML 缺少 dimension。")
     old_ref = dimension.group(1)
-    new_ref = re.sub(r"\d+$", str(last_row), old_ref)
+    old_max_row = openpyxl.utils.cell.range_boundaries(old_ref)[3]
+    new_ref = re.sub(r"\d+$", str(max(last_row, old_max_row)), old_ref)
     xml_text = xml_text[: dimension.start(1)] + new_ref + xml_text[dimension.end(1) :]
     return xml_text.encode("utf-8"), first_row, last_row
 
@@ -512,6 +639,8 @@ def _write_patched_workbook(
     *,
     template_start: int,
     pairs: tuple[DailyLoadPair, ...],
+    group_rows: tuple[int, ...] = (),
+    preserved_cells: dict[str, tuple[Any, str]] | None = None,
 ) -> tuple[int, int]:
     sheet_part = xlsx_sheet_paths(original).get(SHEET_NAME)
     if not sheet_part:
@@ -531,6 +660,8 @@ def _write_patched_workbook(
                     template_start=template_start,
                     pairs=pairs,
                     epoch=epoch,
+                    group_rows=group_rows,
+                    preserved_cells=preserved_cells,
                 )
                 bounds = (first_row, last_row)
             output.writestr(info, data)
@@ -555,7 +686,8 @@ def verify_workbook(path: Path, prepared: PreparedWorkbook) -> None:
         columns = (3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15)
         snapshots = read_cell_snapshots(workbook, (
             (SHEET_NAME, f"{get_column_letter(column)}{row}")
-            for row in range(prepared.first_row, prepared.first_row + len(prepared.pairs) * GROUP_HEIGHT)
+            for start in (prepared.group_rows or tuple(prepared.first_row + index * GROUP_HEIGHT for index in range(len(prepared.pairs))))
+            for row in range(start, start + len(CATEGORY_ORDER))
             for column in columns
         ))
 
@@ -563,7 +695,7 @@ def verify_workbook(path: Path, prepared: PreparedWorkbook) -> None:
             return snapshots[(SHEET_NAME, f"{get_column_letter(column)}{row}")][0]
 
         for index, pair in enumerate(prepared.pairs):
-            start = prepared.first_row + index * GROUP_HEIGHT
+            start = prepared.group_rows[index] if prepared.group_rows else prepared.first_row + index * GROUP_HEIGHT
             day_date = _as_date(value(start, 3), epoch=workbook.epoch)
             actual_date = _as_date(value(start, 10), epoch=workbook.epoch)
             if day_date != pair.day_ahead_date or actual_date != pair.actual_date:
@@ -581,17 +713,28 @@ def verify_workbook(path: Path, prepared: PreparedWorkbook) -> None:
                         raise RuntimeError(f"日前西电应留空：第 {row} 行。")
                 elif not all(
                     _values_equal(actual, expected)
-                    for actual, expected in zip(left, pair.day_ahead[category])
+                    for column, actual, expected in zip("EFGH", left, pair.day_ahead[category])
+                    if f"{column}{row}" not in prepared.preserved_cells
                 ):
                     raise RuntimeError(f"日前数值回读失败：第 {row} 行。")
                 right = tuple(value(row, column) for column in range(12, 16))
                 if not all(
                     _values_equal(actual, expected)
-                    for actual, expected in zip(right, pair.actual[category])
+                    for column, actual, expected in zip("LMNO", right, pair.actual[category])
+                    if f"{column}{row}" not in prepared.preserved_cells
                 ):
                     raise RuntimeError(f"实际数值回读失败：第 {row} 行。")
     finally:
         workbook.close()
+    if prepared.preserved_cells:
+        raw = openpyxl.load_workbook(path, data_only=False, read_only=True)
+        try:
+            actual = read_cell_snapshots(raw, ((SHEET_NAME, coordinate) for coordinate in prepared.preserved_cells))
+            for coordinate, expected in prepared.preserved_cells.items():
+                if actual[(SHEET_NAME, coordinate)] != expected:
+                    raise RuntimeError(f"已有单元格回读失败：{coordinate}")
+        finally:
+            raw.close()
 
 
 def prepare_workbook(path: Path, pairs: Iterable[DailyLoadPair]) -> PreparedWorkbook:
@@ -601,7 +744,9 @@ def prepare_workbook(path: Path, pairs: Iterable[DailyLoadPair]) -> PreparedWork
         raise ValueError("没有可写入的日期数据。")
     source_fingerprint = workbook_fingerprint(original)
     tail = inspect_workbook_tail(original)
-    expected_start = tail.day_ahead_date + timedelta(days=1)
+    groups = inspect_workbook_groups(original)
+    pending = [day for day, (_, cells) in groups.items() if len(cells) < INPUT_CELL_COUNT]
+    expected_start = min(pending) if pending else tail.day_ahead_date + timedelta(days=1)
     if pair_tuple[0].day_ahead_date != expected_start:
         raise ValueError(
             f"新数据必须从 {expected_start.isoformat()} 开始，"
@@ -614,12 +759,19 @@ def prepare_workbook(path: Path, pairs: Iterable[DailyLoadPair]) -> PreparedWork
         if pair.day_ahead_date - pair.actual_date != timedelta(days=DATE_OFFSET_DAYS):
             raise ValueError("每组数据必须满足日前 D、实际 D-3。")
     temporary = original.with_name(f".{original.stem}.{uuid.uuid4().hex}.tmp.xlsx")
+    group_rows = tuple(groups[pair.day_ahead_date][0].start_row if pair.day_ahead_date in groups
+                       else tail.start_row + (pair.day_ahead_date - tail.day_ahead_date).days * GROUP_HEIGHT
+                       for pair in pair_tuple)
+    preserved_cells = {coordinate: snapshot for pair in pair_tuple
+                       for coordinate, snapshot in groups.get(pair.day_ahead_date, (None, {}))[1].items()}
     try:
         first_row, last_row = _write_patched_workbook(
             original,
             temporary,
             template_start=tail.start_row,
             pairs=pair_tuple,
+            group_rows=group_rows,
+            preserved_cells=preserved_cells,
         )
         prepared = PreparedWorkbook(
             original=original,
@@ -628,6 +780,8 @@ def prepare_workbook(path: Path, pairs: Iterable[DailyLoadPair]) -> PreparedWork
             first_row=first_row,
             last_row=last_row,
             pairs=pair_tuple,
+            group_rows=group_rows,
+            preserved_cells=preserved_cells,
         )
         verify_workbook(temporary, prepared)
         assert_workbook_unchanged(original, source_fingerprint)
@@ -690,7 +844,7 @@ def main() -> int:
         description="抓取现货运行日报市场负荷信息并接续更新交易系统信息收集表"
     )
     parser.add_argument("--workbook", type=Path, default=DEFAULT_WORKBOOK)
-    parser.add_argument("--start-date", help="日前开始日期；不填时自动从工作簿最后日期+1接续")
+    parser.add_argument("--start-date", help="日前开始日期；不填时优先补已有日期组空值，再从表尾接续")
     parser.add_argument(
         "--end-date",
         default=(date.today() - timedelta(days=1)).isoformat(),

@@ -12,6 +12,50 @@ from toolbox.runtime import load_module
 
 
 class MarketTableBatchWriteTests(unittest.TestCase):
+    def test_missing_tail_dates_are_extended_and_read_back(self):
+        module = load_module("market_tail_extension", Path(__file__).resolve().parents[2] / "市场表更新/update_market_table.py")
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "market.xlsx"
+            book = Workbook(); sheet = book.active; sheet.title = module.MARKET_SHEET_NAME
+            sheet["A2"] = date(2026, 10, 8); sheet["A2"].number_format = "yyyy/m/d"
+            sheet["V2"] = 99; sheet["V2"].number_format = "0.00%"
+            sheet["A30"].number_format = "yyyy/m/d"
+            book.create_sheet("保留")["A1"] = "=1+1"
+            book.save(path); book.close()
+            module.write_day_ahead_market_values(path, date(2026, 10, 11), list(range(12)))
+            module.write_market_row_values(workbook_path=path, run_date=date(2026,10,11),
+                values=list(range(12)), start_column="V", expected_count=12, label="日前市场")
+            book = load_workbook(path)
+            try:
+                sheet = book[module.MARKET_SHEET_NAME]
+                self.assertEqual([sheet.cell(r, 1).value.date() for r in (3, 4, 5)],
+                                 [date(2026, 10, d) for d in (9, 10, 11)])
+                self.assertIsNone(sheet["V3"].value)
+                self.assertEqual(sheet["V2"].value, 99)
+                self.assertEqual(sheet["V5"].number_format, "0.00%")
+                self.assertEqual(tuple(sheet.cell(5, col).value for col in range(22, 34)), tuple(range(12)))
+                self.assertEqual(book["保留"]["A1"].value, "=1+1")
+                self.assertEqual(sheet["A5"].number_format, "yyyy/m/d")
+            finally: book.close()
+
+    def test_unsafe_extension_preserves_original(self):
+        module = load_module("market_unsafe_extension", Path(__file__).resolve().parents[2] / "市场表更新/update_market_table.py")
+        for problem in ("footer", "merge", "history", "year", "duplicate", "month"):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "market.xlsx"
+                book = Workbook(); sheet = book.active; sheet.title = module.MARKET_SHEET_NAME
+                sheet["A2"] = date(2026, 10, 8)
+                if problem == "footer": sheet["A3"] = "10月合计"
+                if problem == "merge": sheet.merge_cells("A3:A4")
+                if problem == "duplicate": sheet["A3"] = date(2026, 10, 8)
+                if problem == "month": sheet["A1"] = "10月"
+                book.save(path); book.close(); before = path.read_bytes()
+                target = date(2027, 1, 1) if problem == "year" else date(2026, 10, 7 if problem == "history" else 8 if problem == "duplicate" else 9)
+                if problem == "month": target = date(2026,11,1)
+                with self.assertRaises(RuntimeError):
+                    module.write_day_ahead_market_values(path, target, list(range(12)))
+                self.assertEqual(path.read_bytes(), before)
+
     def test_external_save_during_session_is_preserved(self) -> None:
         module = load_module("market_table_external_save_test",
             Path(__file__).resolve().parents[2] / "市场表更新/update_market_table.py")

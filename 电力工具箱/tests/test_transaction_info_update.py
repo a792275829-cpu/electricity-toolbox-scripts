@@ -14,6 +14,100 @@ from toolbox.runtime import ToolPaths, load_module
 
 
 class TransactionInfoUpdateTests(unittest.TestCase):
+    def test_append_reuses_styled_blank_rows_without_duplicate_rows(self):
+        import zipfile
+        from xml.etree import ElementTree as ET
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "transaction.xlsx"; self._build_fixture(path)
+            book = openpyxl.load_workbook(path); sheet = book["Sheet1"]
+            sheet["E8"].number_format = "0.00%"; sheet["E20"].number_format = "0.00%"
+            book.save(path); book.close()
+            before = path.read_bytes(); day = date(2026,9,11)
+            pair = self.module.build_daily_load_pair(day, self._payload(day), self._payload(day - timedelta(days=3)))
+            item = self.module.prepare_workbook(path, (pair,))
+            self.assertEqual(path.read_bytes(), before)
+            self.module.commit_prepared_workbook(item, create_backup=False)
+            with zipfile.ZipFile(path) as archive:
+                root = ET.fromstring(archive.read(self.module.xlsx_sheet_paths(path)["Sheet1"]))
+            ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+            rows = [int(row.attrib["r"]) for row in root.find(ns + "sheetData")]
+            self.assertEqual(rows, sorted(set(rows)))
+            book = openpyxl.load_workbook(path)
+            try:
+                self.assertEqual(book["Sheet1"]["C8"].value.date(), day)
+                self.assertEqual(book["Sheet1"]["E20"].number_format, "0.00%")
+                self.assertEqual(book["Sheet1"]["E8"].number_format, "0.00%")
+                self.assertEqual(book["Sheet1"]["E8"].value, pair.day_ahead["统调"][0])
+            finally: book.close()
+
+    def test_empty_and_partial_groups_are_filled_before_appending(self):
+        for partial in (False, True):
+            with self.subTest(partial=partial), tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "transaction.xlsx"; self._build_fixture(path)
+                first = date(2026,9,11)
+                pair = self.module.build_daily_load_pair(first, self._payload(first), self._payload(first - timedelta(days=3)))
+                item = self.module.prepare_workbook(path, (pair,))
+                self.module.commit_prepared_workbook(item, create_backup=False)
+                book = openpyxl.load_workbook(path); sheet = book["Sheet1"]
+                for row in range(8,14):
+                    for column in (*range(5,9), *range(12,16)):
+                        sheet.cell(row,column).value = None
+                if partial:
+                    sheet["E8"] = 0; sheet["F8"] = "=1+1"; sheet["F8"].number_format = "0.00%"
+                sheet["P8"] = "保留"; book.save(path); book.close()
+                self.assertEqual(self.module.resolve_start_date(path, None), first)
+                second = first + timedelta(days=1)
+                next_pair = self.module.build_daily_load_pair(second, self._payload(second), self._payload(second - timedelta(days=3)))
+                item = self.module.prepare_workbook(path, (pair, next_pair))
+                self.module.commit_prepared_workbook(item, create_backup=False)
+                book = openpyxl.load_workbook(path)
+                try:
+                    sheet = book["Sheet1"]
+                    self.assertEqual(sheet["C8"].value.date(), first)
+                    self.assertEqual(sheet["C15"].value.date(), second)
+                    self.assertEqual(sheet["L8"].value, pair.actual["统调"][0])
+                    self.assertEqual(sheet["P8"].value, "保留")
+                    if partial:
+                        self.assertEqual(sheet["E8"].value, 0)
+                        self.assertEqual(sheet["F8"].value, "=1+1")
+                        self.assertEqual(sheet["F8"].number_format, "0.00%")
+                finally: book.close()
+                self.assertEqual(self.module.resolve_start_date(path, None), second + timedelta(days=1))
+
+    def test_append_refuses_occupied_tail_without_changing_original(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "transaction.xlsx"; self._build_fixture(path)
+            book = openpyxl.load_workbook(path); book["Sheet1"]["P8"] = "已有汇总"; book.save(path); book.close()
+            before = path.read_bytes(); day = date(2026,9,11)
+            pair = self.module.build_daily_load_pair(day, self._payload(day), self._payload(day - timedelta(days=3)))
+            with self.assertRaisesRegex(RuntimeError, "已有其他内容"):
+                self.module.prepare_workbook(path, (pair,))
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(list(Path(folder).glob(".*.tmp.xlsx")), [])
+
+    def test_legacy_layout_is_left_untouched_and_new_groups_keep_merges(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "transaction.xlsx"; self._build_fixture(path)
+            day = date(2026,9,11)
+            pair = self.module.build_daily_load_pair(day, self._payload(day), self._payload(day - timedelta(days=3)))
+            item = self.module.prepare_workbook(path, (pair,))
+            self.module.commit_prepared_workbook(item, create_backup=False)
+            book = openpyxl.load_workbook(path); sheet = book["Sheet1"]
+            sheet["D5"] = "旧字段"; sheet.merge_cells("C8:C13"); sheet.merge_cells("J8:J13")
+            book.save(path); book.close()
+            next_day = day + timedelta(days=1)
+            self.assertEqual(self.module.resolve_start_date(path, None), next_day)
+            pair = self.module.build_daily_load_pair(next_day, self._payload(next_day), self._payload(next_day - timedelta(days=3)))
+            item = self.module.prepare_workbook(path, (pair,))
+            self.module.commit_prepared_workbook(item, create_backup=False)
+            book = openpyxl.load_workbook(path)
+            try:
+                sheet = book["Sheet1"]
+                self.assertEqual(sheet["D5"].value, "旧字段")
+                self.assertTrue({"C8:C13", "J8:J13", "C15:C20", "J15:J20"} <= {str(area) for area in sheet.merged_cells.ranges})
+                self.assertEqual(sheet["C15"].value.date(), next_day)
+            finally: book.close()
+
     def test_commit_rejects_external_save_and_preserves_other_sheet(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "transaction.xlsx"

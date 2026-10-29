@@ -68,6 +68,29 @@ class PowerBenefitTests(unittest.TestCase):
             plan = self.module.inspect_workbook(path, start_date=date(2026,10,2), end_date=date(2026,10,2))
             self.assertEqual(len(plan.cells), 144)
 
+    def test_missing_requested_dates_fail_before_fetch_or_write(self):
+        for mode in ("stream", "full"):
+            for start in (None, date(2026, 10, 2)):
+                with self.subTest(mode=mode, start=start), tempfile.TemporaryDirectory() as folder:
+                    path = self.make_template(folder); before = path.read_bytes()
+                    with patch.dict("os.environ", TOOLBOX_BENEFIT_INSPECT_BACKEND=mode), \
+                            patch.object(self.module, "collect_data") as fetch:
+                        with self.assertRaisesRegex(ValueError, "模板缺少日期.*2026-10-04.*2026-10-05"):
+                            self.module.run_update((path,), start_date=start, end_date=date(2026,10,5))
+                        fetch.assert_not_called()
+                    self.assertEqual(path.read_bytes(), before)
+
+    def test_missing_month_and_middle_day_are_reported(self):
+        for problem in ("month", "middle"):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as folder:
+                path = self.make_template(folder)
+                if problem == "middle":
+                    book = openpyxl.load_workbook(path); book["10月"]["A29"] = datetime(2026,10,3)
+                    book["10月"]["A54"] = datetime(2026,10,4); book.save(path); book.close()
+                end = date(2026,11,1) if problem == "month" else date(2026,10,4)
+                with self.assertRaisesRegex(ValueError, "模板缺少日期"):
+                    self.module.inspect_workbook(path, start_date=date(2026,10,1), end_date=end)
+
     def test_out_of_month_placeholder_is_ignored(self):
         with tempfile.TemporaryDirectory() as folder:
             path = self.make_template(folder)

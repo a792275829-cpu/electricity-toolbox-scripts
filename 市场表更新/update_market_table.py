@@ -10,6 +10,7 @@ import tempfile
 from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import copy
+from functools import wraps
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -118,7 +119,7 @@ def date_matches(value: Any, target: date) -> bool:
     return parsed == target
 
 
-def find_date_row(sheet, target: date) -> int:
+def find_date_row(sheet, target: date, *, extend: bool = False) -> int:
     resolved_dates: dict[int, date] = {}
     formula_pattern = re.compile(r"^=\$?A\$?(\d+)\s*([+-])\s*(\d+)$", re.IGNORECASE)
 
@@ -137,8 +138,45 @@ def find_date_row(sheet, target: date) -> int:
                     parsed = ref_date + timedelta(days=delta)
         if parsed is not None:
             resolved_dates[row] = parsed
-        if parsed == target:
-            return row
+    matches = [row for row, day in resolved_dates.items() if day == target]
+    if len(matches) > 1:
+        raise RuntimeError(f"{sheet.title} 日期重复：{target.isoformat()}")
+    if matches:
+        return matches[0]
+    if extend and resolved_dates:
+        last_row = max(resolved_dates)
+        last_date = resolved_dates[last_row]
+        year = re.match(r"^(\d{4})年", sheet.title)
+        if year and target.year != int(year[1]):
+            raise RuntimeError(f"{sheet.title} 不支持写入 {target.year} 年，请选择对应年度模板。")
+        if target > max(resolved_dates.values()) and last_date == max(resolved_dates.values()):
+            if (target.month != last_date.month and any(
+                isinstance(cells[0].value, str) and re.search(r"\d+月|合计|汇总|小计", cells[0].value)
+                for cells in sheet.iter_rows(min_col=1, max_col=1)
+            )):
+                raise RuntimeError(f"{sheet.title} 跨月接续涉及月份汇总，请先补齐对应月份模板。")
+            for cells in sheet.iter_rows(min_row=last_row + 1):
+                if any(cell.value not in (None, "") for cell in cells):
+                    raise RuntimeError(f"{sheet.title} 表尾存在汇总或其他内容，请先补齐日期模板，未执行写入。")
+            final_row = last_row + (target - last_date).days
+            if final_row > 1_048_576:
+                raise RuntimeError(f"{sheet.title} 接续日期将超出 Excel 行数限制。")
+            if any(area.min_row <= final_row and area.max_row > last_row for area in sheet.merged_cells.ranges):
+                raise RuntimeError(f"{sheet.title} 接续区域存在合并单元格，请先补齐日期模板。")
+            for row in range(last_row + 1, final_row + 1):
+                sheet.row_dimensions[row].height = sheet.row_dimensions[last_row].height
+                for column in range(1, sheet.max_column + 1):
+                    source, cell = sheet.cell(last_row, column), sheet.cell(row, column)
+                    copy_cell_style(source, cell)
+                day = last_date + timedelta(days=row - last_row)
+                cell = sheet.cell(row, 1, datetime.combine(day, datetime.min.time()))
+                if not is_date_format(cell.number_format):
+                    cell.number_format = "yyyy-mm-dd"
+                session = _active_write_session.get()
+                if session is not None:
+                    session.record(cell)
+            log(f"{sheet.title}：接续 {last_date + timedelta(days=1)} 至 {target} 的日期行。")
+            return final_row
     raise RuntimeError(f"{sheet.title} 未找到日期行：{target.isoformat()}")
 
 
@@ -274,7 +312,7 @@ def find_date_row_in_workbook(
             raise RuntimeError(f"Excel 中未找到工作表：{sheet_name}")
         key = (sheet_name, target)
         if key not in session.date_rows:
-            session.date_rows[key] = find_date_row(workbook[sheet_name], target)
+            session.date_rows[key] = find_date_row(workbook[sheet_name], target, extend=True)
         return session.date_rows[key]
     workbook = load_workbook_checked(workbook_path, read_only=True, data_only=False)
     try:
@@ -967,6 +1005,17 @@ def write_market_load_values(
     )
 
 
+def _market_write(function):
+    @wraps(function)
+    def write(workbook_path, *args, **kwargs):
+        if active_session_for(workbook_path) is not None:
+            return function(workbook_path, *args, **kwargs)
+        with workbook_write_session(workbook_path):
+            return function(workbook_path, *args, **kwargs)
+    return write
+
+
+@_market_write
 def write_market_row_values(
     workbook_path: Path | str,
     run_date: date,
@@ -1014,6 +1063,7 @@ def write_market_row_values(
     }
 
 
+@_market_write
 def write_unit_cost_price_values(
     workbook_path: Path | str,
     run_date: date,
@@ -1056,6 +1106,7 @@ def write_unit_cost_price_values(
     }
 
 
+@_market_write
 def write_market_board_online_unit_values(
     workbook_path: Path | str,
     run_date: date,
@@ -1099,6 +1150,7 @@ def write_market_board_online_unit_values(
     }
 
 
+@_market_write
 def write_spot_clearing_unit_count_values(
     workbook_path: Path | str,
     run_date: date,
@@ -1145,6 +1197,7 @@ def write_spot_clearing_unit_count_values(
     }
 
 
+@_market_write
 def copy_previous_day_unit_operation_mode(
     workbook_path: Path | str,
     run_date: date,
