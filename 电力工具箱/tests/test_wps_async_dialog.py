@@ -583,6 +583,7 @@ class WpsConnectionTimeoutTests(unittest.TestCase):
             ("_ensure_wps_dedicated_chrome", {}),
             ("resolve_cdp_endpoint", {"return_value": "ws://127.0.0.1:9222/browser/test"}),
             ("managed_chrome_pid", {"return_value": 123}),
+            ("managed_chrome_is_headless", {"return_value": True}),
             ("stop_managed_chrome", {}),
         ):
             patcher = mock.patch.object(self.module, name, **kwargs)

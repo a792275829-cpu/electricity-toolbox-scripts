@@ -455,6 +455,11 @@ def stop_outdated_managed_chrome(
     pid = managed_chrome_pid()
     if pid is None:
         return
+    # Background inspection may race with a user completing interactive login.
+    # A visible browser stays visible until the user closes it; only an explicit
+    # login request may switch a headless browser to a window.
+    if headless and not managed_chrome_is_headless(pid):
+        return
     if managed_chrome_launch_version(pid) < WPS_CHROME_LAUNCH_VERSION:
         reason = "正在应用更新后的浏览器设置"
     elif managed_chrome_is_headless(pid) != headless:
@@ -517,6 +522,8 @@ def _ensure_wps_dedicated_chrome(
                     "headless": headless,
                 }
             time_module.sleep(0.2)
+        if headless and not managed_chrome_is_headless(existing_pid):
+            raise RuntimeError("登录浏览器暂时无响应，已保留窗口。请完成登录后重试。")
         stop_managed_chrome(
             existing_pid,
             log,
@@ -643,6 +650,10 @@ def open_browser_context(
                     if pid is None:
                         raise RuntimeError(
                             "浏览器连接超时，请关闭专用浏览器后重新打开。"
+                        ) from exc
+                    if not managed_chrome_is_headless(pid):
+                        raise RuntimeError(
+                            "登录浏览器连接超时，已保留窗口。请完成登录后重试。"
                         ) from exc
                     stop_managed_chrome(pid, log, "表格页面无响应，连接超时")
                     _ensure_wps_dedicated_chrome(
