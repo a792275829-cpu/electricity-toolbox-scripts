@@ -60,9 +60,10 @@ COMPANY_DISPLAY_NAME = {
     "华能广东汕头海上风电有限责任公司": "海风",
     "华能（汕头金平）新能源有限责任公司": "金平",
     "华能（潮州潮安）新能源有限责任公司": "潮安",
+    "清远电厂": "清远",
 }
 
-COMPANY_DISPLAY_ORDER = ["汕头", "海门", "东莞", "海风", "金平", "潮安"]
+COMPANY_DISPLAY_ORDER = ["汕头", "海门", "东莞", "海风", "金平", "潮安", "清远"]
 
 
 @dataclass
@@ -481,6 +482,9 @@ def collect_detail_rows(run_date: str, config: Config) -> list[dict[str, Any]]:
 
 
 def display_unit_header(value: str) -> str:
+    numbers = re.findall(r"#(\d+)", value)
+    if len(numbers) > 1:
+        return "、".join(numbers) + "号机"
     match = re.search(r"#(\d+)", value)
     if match:
         return f"{match.group(1)}号机"

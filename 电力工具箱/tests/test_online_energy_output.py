@@ -58,3 +58,29 @@ class OnlineEnergyOutputTests(unittest.TestCase):
                 self.assertEqual(sheet["A4"].value, 0)
             finally:
                 workbook.close()
+
+    def test_qingyuan_two_groups_are_appended_with_hourly_values(self):
+        import openpyxl
+
+        rows = [
+            {"company": company, "unit": unit, "time": f"{hour:02d}:00", "onlineEle": value + hour}
+            for company, unit, value in (
+                ("清远电厂", "清远#1、#2机", 100.7),
+                ("清远电厂", "清远#3、#4机", 0),
+                ("汕头电厂", "#1", 10),
+            )
+            for hour in range(24)
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.module.save_excel("2026-10-28", rows, Path(folder))
+            workbook = openpyxl.load_workbook(path)
+            try:
+                sheet = workbook["汇总"]
+                self.assertEqual(sheet["A1"].value, "汕头 实际上网电量（万千瓦时）")
+                self.assertEqual(sheet["A28"].value, "清远 实际上网电量（万千瓦时）")
+                self.assertEqual((sheet["A29"].value, sheet["B29"].value), ("1、2号机", "3、4号机"))
+                self.assertEqual((sheet["A30"].value, sheet["B30"].value), (100.7, 0))
+                self.assertEqual((sheet["A53"].value, sheet["B53"].value), (123.7, 23))
+                self.assertEqual(sheet["A30"].number_format, "General")
+            finally:
+                workbook.close()
