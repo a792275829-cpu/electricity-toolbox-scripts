@@ -12,6 +12,7 @@ from .runtime import TaskRegistry, ToolPaths
 from .ui import DashboardPage, DiagnosticCenterPanel, TaskCenter, configure_theme
 from .ui.credentials_panel import CredentialsPanel
 from .ui.theme import SIDEBAR
+from .ui.viewport import Viewport
 
 PAGE_NAMES = (
     "导出上网电量",
@@ -32,8 +33,10 @@ PAGE_NAMES = (
 )
 PageFactory = Callable[[tk.Misc, ToolPaths, TaskRegistry], tk.Frame]
 
-DEFAULT_WINDOW_WIDTH = 1440
-DEFAULT_WINDOW_HEIGHT = 820
+DEFAULT_WINDOW_WIDTH = 1480
+DEFAULT_WINDOW_HEIGHT = 900
+MIN_WINDOW_WIDTH = 1280
+MIN_WINDOW_HEIGHT = 720
 SCREEN_EDGE_MARGIN = 80
 PAGE_LOAD_DELAY_MS = 35
 
@@ -160,18 +163,19 @@ class ToolboxApp(tk.Tk):
         self.navigation.bind("<MouseWheel>", self._scroll_navigation)
         for label, _items in self._nav_groups:
             label.bind("<MouseWheel>", self._scroll_navigation)
-        self.page_host = ttk.Frame(self)
-        self.page_host.grid(row=0, column=1, sticky="nsew")
+        self.page_viewport = Viewport(self, width=800)
+        self.page_viewport.grid(row=0, column=1, sticky="nsew")
+        self.page_host = self.page_viewport.content
         self.page_host.rowconfigure(0, weight=1)
         self.page_host.columnconfigure(0, weight=1)
         self.dashboard = DashboardPage(self.page_host, self.registry, self.request_page, self.paths)
         self.dashboard.grid(row=0, column=0, sticky="nsew")
         self.dashboard.grid_remove()
 
-        right_rail = ttk.Frame(self)
-        self.right_rail = right_rail
+        self.right_rail = Viewport(self, width=280)
+        right_rail = self.right_rail.content
         self.right_rail_visible = True
-        right_rail.grid(row=0, column=2, sticky="nsew")
+        self.right_rail.grid(row=0, column=2, sticky="nsew")
         right_rail.columnconfigure(0, weight=1)
         right_rail.rowconfigure(0, weight=1)
         self.task_center = TaskCenter(right_rail, self.registry)
@@ -248,7 +252,7 @@ class ToolboxApp(tk.Tk):
         width = min(DEFAULT_WINDOW_WIDTH, available_width)
         height = min(max(DEFAULT_WINDOW_HEIGHT, required_height), available_height)
         self.geometry(f"{width}x{height}")
-        self.minsize(min(980, width), min(640, height))
+        self.minsize(min(MIN_WINDOW_WIDTH, available_width), min(MIN_WINDOW_HEIGHT, available_height))
 
     def _create_page(self, name: str) -> tk.Frame:
         page = self.pages.get(name)
@@ -291,6 +295,7 @@ class ToolboxApp(tk.Tk):
             self._visible_page.grid_remove()
         page.grid()
         page.tkraise()
+        self.page_viewport.reset()
         self._visible_page = page
         show = getattr(page, "on_navigation_shown", None)
         if show is not None:
