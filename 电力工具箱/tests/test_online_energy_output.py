@@ -84,3 +84,22 @@ class OnlineEnergyOutputTests(unittest.TestCase):
                 self.assertEqual(sheet["A30"].number_format, "General")
             finally:
                 workbook.close()
+
+    def test_qingyuan_api_uses_online_columns_and_checks_hours(self):
+        columns = [{"unitId": unit, "fieldKey": f"{unit}_{metric}", "metricType": metric}
+                   for unit in ("a", "b") for metric in ("actualEle", "onlineEle")]
+        rows = [{"time": f"{hour:02d}:00", "valueMap": {
+            "a_actualEle": 999, "a_onlineEle": hour + 0.7,
+            "b_actualEle": 999, "b_onlineEle": 0,
+        }} for hour in reversed(range(24))]
+        context = mock.Mock()
+        with mock.patch.object(self.module, "parse_json_response", return_value={"data": {"columnList": columns, "rowList": rows}}):
+            result = self.module.fetch_qingyuan_rows(context, "2026-10-28", "tenant")
+            self.assertEqual(result[0]["onlineEle"][0], 0.7)
+            self.assertEqual(result[0]["onlineEle"][-1], 23.7)
+            self.assertEqual(result[1]["onlineEle"], [0] * 24)
+            self.assertEqual(context.request.get.call_args.kwargs["params"], {
+                "runDate": "2026-10-28", "endDate": "2026-10-28", "orgId": "tenant"})
+            rows[-1]["time"] = rows[0]["time"]
+            with self.assertRaisesRegex(ValueError, "重复"):
+                self.module.fetch_qingyuan_rows(context, "2026-10-28", "tenant")

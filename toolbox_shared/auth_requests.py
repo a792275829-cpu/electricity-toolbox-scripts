@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 
 READ_GET = frozenset({
     "/gdfire/api/data/unit/power/energy", "/gdfire/api/data/unit/power/fire",
+    "/gdfire/api/data/unit/power/qing-yuan/data",
     "/gdfire/api/pf/tenant/user/tenant/grantApplication", "/gdfire/api/unit/list",
     "/gdfire/api/data/net/load", "/gdfire/api/data/net/capacity", "/gdfire/api/data/spot/trade/unit",
     "/gdfire/api/pub/data/report", "/gdfire/api/spot/market/info", "/gdfire/api/cockpit/extremePrice",

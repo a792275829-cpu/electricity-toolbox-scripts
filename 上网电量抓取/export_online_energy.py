@@ -390,6 +390,38 @@ def fetch_fire_rows(context, run_date: str, tenant_id: str) -> list[dict[str, An
     return rows
 
 
+def fetch_qingyuan_rows(context, run_date: str, tenant_id: str) -> list[dict[str, Any]]:
+    response = context.request.get(
+        f"{BASE_URL}/gdfire/api/data/unit/power/qing-yuan/data",
+        params={"runDate": run_date, "endDate": run_date, "orgId": tenant_id},
+        timeout=30000,
+    )
+    data = parse_json_response(response, "读取清远上网电量").get("data")
+    if not isinstance(data, dict) or not isinstance(data.get("columnList"), list) or not isinstance(data.get("rowList"), list):
+        raise ValueError("清远上网电量返回格式不正确，停止导出。")
+    columns = {}
+    for column in data["columnList"]:
+        if column.get("metricType") != "onlineEle":
+            continue
+        unit_id, field = column.get("unitId"), column.get("fieldKey")
+        if not unit_id or not field or unit_id in columns or field in columns.values():
+            raise ValueError("清远上网电量列缺失或重复，停止导出。")
+        columns[unit_id] = field
+    if not columns:
+        raise ValueError("清远缺少实际上网电量列，停止导出。")
+    hours = {}
+    for row in data["rowList"]:
+        hour = row.get("time")
+        if hour not in [f"{i:02d}:00" for i in range(24)] or hour in hours or not isinstance(row.get("valueMap"), dict):
+            raise ValueError("清远上网电量时刻无效或重复，停止导出。")
+        hours[hour] = row["valueMap"]
+    if len(hours) != 24:
+        raise ValueError("清远上网电量不足24个小时，停止导出。")
+    return [{"unitId": unit_id, "runDate": run_date,
+             "onlineEle": [hours[f"{i:02d}:00"].get(field) for i in range(24)]}
+            for unit_id, field in columns.items()]
+
+
 def fetch_energy_rows(context, run_date: str, tenant_id: str, units: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for unit in units:
@@ -432,7 +464,9 @@ def collect_detail_rows(run_date: str, config: Config) -> list[dict[str, Any]]:
                 unit_names = {str(item.get("id")): unit_display_name(item) for item in units if item.get("id")}
                 unit_order = {str(item.get("id")): pos for pos, item in enumerate(units) if item.get("id")}
 
-                if is_renewable_company(units):
+                if company_name == "清远电厂":
+                    raw_rows = fetch_qingyuan_rows(context, run_date, tenant_id)
+                elif is_renewable_company(units):
                     raw_rows = fetch_energy_rows(context, run_date, tenant_id, units)
                 else:
                     raw_rows = fetch_fire_rows(context, run_date, tenant_id)
