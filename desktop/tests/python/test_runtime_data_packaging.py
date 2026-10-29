@@ -84,6 +84,27 @@ class RuntimeDataPackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "必要字段"):
             prepare_payload.prepare_forecast_seed(self.base, self.original)
 
+    def test_seed_is_optional_when_no_workbook_is_available(self):
+        absent = self.base / "无总表/输出/广东电价数据总表.xlsx"
+        with mock.patch(
+            "migrate_forecast_data.resolve_paths", return_value={"masterWorkbook": absent}
+        ), mock.patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("FORECAST_MASTER_WORKBOOK", None)
+            os.environ.pop("FORECAST_MASTER_URL", None)
+            target = prepare_payload.prepare_forecast_seed(self.payload / "defaults")
+        self.assertIsNone(target)
+        self.assertFalse((self.payload / "defaults" / prepare_payload.FORECAST_SEED).exists())
+
+    def test_install_without_seed_keeps_user_data_layout(self):
+        (self.payload / "manifest.json").write_text(
+            json.dumps({"files": {}, "build": "first", "defaults": [], "default_hashes": {}})
+        )
+        self.install()
+        self.assertTrue((self.base / "user/app").is_dir())
+        self.assertFalse(
+            (self.base / "user/data" / prepare_payload.FORECAST_SEED).exists()
+        )
+
     def test_each_required_runtime_asset_is_exported_and_enforced(self):
         source = self.base / "assets"
         for relative in prepare_payload.REQUIRED_RUNTIME_ASSETS:

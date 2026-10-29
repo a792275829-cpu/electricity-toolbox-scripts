@@ -945,7 +945,7 @@ class GuangdongPricePage(ToolPage):
             master_button,
             prediction_dir_button,
         )
-        self.append_log("先补齐总表，再运行 D+1 预测；账号使用右侧统一账号。")
+        self.append_log("总表缺失时会先按账号自动补齐，再运行 D+1 预测；账号使用右侧统一账号。")
 
     def resolve_business_path(self, text: str) -> Path:
         if not text.strip():

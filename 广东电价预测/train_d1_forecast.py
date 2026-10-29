@@ -23,6 +23,39 @@ from gd_price_forecast.future_inputs import (
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
+
+def ensure_master_workbook(paths, input_path=None):
+    """Return the modelling input, generating the master workbook when absent.
+
+    First installs no longer ship a forecast master workbook, so a missing file
+    is filled from the grid API before training. An explicitly requested input
+    must still exist: silently training on another file would hide the mistake.
+    """
+    target = Path(input_path) if input_path is not None else Path(paths["masterWorkbook"])
+    if target.is_file():
+        return target
+    if input_path is not None:
+        raise FileNotFoundError(f"指定的预测输入工作簿不存在：{target}")
+    import sys
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
+    import update_gdfire_data
+    target.parent.mkdir(parents=True, exist_ok=True)
+    print(
+        json.dumps(
+            {"stage": "生成数据总表", "master": str(target)},
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+    result = update_gdfire_data.update_master_workbook(master_workbook=target)
+    master = Path(result["master"])
+    if not master.is_file():
+        raise FileNotFoundError(f"数据总表生成失败，请检查账号与网络后重试：{master}")
+    print(json.dumps({"stage": "数据总表已生成", "master": str(master)}, ensure_ascii=False), flush=True)
+    return master
+
+
 DEFAULT_CONFIGS = [
     {"name": "lgb_l20_m50", "kind": "lightgbm", "params": {"n_estimators": 700, "learning_rate": 0.02, "num_leaves": 20, "min_child_samples": 50, "colsample_bytree": 0.8, "reg_lambda": 3.0, "reg_alpha": 1.0}},
     {"name": "lgb_l15_m20", "kind": "lightgbm", "params": {"n_estimators": 700, "learning_rate": 0.02, "num_leaves": 15, "min_child_samples": 20, "colsample_bytree": 0.8, "reg_lambda": 3.0, "reg_alpha": 1.0}},
@@ -241,6 +274,7 @@ def main() -> None:
     parser.add_argument('--historical-only', action='store_true', help='只使用历史信息，禁用预测日供需抓取')
     args = parser.parse_args()
     paths = resolve_paths(config_path=args.config)
+    master_workbook = ensure_master_workbook(paths, args.input)
     as_of = args.as_of or datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
     if args.compare_algorithms:
         from gd_price_forecast.experiments import run_comparison
@@ -250,13 +284,13 @@ def main() -> None:
             if as_of != datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat():
                 raise ValueError('实时快照只适用于当天基准日；历史回测必须使用历史归档快照')
             snapshot,_=fetch_forecast_snapshot(str((pd.Timestamp(as_of)+pd.Timedelta(days=1)).date()),output/'预测日快照')
-        print(json.dumps(run_comparison(args.input or paths['masterWorkbook'],
+        print(json.dumps(run_comparison(master_workbook,
                                        output,as_of=as_of,future_snapshot=snapshot), ensure_ascii=False, indent=2))
         return
     print(
         json.dumps(
             run_pipeline(
-                args.input or paths["masterWorkbook"],
+                master_workbook,
                 args.output_dir or paths["predictionOutputDir"],
                 forecast_days=args.forecast_days,
                 training_months=args.training_months,

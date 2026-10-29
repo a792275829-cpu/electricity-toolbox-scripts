@@ -162,7 +162,7 @@ def plan(paths, tool_id, action, p):
         if master.suffix.lower() != ".xlsx":
             raise ValueError("数据总表必须是 .xlsx 文件")
         if action == "predict":
-            required_path(p, "master_workbook")
+            # 首次安装不再内置总表：缺失时由预测流程按账号配置自动补齐。
             months = number(p["training_months"], "训练月数")
             if not months.is_integer() or (months != 0 and months < 2):
                 raise ValueError("训练窗口填 0 自动选择，或填写至少 2 个月")

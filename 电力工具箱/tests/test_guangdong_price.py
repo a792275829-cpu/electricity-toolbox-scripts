@@ -239,12 +239,18 @@ class GuangdongForecastTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             config = Path(folder) / "config.json"
             config.write_text('{"masterWorkbook":"自选/总表.xlsx","predictionOutputDir":"自选/预测"}')
+            from toolbox_shared.storage import data_path
+            master = data_path(PROJECT / "自选/总表.xlsx")
             with mock.patch.object(sys, "argv", ["train_d1_forecast.py", "--config", str(config)]), mock.patch.object(
+                self.forecast, "ensure_master_workbook", return_value=master
+            ) as ensure, mock.patch.object(
                 self.forecast, "run_pipeline", return_value={"mae": 0.0}
             ) as pipeline, mock.patch("builtins.print"):
                 self.forecast.main()
-            from toolbox_shared.storage import data_path
-            self.assertEqual((data_path(PROJECT / "自选/总表.xlsx"), data_path(PROJECT / "自选/预测")), pipeline.call_args.args)
+            self.assertEqual(master, ensure.call_args.args[0]["masterWorkbook"])
+            self.assertEqual(
+                (master, data_path(PROJECT / "自选/预测")), pipeline.call_args.args
+            )
 
     def test_pipeline_exports_actual_workbook_and_rejects_unsupported_days(self) -> None:
         times = pd.date_range("2026-05-01", periods=50 * 96, freq="15min")
@@ -391,6 +397,60 @@ class GuangdongForecastTests(unittest.TestCase):
             )
 
         self.assertEqual([pd.Timestamp("2026-07-13")], list(result["日期"].unique()))
+
+
+class ForecastMasterBootstrapTests(unittest.TestCase):
+    """首次安装不再内置总表，预测入口要在缺失时自动生成。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        sys.path.insert(0, str(PROJECT))
+        cls.train = load_script("test_guangdong_train", "train_d1_forecast.py")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if sys.path and sys.path[0] == str(PROJECT):
+            sys.path.pop(0)
+
+    def test_missing_master_is_generated_from_grid_api(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            master = Path(folder) / "输出/广东电价数据总表.xlsx"
+            calls = []
+
+            def fake_update(*, master_workbook=None):
+                calls.append(Path(master_workbook))
+                Path(master_workbook).parent.mkdir(parents=True, exist_ok=True)
+                Path(master_workbook).write_bytes(b"generated")
+                return {"master": str(master_workbook)}
+
+            stub = mock.Mock(update_master_workbook=fake_update)
+            with mock.patch.dict(sys.modules, {"update_gdfire_data": stub}):
+                result = self.train.ensure_master_workbook({"masterWorkbook": master})
+
+            self.assertEqual(master, result)
+            self.assertTrue(master.is_file())
+            self.assertEqual([master], calls)
+
+    def test_existing_master_is_used_without_generating(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            master = Path(folder) / "总表.xlsx"
+            master.write_bytes(b"local")
+            stub = mock.Mock()
+            with mock.patch.dict(sys.modules, {"update_gdfire_data": stub}):
+                result = self.train.ensure_master_workbook({"masterWorkbook": master})
+            self.assertEqual(master, result)
+            stub.update_master_workbook.assert_not_called()
+
+    def test_explicit_missing_input_is_not_silently_replaced(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            missing = Path(folder) / "指定输入.xlsx"
+            stub = mock.Mock()
+            with mock.patch.dict(sys.modules, {"update_gdfire_data": stub}):
+                with self.assertRaisesRegex(FileNotFoundError, "指定的预测输入工作簿不存在"):
+                    self.train.ensure_master_workbook(
+                        {"masterWorkbook": Path(folder) / "总表.xlsx"}, missing
+                    )
+            stub.update_master_workbook.assert_not_called()
 
 
 if __name__ == "__main__":

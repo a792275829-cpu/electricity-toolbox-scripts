@@ -69,16 +69,23 @@ def validate_runtime_assets(source: Path) -> None:
             raise FileNotFoundError(f"打包缺少必需功能资源或文件为空：{relative}")
 
 
-def prepare_forecast_seed(defaults: Path, workbook: Path | None = None) -> Path:
-    """Ship a byte-preserving initial workbook; never manage users' live data."""
+def prepare_forecast_seed(defaults: Path, workbook: Path | None = None) -> Path | None:
+    """Ship a byte-preserving initial workbook when one is available.
+
+    The seed is optional: without it the app builds the master workbook from the
+    grid API on first run (``update_gdfire_data.update_master_workbook``).
+    Explicitly requested workbooks must exist and stay valid.
+    """
     from migrate_forecast_data import copy_atomic, resolve_paths
     from openpyxl import load_workbook
 
+    explicit = workbook is not None
     if workbook is None:
         configured = os.environ.get("FORECAST_MASTER_WORKBOOK")
         url = os.environ.get("FORECAST_MASTER_URL")
         if configured:
             workbook = Path(configured).expanduser()
+            explicit = True
         elif url:
             expected = os.environ.get("FORECAST_MASTER_SHA256", "")
             if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
@@ -86,11 +93,20 @@ def prepare_forecast_seed(defaults: Path, workbook: Path | None = None) -> Path:
             workbook = build_support.download(
                 url, ROOT / "dist/tauri-build/forecast" / expected / "master.xlsx", expected,
             )
+            explicit = True
         else:
-            workbook = resolve_paths(ROOT / "广东电价预测")["masterWorkbook"]
+            try:
+                workbook = resolve_paths(ROOT / "广东电价预测")["masterWorkbook"]
+            except Exception:
+                workbook = None
+    if workbook is None or not Path(workbook).is_file():
+        if explicit:
+            raise FileNotFoundError(
+                f"指定的预测总数据表不存在：{workbook}；"
+                "或去掉 --forecast-workbook 让首次运行自动生成"
+            )
+        return None
     workbook = Path(workbook)
-    if not workbook.is_file():
-        raise FileNotFoundError("打包缺少电价预测总数据表，请提供 --forecast-workbook 或 FORECAST_MASTER_WORKBOOK")
     book = load_workbook(workbook, read_only=True, data_only=True)
     try:
         sheet = book["整合数据"] if "整合数据" in book.sheetnames else book.worksheets[0]
@@ -194,7 +210,11 @@ def prepare(target: str, runtime_from: Path | None = None, forecast_workbook: Pa
     validate_runtime_assets(source)
     defaults = payload / "defaults"
     prepare_defaults(source, defaults)
-    prepare_forecast_seed(defaults, forecast_workbook)
+    if prepare_forecast_seed(defaults, forecast_workbook) is None:
+        print(
+            "未内置电价预测总表：首次运行时按模块配置的 initialDate 自动生成。",
+            flush=True,
+        )
     runtime = payload / "runtime"
     marker = runtime / "target.txt"
     if not marker.is_file() or marker.read_text() != target:
