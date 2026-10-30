@@ -793,6 +793,12 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     const flowArrowsG = document.getElementById('flowArrows');
     const flowMotionPreference = matchMedia('(prefers-reduced-motion: reduce)');
     const activeFlowItems = [];
+    const flowLineLengths = DATA.edges.map(edge => {{
+      const length = Math.max(1, Math.hypot(edge.x2-edge.x1, edge.y2-edge.y1));
+      return Math.max(1, length - Math.min(12, length * .2) * 2);
+    }}).sort((a,b) => a-b);
+    const flowReferenceLength = flowLineLengths.length
+      ? (flowLineLengths[Math.floor((flowLineLengths.length-1)/2)] + flowLineLengths[Math.floor(flowLineLengths.length/2)]) / 2 : 1;
     let flowAnimationFrame = 0, flowMotionRunning = false, flowLastFrame = 0, flowClock = 370;
     function renderFlowPackets() {{
       activeFlowItems.forEach(item => {{
@@ -855,6 +861,8 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         const angle = Math.atan2(dy, dx) * 180 / Math.PI;
         item.route.setAttribute('transform', `translate(${{startX + dx * inset}} ${{startY + dy * inset}}) rotate(${{angle}})`);
         item.routeLength = routeLength;
+        // Length-based speed with a square-root scale keeps long routes readable.
+        item.speed = .065 * (edge.is_section ? .4 : .8) * Math.sqrt(routeLength / flowReferenceLength);
         item.direction = direction;
       }}
       item.time = time;
@@ -937,7 +945,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         if (event.key === 'Enter' || event.key === ' ') activate(event);
       }});
       flowArrowsG.appendChild(group);
-      flowArrowItems.set(edge.edge, {{ group, title, hit, line, route, packets, speed:.065 * (edge.is_section ? .4 : .8), bounds:[Math.min(edge.x1,edge.x2),Math.min(edge.y1,edge.y2),Math.max(edge.x1,edge.x2),Math.max(edge.y1,edge.y2)] }});
+      flowArrowItems.set(edge.edge, {{ group, title, hit, line, route, packets, bounds:[Math.min(edge.x1,edge.x2),Math.min(edge.y1,edge.y2),Math.max(edge.x1,edge.x2),Math.max(edge.y1,edge.y2)] }});
       resetFlowArrow(edge);
     }});
 
