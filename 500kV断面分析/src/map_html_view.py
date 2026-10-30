@@ -253,8 +253,8 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     }}
     .flow-arrow-line {{ stroke:#087ca7; stroke-width:1.3; opacity:.3; pointer-events:none; vector-effect:non-scaling-stroke; }}
     .flow-packet {{ color:#0069d8; pointer-events:none; }}
-    .flow-packet path {{ fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }}
-    .flow-packet .flow-tail {{ opacity:.42; stroke-width:1.2; }}
+    .flow-packet path {{ fill:none; stroke:currentColor; stroke-width:2.25; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }}
+    .flow-packet .flow-tail {{ opacity:.42; stroke-width:1.8; }}
     .flow-arrow:hover .flow-packet,.flow-arrow:focus-visible .flow-packet {{ color:#ed6600; }}
     .flow-arrow.context-dimmed {{ opacity:.14; }}
     @media (prefers-reduced-motion:reduce) {{ .flow-packet {{ opacity:1!important; }} }}
@@ -929,9 +929,9 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         const packet = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         packet.setAttribute('class', 'flow-packet');
         const tail = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        tail.setAttribute('d', 'M -9 -2.5 L -6 0 L -9 2.5');tail.setAttribute('class', 'flow-tail');
+        tail.setAttribute('d', 'M -13.5 -3.75 L -9 0 L -13.5 3.75');tail.setAttribute('class', 'flow-tail');
         const head = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        head.setAttribute('d', 'M -3.5 -2.5 L 0 0 L -3.5 2.5');head.setAttribute('class', 'flow-head');
+        head.setAttribute('d', 'M -5.25 -3.75 L 0 0 L -5.25 3.75');head.setAttribute('class', 'flow-head');
         packet.append(tail,head);route.append(packet);
         return {{element:packet}};
       }});
