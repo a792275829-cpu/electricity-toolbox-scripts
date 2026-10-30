@@ -253,8 +253,8 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     }}
     .flow-arrow-line {{ stroke:#087ca7; stroke-width:1.3; opacity:.3; pointer-events:none; vector-effect:non-scaling-stroke; }}
     .flow-packet {{ color:#0069d8; pointer-events:none; }}
-    .flow-packet path {{ fill:none; stroke:currentColor; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }}
-    .flow-packet .flow-tail {{ opacity:.42; stroke-width:2.4; }}
+    .flow-packet path {{ fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }}
+    .flow-packet .flow-tail {{ opacity:.42; stroke-width:1.2; }}
     .flow-arrow:hover .flow-packet,.flow-arrow:focus-visible .flow-packet {{ color:#ed6600; }}
     .flow-arrow.context-dimmed {{ opacity:.14; }}
     @media (prefers-reduced-motion:reduce) {{ .flow-packet {{ opacity:1!important; }} }}
@@ -805,9 +805,9 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         const box = item.bounds;
         if (box[0]*view.scale+view.x > mapCanvas.width || box[2]*view.scale+view.x < 0 ||
             box[1]*view.scale+view.y > mapCanvas.height || box[3]*view.scale+view.y < 0) return;
-        const phase = flowClock * item.speed / item.routeLength;
+        const phase = flowClock * item.speed / item.routeLength + (item.phaseOffset || 0);
         item.packets.forEach((packet,index) => {{
-          const offset = ((phase + index/item.packets.length) % 1) * item.routeLength;
+          const offset = (((phase + index/item.packets.length) % 1 + 1) % 1) * item.routeLength;
           packet.element.setAttribute('transform', `translate(${{offset.toFixed(2)}} 0)`);
         }});
       }});
@@ -862,9 +862,15 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         item.route.setAttribute('transform', `translate(${{startX + dx * inset}} ${{startY + dy * inset}}) rotate(${{angle}})`);
         item.routeLength = routeLength;
         // Length-based speed with a square-root scale keeps long routes readable.
-        item.speed = .065 * (edge.is_section ? .4 : .8) * Math.sqrt(routeLength / flowReferenceLength);
+
         item.direction = direction;
       }}
+      const priceIndex = DATA.time_headers.indexOf(time);
+      const gap = Math.abs(nodeByName.get(edge.a).prices[priceIndex] - nodeByName.get(edge.b).prices[priceIndex]);
+      const congestionFactor = edge.is_section ? Math.max(.25, 1 / (1 + gap / 200)) : 1;
+      const nextSpeed = .065 * (edge.is_section ? .4 : .8) * .8 * Math.sqrt(item.routeLength / flowReferenceLength) * congestionFactor;
+      if (item.speed != null && item.routeLength) item.phaseOffset = ((item.phaseOffset || 0) + flowClock * (item.speed - nextSpeed) / item.routeLength) % 1;
+      item.speed = nextSpeed;
       item.time = time;
       item.title.textContent = `${{time}}｜${{direction}}`;
       item.group.dataset.direction = direction;
@@ -923,9 +929,9 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         const packet = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         packet.setAttribute('class', 'flow-packet');
         const tail = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        tail.setAttribute('d', 'M -18 -5 L -12 0 L -18 5');tail.setAttribute('class', 'flow-tail');
+        tail.setAttribute('d', 'M -9 -2.5 L -6 0 L -9 2.5');tail.setAttribute('class', 'flow-tail');
         const head = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        head.setAttribute('d', 'M -7 -5 L 0 0 L -7 5');head.setAttribute('class', 'flow-head');
+        head.setAttribute('d', 'M -3.5 -2.5 L 0 0 L -3.5 2.5');head.setAttribute('class', 'flow-head');
         packet.append(tail,head);route.append(packet);
         return {{element:packet}};
       }});
