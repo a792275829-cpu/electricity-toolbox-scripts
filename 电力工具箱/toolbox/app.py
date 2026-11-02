@@ -298,7 +298,11 @@ class ToolboxApp(tk.Tk):
             # Sizing that must settle before the page is painted once.
             prepare()
         page.grid()
-        page.tkraise()
+        # Only restack when something else is still mapped (the loading frame or
+        # the dashboard): raising a lone child repaints it for nothing.
+        if any(child.winfo_ismapped() for child in page.master.winfo_children()
+               if child is not page):
+            page.tkraise()
         self.page_viewport.reset()
         self._visible_page = page
         show = getattr(page, "on_navigation_shown", None)

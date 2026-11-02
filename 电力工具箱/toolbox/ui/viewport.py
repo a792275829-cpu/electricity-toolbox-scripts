@@ -60,8 +60,11 @@ class Viewport(ttk.Frame):
             self._refresh_id = self.after_idle(self.refresh)
 
     def reset(self) -> None:
-        self.canvas.xview_moveto(0)
-        self.canvas.yview_moveto(0)
+        # moveto 在已经归位时仍然会让画布重绘一遍窗口项，先判断再移动。
+        if self.canvas.xview()[0] != 0.0:
+            self.canvas.xview_moveto(0)
+        if self.canvas.yview()[0] != 0.0:
+            self.canvas.yview_moveto(0)
 
     def _contains(self, widget) -> bool:
         while widget is not None:
