@@ -76,6 +76,24 @@ class MinimumWindowLayoutTests(unittest.TestCase):
         self.assertEqual(view.horizontal.winfo_manager(), "")
         self.assertEqual(view.vertical.winfo_manager(), "")
 
+    def test_common_window_needs_no_scrollbar_so_switching_stays_off_the_clipped_canvas(self):
+        app = self.app
+        app.geometry("1360x820")
+        app.update()
+        view = app.page_viewport
+        if view.canvas.winfo_height() < 780 or view.canvas.winfo_width() < 820:
+            self.skipTest("当前屏幕放不下 1360x820 窗口，无法验证常见笔记本尺寸")
+        for name in PAGE_NAMES:
+            with self.subTest(page=name):
+                app.show_page(name)
+                app.update()
+                # 页面一旦超出视口就必须滚动，切换会走 Tk 裁剪画布的重绘路径
+                # （实测约为完整显示时的 3 倍），因此常见窗口下应全部放得下。
+                self.assertEqual(view.vertical.winfo_manager(), "",
+                                 f"{name} 需要纵向滚动条")
+                self.assertEqual(view.horizontal.winfo_manager(), "",
+                                 f"{name} 需要横向滚动条")
+
     def test_small_display_caps_window_and_keeps_overflow_scrollable(self):
         app = self.app
         with patch.object(app, "winfo_screenwidth", return_value=1200), \

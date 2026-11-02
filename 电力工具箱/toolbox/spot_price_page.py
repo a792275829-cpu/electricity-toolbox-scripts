@@ -62,19 +62,19 @@ class SpotPriceUpdatePage(ToolPage):
         self.overwrite = tk.BooleanVar(master=self, value=True)
         self.create_backup = tk.BooleanVar(master=self, value=False)
 
-        form = ttk.LabelFrame(self.content, text="更新设置", padding=12)
+        form = ttk.LabelFrame(self.content, text="更新设置", padding=10)
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
-        ttk.Label(form, text="开始日期").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(form, text="开始日期").grid(row=0, column=0, sticky="w", pady=3)
         DateInput(form, textvariable=self.start_date, width=16).grid(
-            row=0, column=1, sticky="w", pady=4
+            row=0, column=1, sticky="w", pady=3
         )
-        ttk.Label(form, text="结束日期").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=4)
+        ttk.Label(form, text="结束日期").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=3)
         DateInput(form, textvariable=self.end_date, width=16).grid(
-            row=0, column=3, sticky="w", padx=(8, 0), pady=4
+            row=0, column=3, sticky="w", padx=(8, 0), pady=3
         )
         ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
-            row=0, column=4, sticky="w", padx=(8, 0), pady=4
+            row=0, column=4, sticky="w", padx=(8, 0), pady=3
         )
 
         self.guihu_button = add_path_row(
@@ -103,7 +103,7 @@ class SpotPriceUpdatePage(ToolPage):
         )
 
         stations = ttk.Frame(form)
-        stations.grid(row=4, column=0, columnspan=5, sticky="w", pady=(7, 0))
+        stations.grid(row=4, column=0, columnspan=5, sticky="w", pady=(5, 0))
         ttk.Label(stations, text="更新场站：").pack(side="left")
         self.station_checkbuttons = []
         for label, variable in self.selected_stations.items():
@@ -112,14 +112,14 @@ class SpotPriceUpdatePage(ToolPage):
             self.station_checkbuttons.append(button)
 
         options = ttk.Frame(form)
-        options.grid(row=5, column=0, columnspan=5, sticky="w", pady=(7, 0))
+        options.grid(row=5, column=0, columnspan=5, sticky="w", pady=(5, 0))
         SettingCheckbutton(options, text="覆盖已有非空价格", variable=self.overwrite).pack(anchor="w")
         SettingCheckbutton(options, text="写入前生成时间戳备份", variable=self.create_backup).pack(
             anchor="w", pady=(4, 0)
         )
 
-        mapping = ttk.LabelFrame(self.content, text="固定映射", padding=12)
-        mapping.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        mapping = ttk.LabelFrame(self.content, text="固定映射", padding=10)
+        mapping.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(
             mapping,
             text=(
@@ -133,6 +133,9 @@ class SpotPriceUpdatePage(ToolPage):
             justify="left",
         ).grid(row=0, column=0, sticky="w")
 
+        # Keep the form inside the viewport: a page taller than the canvas sends
+        # every switch through Tk's clipped-canvas repaint (measured ~3x).
+        self.log_text.configure(height=8)
         self.update_button = ttk.Button(self.actions, text="抓取并更新", command=self.start_update)
         self.update_button.pack(side="left")
         self.register_busy_widgets(

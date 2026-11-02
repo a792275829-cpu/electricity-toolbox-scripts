@@ -71,7 +71,11 @@ class DailyPdfParserPage(ToolPage):
         )
         notes = ttk.LabelFrame(self.content, text="输出说明", padding=10)
         notes.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        ttk.Label(
+        # A fixed wraplength wider than the viewport adds a horizontal scrollbar,
+        # and any scrollbar puts every switch on Tk's clipped-canvas repaint
+        # (measured ~3x). Track the real width instead.
+        self._notes_wraplength = 700
+        notes_label = ttk.Label(
             notes,
             text=(
                 "从日前申报信息表读取汇总值，按报价分布图的颜色覆盖率估算燃煤、燃气、新能源容量。"
@@ -79,11 +83,19 @@ class DailyPdfParserPage(ToolPage):
                 "默认将源 PDF 上传至“现货交易日报”，Excel 上传至“报价容量数据”，两项均按 PDF 报告日期匹配。"
                 "仅上传可重试已有文件；上传失败时保留本地解析结果。账号使用任务中心的清能网站配置。"
             ),
-            wraplength=820,
-        ).pack(anchor="w")
+            wraplength=self._notes_wraplength,
+        )
+        notes_label.pack(anchor="w")
+        notes.bind("<Configure>", lambda event: self._resize_notes(event, notes_label))
 
         self.register_busy_widgets(self.run_button, pdf_button, output_button, *mode_buttons)
         self.append_log("请选择广东运行日报 PDF。")
+
+    def _resize_notes(self, event, label) -> None:
+        wraplength = max(240, event.width - 40)
+        if abs(wraplength - self._notes_wraplength) > 8:
+            self._notes_wraplength = wraplength
+            label.configure(wraplength=wraplength)
 
     def _update_mode(self, *_args) -> None:
         self.run_button.configure(text={"both": "解析并上传", "parse": "开始解析", "upload": "上传已有文件"}[self.mode.get()])
