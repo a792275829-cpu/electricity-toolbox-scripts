@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 import tkinter as tk
 import unittest
 import zipfile
@@ -289,6 +290,15 @@ class PowerBenefitPageTests(unittest.TestCase):
             app.show_page("功率调整收益统计表更新")
             app.update()
             page=app.pages["功率调整收益统计表更新"]
+            # 日志行数适配在切换后的空闲回调里完成，慢速机器上要多让几轮事件。
+            previous=None
+            for _ in range(40):
+                app.update()
+                current=(page.winfo_reqheight(),app.page_viewport.vertical.winfo_manager())
+                if current==previous:
+                    break
+                previous=current
+                time.sleep(.02)
             # 页面一旦高于视口就必须滚动，切换会走 Tk 裁剪画布的重绘路径
             # （实测约 3 倍）；日志面板会先让出行数，保证表单放得下。
             self.assertLessEqual(page.winfo_reqheight(),app.page_viewport.canvas.winfo_height())

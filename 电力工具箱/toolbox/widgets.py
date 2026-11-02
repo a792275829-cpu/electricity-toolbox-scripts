@@ -136,6 +136,9 @@ class ToolPage(ttk.Frame):
         """
         self._fit_description()
         self._fit_log_console(force=True)
+        # 首次适配发生在页面还没排完版的时候，描述换行和行高会再变一次；
+        # 等这一轮布局结束再收缩一遍，避免字体／主题差异留下几像素溢出。
+        self._queue_log_fit()
         if self._log_fit_binding is None:
             self._log_fit_binding = self.winfo_toplevel().bind(
                 "<Configure>", self._queue_log_fit, add="+")
@@ -172,7 +175,9 @@ class ToolPage(ttk.Frame):
         viewport = getattr(self.winfo_toplevel(), "page_viewport", None)
         if viewport is None:
             return
-        available = viewport.canvas.winfo_height()
+        # 留 2 像素余量：字体回退或主题差异会让实际行高比估算略大，正好卡在
+        # 视口高度上时多余的一点高度会触发整页滚动。
+        available = viewport.canvas.winfo_height() - 2
         if available <= 1:
             return
         if self.winfo_reqheight() <= 1:
@@ -188,12 +193,14 @@ class ToolPage(ttk.Frame):
         fixed = self.winfo_reqheight() - text_height - self.LOG_PANEL_GAP
         desired = int((available - fixed) / line_height)
         desired = max(self.LOG_MIN_LINES, min(self.LOG_MAX_LINES, desired))
-        if desired == lines or (desired > lines and not allow_grow):
+        if desired > lines and not allow_grow:
+            return
+        if desired == lines and self.winfo_reqheight() <= available:
             return
         self._fitting_log = True
         try:
             # 逐次收敛：滚动态和日志行数会互相影响，算出来仍超出时再让一行。
-            for _ in range(4):
+            for _ in range(6):
                 text.configure(height=desired)
                 self.update_idletasks()
                 if desired <= self.LOG_MIN_LINES:
