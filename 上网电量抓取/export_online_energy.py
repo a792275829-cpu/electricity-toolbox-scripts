@@ -362,11 +362,14 @@ def number_or_zero(value: Any) -> float:
         return 0.0
 
 
-def online_energy_hours(values, *, label: str) -> tuple[float, ...]:
+def online_energy_hours(values, *, label: str, allow_empty: bool = False) -> tuple[float | None, ...]:
     if not isinstance(values, list) or len(values) != 24:
         raise ValueError(f"{label} 应有完整24个小时电量，实际为 {len(values) if isinstance(values, list) else 0} 个，停止导出。")
     result = []
     for hour, raw in enumerate(values):
+        if raw is None and allow_empty:
+            result.append(None)
+            continue
         try:
             value = float(raw)
         except (TypeError, ValueError):
@@ -417,6 +420,8 @@ def fetch_qingyuan_rows(context, run_date: str, tenant_id: str) -> list[dict[str
         hours[hour] = row["valueMap"]
     if len(hours) != 24:
         raise ValueError("清远上网电量不足24个小时，停止导出。")
+    if any(field not in values for values in hours.values() for field in columns.values()):
+        raise ValueError("清远上网电量数据字段缺失，停止导出。")
     return [{"unitId": unit_id, "runDate": run_date,
              "onlineEle": [hours[f"{i:02d}:00"].get(field) for i in range(24)]}
             for unit_id, field in columns.items()]
@@ -496,7 +501,11 @@ def collect_detail_rows(run_date: str, config: Config) -> list[dict[str, Any]]:
                     unit_id = str(item.get("unitId") or "")
                     unit_name = unit_names.get(unit_id, unit_id or "未知机组")
                     values = online_energy_hours(item.get("onlineEle"),
-                        label=f"{run_date} {company_name} / {unit_name}")
+                        label=f"{run_date} {company_name} / {unit_name}",
+                        allow_empty=company_name == "清远电厂")
+                    missing_hours = sum(value is None for value in values)
+                    if missing_hours:
+                        log(f"  提示：{company_name} / {unit_name} 有 {missing_hours} 个时段实际上网电量未填报，导出为空白。")
                     for hour, value in enumerate(values):
                         detail_rows.append(
                             {

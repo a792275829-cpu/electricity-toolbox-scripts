@@ -103,3 +103,26 @@ class OnlineEnergyOutputTests(unittest.TestCase):
             rows[-1]["time"] = rows[0]["time"]
             with self.assertRaisesRegex(ValueError, "重复"):
                 self.module.fetch_qingyuan_rows(context, "2026-10-28", "tenant")
+
+    def test_qingyuan_unreported_values_stay_blank_and_other_values_remain(self):
+        import openpyxl
+
+        values = self.module.online_energy_hours([None, 0, 12.5] + [None] * 21,
+                                                 label="清远", allow_empty=True)
+        with self.assertRaisesRegex(ValueError, "缺失或无效"):
+            self.module.online_energy_hours([None] * 24, label="其他电厂")
+        with self.assertRaisesRegex(ValueError, "缺失或无效"):
+            self.module.online_energy_hours(["无效"] * 24, label="清远", allow_empty=True)
+        rows = [{"company": "清远电厂", "unit": "清远#1、#2机", "time": f"{hour:02d}:00", "onlineEle": value}
+                for hour, value in enumerate(values)]
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.module.save_excel("2026-11-01", rows, Path(folder))
+            workbook = openpyxl.load_workbook(path)
+            try:
+                sheet = workbook["汇总"]
+                self.assertIsNone(sheet["A3"].value)
+                self.assertEqual(sheet["A4"].value, 0)
+                self.assertEqual(sheet["A5"].value, 12.5)
+                self.assertEqual(sheet["A3"].number_format, "General")
+            finally:
+                workbook.close()
