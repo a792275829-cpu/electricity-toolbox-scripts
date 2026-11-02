@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import tkinter as tk
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -88,6 +89,9 @@ class ToolboxApp(tk.Tk):
         self._loading_frame = None
         self._navigation_generation = 0
         self._constructing_page = None
+        self.navigation_timings: list[dict[str, object]] = []
+        self._nav_started_at: float | None = None
+        self._nav_cold = False
         self._page_loading_suspended = False
         self.status_var = tk.StringVar(master=self, value="就绪")
         injected = page_factories is not None
@@ -184,7 +188,8 @@ class ToolboxApp(tk.Tk):
         self.credentials_panel = CredentialsPanel(right_rail, self.paths.workspace)
         self.credentials_panel.grid(row=2, column=0, sticky="ew")
         ttk.Separator(right_rail, orient="horizontal").grid(row=3, column=0, sticky="ew")
-        self.diagnostic_center = DiagnosticCenterPanel(right_rail, self.paths)
+        self.diagnostic_center = DiagnosticCenterPanel(
+            right_rail, self.paths, navigation_summary=self.navigation_summary)
         self.diagnostic_center.grid(row=4, column=0, sticky="ew")
         if not self._lazy_pages:
             for name in PAGE_NAMES:
@@ -322,6 +327,7 @@ class ToolboxApp(tk.Tk):
             raise KeyError(f"未知页面：{name}")
         if self._page_loading_suspended:
             return
+        self._begin_navigation_timing(name)
         if name == "今日概览" or name in self.pages:
             self.show_page(name)
             return
@@ -399,6 +405,45 @@ class ToolboxApp(tk.Tk):
         self.current_page = name
         self.status_var.set(f"当前功能：{name}")
         self._select_navigation(name)
+        self._finish_navigation_timing(name)
+
+    def _begin_navigation_timing(self, name: str) -> None:
+        """Record the click so the diagnostics panel can show real open times."""
+        self._nav_started_at = time.perf_counter()
+        self._nav_cold = name not in self.pages
+
+    def _finish_navigation_timing(self, name: str) -> None:
+        started = self._nav_started_at
+        if started is None:
+            return
+        self._nav_started_at = None
+        cold = self._nav_cold
+
+        def record() -> None:
+            entry = {
+                "module": name,
+                "cold": cold,
+                "ms": round((time.perf_counter() - started) * 1000, 1),
+                "window": f"{self.winfo_width()}x{self.winfo_height()}",
+            }
+            self.navigation_timings.append(entry)
+            del self.navigation_timings[:-20]
+
+        # 一帧之后回调，量到的是"点击到画完"而不是只到 Python 处理完。
+        self.after(1, record)
+
+    def navigation_summary(self) -> str:
+        entries = [item for item in self.navigation_timings if isinstance(item, dict)]
+        if not entries:
+            return "模块切换：暂无记录"
+        recent = entries[-8:]
+        values = sorted(float(item["ms"]) for item in recent)
+        median = values[len(values) // 2]
+        slowest = max(recent, key=lambda item: float(item["ms"]))
+        cold = sum(1 for item in recent if item.get("cold"))
+        return (f"模块切换：最近 {len(recent)} 次中位 {median:.0f}ms · 最慢 {float(slowest['ms']):.0f}ms"
+                f"（{slowest['module']}，{'首次' if slowest.get('cold') else '再次'}）"
+                f" · 其中 {cold} 次为首次打开")
 
     def _set_nav_style(self, name: str, style: str) -> None:
         if self.surface_cache is not None:

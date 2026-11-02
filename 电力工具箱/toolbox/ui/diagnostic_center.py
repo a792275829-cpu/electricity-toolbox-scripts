@@ -23,9 +23,10 @@ _STATUS_ICON = {
 class DiagnosticCenterPanel(ttk.Frame):
     """常驻右侧的只读运行诊断摘要，不介入任何业务脚本。"""
 
-    def __init__(self, parent: tk.Misc, paths: ToolPaths) -> None:
+    def __init__(self, parent: tk.Misc, paths: ToolPaths, *, navigation_summary=None) -> None:
         super().__init__(parent, padding=(12, 10))
         self.paths = paths
+        self.navigation_summary = navigation_summary
         self.report: DiagnosticReport | None = None
         self._visible_checks: list[DiagnosticCheck] = []
 
@@ -40,6 +41,10 @@ class DiagnosticCenterPanel(ttk.Frame):
             anchor="w", pady=(8, 2)
         )
         ttk.Label(self, textvariable=self.summary_var, style="Muted.TLabel").pack(anchor="w")
+        self.nav_var = tk.StringVar(self, "")
+        if navigation_summary is not None:
+            ttk.Label(self, textvariable=self.nav_var, style="Muted.TLabel",
+                      wraplength=250, justify="left").pack(anchor="w", pady=(4, 0))
 
         self.checks_frame = ttk.Frame(self)
         self.checks_frame.columnconfigure(0, weight=1)
@@ -94,6 +99,9 @@ class DiagnosticCenterPanel(ttk.Frame):
         else:
             self.health_var.set("✓ 未发现问题")
         self.summary_var.set(f"{warnings} 提醒 · {errors} 异常  ·  {report.generated_at:%H:%M}" if warnings or errors else f"检查于 {report.generated_at:%H:%M}")
+
+        if self.navigation_summary is not None:
+            self.nav_var.set(self.navigation_summary())
 
         issues = [*report.errors, *report.warnings]
         self._visible_checks = issues

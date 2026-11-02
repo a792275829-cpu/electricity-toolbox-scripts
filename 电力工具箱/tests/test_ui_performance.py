@@ -235,6 +235,32 @@ class UiRefreshTests(unittest.TestCase):
         self.root = app
         return app, list(app.nav_buttons)
 
+    def test_navigation_timings_feed_the_diagnostics_summary(self):
+        app, names = self._navigation_app()
+        # 首个模块启动时已经显示，request_page 会直接返回，不产生记录。
+        targets = [name for name in names if name != app.current_page][:3]
+        for name in targets:
+            app.request_page(name)
+            deadline = time.monotonic() + 2
+            while app._pending_page is not None and time.monotonic() < deadline:
+                app.update()
+                time.sleep(.01)
+            for _ in range(4):
+                app.update()
+                time.sleep(.01)
+        self.assertEqual(3, len(app.navigation_timings))
+        self.assertTrue(all(item["ms"] >= 0 for item in app.navigation_timings))
+        self.assertTrue(all(item["cold"] is True for item in app.navigation_timings))
+        summary = app.navigation_summary()
+        self.assertIn("模块切换", summary)
+        self.assertIn("首次", summary)
+        # 再次切回应记为非首次
+        app.request_page(targets[0])
+        for _ in range(6):
+            app.update()
+            time.sleep(.01)
+        self.assertFalse(app.navigation_timings[-1]["cold"])
+
     def test_frequent_switching_does_not_accumulate_timers_or_pages(self):
         app, names = self._navigation_app()
         for _ in range(20):
