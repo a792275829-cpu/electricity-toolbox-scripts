@@ -10,8 +10,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .file_dialogs import FileDialogState
-from .page_support import DateInput, DATE_INPUT_ERROR, DATE_INPUT_HINT, parse_date_input
-from .page_support import add_path_row, open_directory
+from .page_support import DATE_INPUT_ERROR, add_date_row, add_path_row, open_directory, parse_date_input
 from .runtime import TaskRegistry, ToolPaths, python_executable
 from .widgets import ToolPage
 
@@ -37,24 +36,26 @@ class PowerBenefitUpdatePage(ToolPage):
         form = ttk.LabelFrame(self.content, text="更新设置", padding=8)
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
+        add_date_row(
+            form, row=0, start_variable=self.start_date, end_variable=self.end_date,
+            end_label="截止日期 D")
         buttons = []
         for index, station in enumerate(("归湖", "鮀莲", "海风")):
             buttons.append(add_path_row(
-                form, row=index, label=f"{station}工作簿", variable=self.workbooks[index],
+                form, row=1 + index, label=f"{station}工作簿", variable=self.workbooks[index],
                 command=lambda i=index: self.choose_workbook(i), button_text="选择文件"))
-            OptionCheckbutton(form, text="更新", variable=self.selected[index]).grid(
-                row=index, column=3, padx=(8, 0))
-        # 两个日期并排，避免多占一行把页面顶出视口（超出后每次切换都要整幅重绘）
-        ttk.Label(form, text="开始日期").grid(row=3, column=0, sticky="w", pady=3)
-        DateInput(form, textvariable=self.start_date, width=16).grid(
-            row=3, column=1, sticky="w", pady=3)
-        ttk.Label(form, text="截止日期 D").grid(row=3, column=2, sticky="w", padx=(16, 0), pady=3)
-        DateInput(form, textvariable=self.end_date, width=16).grid(
-            row=3, column=3, sticky="w", padx=(8, 0), pady=3)
-        ttk.Label(form, text="海风覆盖必须填写开始日期；其他场站留空检查历史空白；" + DATE_INPUT_HINT,
-                  style="Muted.TLabel").grid(row=4, column=0, columnspan=4, sticky="w", pady=3)
+        stations = ttk.Frame(form)
+        stations.grid(row=4, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        ttk.Label(stations, text="更新场站：").pack(side="left")
+        self.station_checkbuttons = []
+        for index, station in enumerate(("归湖", "鮀莲", "海风")):
+            button = OptionCheckbutton(stations, text=station, variable=self.selected[index])
+            button.pack(side="left", padx=(0, 12))
+            self.station_checkbuttons.append(button)
+        ttk.Label(stations, text="海风覆盖必须填写开始日期；其他场站留空检查历史空白",
+                  style="Muted.TLabel").pack(side="left", padx=(16, 0))
         SettingCheckbutton(form, text="写入前生成时间戳备份", variable=self.create_backup).grid(
-            row=5, column=0, columnspan=3, sticky="w", pady=3)
+            row=5, column=0, columnspan=3, sticky="w", pady=(5, 0))
         mapping = ttk.LabelFrame(self.content, text="更新口径", padding=8)
         mapping.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(mapping, text=(
@@ -72,7 +73,7 @@ class PowerBenefitUpdatePage(ToolPage):
         # clipped-canvas repaint (measured ~3x): 10 log lines push this form to
         # 816 px against ~790 px of space. Two fewer lines keep it in view.
         self.log_text.configure(height=8)
-        self.register_busy_widgets(*buttons, self.update_button)
+        self.register_busy_widgets(*buttons, *self.station_checkbuttons, self.update_button)
 
     def choose_workbook(self, index: int) -> None:
         key = f"power_benefit_{index}"

@@ -10,8 +10,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .file_dialogs import FileDialogState
-from .page_support import DateInput, DATE_INPUT_ERROR, DATE_INPUT_HINT, parse_date_input
-from .page_support import add_path_row
+from .page_support import DATE_INPUT_ERROR, add_date_row, add_path_row, parse_date_input
 from .runtime import TaskRegistry, ToolPaths, python_executable
 from .widgets import ToolPage
 
@@ -65,16 +64,8 @@ class SpotPriceUpdatePage(ToolPage):
         form = ttk.LabelFrame(self.content, text="更新设置", padding=8)
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
-        ttk.Label(form, text="开始日期").grid(row=0, column=0, sticky="w", pady=3)
-        DateInput(form, textvariable=self.start_date, width=16).grid(
-            row=0, column=1, sticky="w", pady=3
-        )
-        ttk.Label(form, text="结束日期").grid(row=0, column=2, sticky="w", padx=(16, 0), pady=3)
-        DateInput(form, textvariable=self.end_date, width=16).grid(
-            row=0, column=3, sticky="w", padx=(8, 0), pady=3
-        )
-        ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
-            row=0, column=4, sticky="w", padx=(8, 0), pady=3
+        add_date_row(
+            form, row=0, start_variable=self.start_date, end_variable=self.end_date
         )
 
         self.guihu_button = add_path_row(
