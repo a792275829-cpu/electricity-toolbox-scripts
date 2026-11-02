@@ -44,6 +44,10 @@ def default_review_folder_for_date(today: date, review_root: Path | None = None)
 
 
 DATE_ROW_GAP = 20
+DATE_FIELD_CHARS = 12
+# 提示文字按固定宽度换行：字体更宽的机器上只会多占一行（日志面板会让出行数），
+# 不会把日期行撑到比视口还宽。
+DATE_HINT_WRAP = 150
 
 
 def add_date_row(parent: ttk.Frame, *, row: int, start_variable: tk.StringVar,
@@ -57,11 +61,14 @@ def add_date_row(parent: ttk.Frame, *, row: int, start_variable: tk.StringVar,
     ttk.Label(parent, text=start_label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=3)
     line = ttk.Frame(parent)
     line.grid(row=row, column=1, sticky="w", pady=3)
-    DateInput(line, textvariable=start_variable, width=16).pack(side="left")
+    # 日期框按 12 个字符取宽（"2026-11-02" 占 10 个），比按 16 个取宽省下两格，
+    # 换到字体更宽的机器上也不会把整行顶出视口宽度。
+    DateInput(line, textvariable=start_variable, width=DATE_FIELD_CHARS).pack(side="left")
     ttk.Label(line, text=end_label).pack(side="left", padx=(DATE_ROW_GAP, 0))
-    DateInput(line, textvariable=end_variable, width=16).pack(side="left", padx=(8, 0))
+    DateInput(line, textvariable=end_variable, width=DATE_FIELD_CHARS).pack(side="left", padx=(8, 0))
     if hint:
-        ttk.Label(line, text=hint, style="Muted.TLabel").pack(side="left", padx=(DATE_ROW_GAP, 0))
+        ttk.Label(line, text=hint, style="Muted.TLabel", wraplength=DATE_HINT_WRAP).pack(
+            side="left", padx=(DATE_ROW_GAP, 0))
     return line
 
 
