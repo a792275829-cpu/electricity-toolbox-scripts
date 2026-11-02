@@ -94,7 +94,7 @@ class ReviewDataGuardsTests(unittest.TestCase):
             target = folder / "上网电量汇总_2026-10-26.xlsx"
             target.write_bytes(b"existing user file")
             cases = [None, [], [1, 2, 3], [0] * 25]
-            cases += [[value] + [0] * 23 for value in (None, "", "-", "nan", "inf", True)]
+            cases += [[value] + [0] * 23 for value in ("", "-", "nan", "inf", True)]
             for values in cases:
                 with self.subTest(values=values), self.assertRaises(ValueError):
                     self.export_online(module, values, folder)

@@ -14,6 +14,25 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class OnlineEnergyOutputTests(unittest.TestCase):
+    def test_qingyuan_plan_columns_preserve_actual_position(self):
+        import openpyxl
+        rows = [{"company": "清远电厂", "unit": unit, "time": f"{hour:02d}:00",
+                 "onlineEle": 10 + col, "planEle": None if hour == 0 else 100 + col,
+                 "planDate": "2027-01-01"}
+                for col, unit in enumerate(("清远#1、#2机", "清远#3、#4机")) for hour in range(24)]
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.module.save_excel("2026-12-30", rows, Path(folder))
+            book = openpyxl.load_workbook(path)
+            try:
+                sheet = book["汇总"]
+                self.assertEqual(sheet["A1"].value, "清远 实际上网电量（万千瓦时）")
+                self.assertIn("2027-01-01 计划电量", sheet["C1"].value)
+                self.assertEqual([sheet.cell(2, c).value for c in range(1, 5)], ["1、2号机", "3、4号机"] * 2)
+                self.assertEqual([sheet.cell(3, c).value for c in range(1, 5)], [10, 11, None, None])
+                self.assertEqual([sheet.cell(4, c).value for c in range(1, 5)], [10, 11, 100, 101])
+            finally:
+                book.close()
+
     def setUp(self):
         self.module = load_module("test_online_energy_output", ToolPaths(ROOT).online_energy)
 
@@ -87,10 +106,11 @@ class OnlineEnergyOutputTests(unittest.TestCase):
 
     def test_qingyuan_api_uses_online_columns_and_checks_hours(self):
         columns = [{"unitId": unit, "fieldKey": f"{unit}_{metric}", "metricType": metric}
-                   for unit in ("a", "b") for metric in ("actualEle", "onlineEle")]
+                   for unit in ("a", "b") for metric in ("actualEle", "onlineEle", "planValue")]
         rows = [{"time": f"{hour:02d}:00", "valueMap": {
             "a_actualEle": 999, "a_onlineEle": hour + 0.7,
             "b_actualEle": 999, "b_onlineEle": 0,
+            "a_planValue": 100, "b_planValue": 55,
         }} for hour in reversed(range(24))]
         context = mock.Mock()
         with mock.patch.object(self.module, "parse_json_response", return_value={"data": {"columnList": columns, "rowList": rows}}):
@@ -98,6 +118,11 @@ class OnlineEnergyOutputTests(unittest.TestCase):
             self.assertEqual(result[0]["onlineEle"][0], 0.7)
             self.assertEqual(result[0]["onlineEle"][-1], 23.7)
             self.assertEqual(result[1]["onlineEle"], [0] * 24)
+            plans = self.module.fetch_qingyuan_rows(context, "2026-10-30", "tenant", metric="planValue")
+            self.assertEqual(plans[0]["onlineEle"], [100] * 24)
+            self.assertEqual(plans[1]["onlineEle"], [55] * 24)
+            self.assertEqual(context.request.get.call_args.kwargs["params"]["runDate"], "2026-10-30")
+            self.module.fetch_qingyuan_rows(context, "2026-10-28", "tenant")
             self.assertEqual(context.request.get.call_args.kwargs["params"], {
                 "runDate": "2026-10-28", "endDate": "2026-10-28", "orgId": "tenant"})
             rows[-1]["time"] = rows[0]["time"]
