@@ -10,6 +10,8 @@
 
 界面日常调试固定使用 `00_启动/源码调试版.command`：直接运行当前 `main` 工作副本及根目录 `.venv`，不复制源码、不打包；窗口标注“源码调试版”并默认打开 WPS 写入页面。Rust 核心沿用源码构建结果；修改 Rust 后先执行 `.venv/bin/python native/price-xlsx/build.py`。开发配置与登录资料继续使用 `~/Library/Application Support/com.electricity.toolbox/development/data/`，与安装版独立；界面代码修改后关闭调试窗口，再双击同一入口重启。
 
+禁止把调试源码复制到正式版用户目录的 `app/` 或已安装 `.app`。正式版提示“检测到本地源码修改”时，按[启动故障恢复约定](docs/startup-recovery.md)备份并恢复发行源码；该文档同时记录后续恢复入口的改进要求。
+
 双击仓库的 `00_启动/Tauri开发版.command`。
 
 首次开发需要 Node 22.23.3、Rust stable、项目根目录 `.venv`。需要 Xcode Command Line Tools；Python 依赖由根目录 `setup_macos.command` 初始化。前端首次执行 `cd desktop && npm ci`。
