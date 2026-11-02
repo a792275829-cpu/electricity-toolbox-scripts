@@ -72,13 +72,18 @@ class UiRefreshTests(unittest.TestCase):
         from toolbox.widgets import ToolPage
 
         page = ToolPage(self.root, registry=self.registry, description="页面说明")
+        # 没有视口时退回事件宽度；换行宽度比控件宽度小一圈，避免说明文字自己
+        # 把页面撑到需要横向滚动条。
         with patch.object(page.description_label, "configure", wraps=page.description_label.configure) as configure:
             page._resize_description(SimpleNamespace(width=608))
             page._resize_description(SimpleNamespace(width=608))
-            configure.assert_called_once_with(wraplength=600)
+            configure.assert_called_once_with(wraplength=564)
             page._resize_description(SimpleNamespace(width=508))
             self.assertEqual(2, configure.call_count)
-        self.assertEqual(500, int(page.description_label.cget("wraplength")))
+            self.assertEqual(464, int(page.description_label.cget("wraplength")))
+            page._resize_description(SimpleNamespace(width=2000))
+        # 宽窗口不再继续放宽，避免说明文字把页面撑得比设计宽度更大。
+        self.assertEqual(820, int(page.description_label.cget("wraplength")))
 
         label = ttk.Label(self.root, wraplength=250)
         with patch.object(label, "configure", wraps=label.configure) as configure:
@@ -229,6 +234,21 @@ class UiRefreshTests(unittest.TestCase):
                                             for name in PAGE_NAMES}, lazy_pages=True)
         self.root = app
         return app, list(app.nav_buttons)
+
+    def test_frequent_switching_does_not_accumulate_timers_or_pages(self):
+        app, names = self._navigation_app()
+        for _ in range(20):
+            for name in names:
+                app.show_page(name)
+                app.update()
+        # 每次切换都必须收尾：定时器不累积、页面不重建（重复切回应复用同一实例）。
+        self.assertLessEqual(len(app.tk.call("after", "info")), 6)
+        self.assertEqual(set(names), set(app.pages))
+        cached = {name: app.pages[name] for name in names}
+        for name in names:
+            app.show_page(name)
+            app.update()
+            self.assertIs(cached[name], app.pages[name])
 
     def _settle_navigation(self, app):
         deadline = time.monotonic() + 2

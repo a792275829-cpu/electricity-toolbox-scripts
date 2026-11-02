@@ -761,6 +761,7 @@ class MarketTableUpdatePage(ToolPage):
 
         self.mapping_text = tk.Text(
             mapping,
+            width=1,
             height=8,
             wrap="word",
             font="TkTextFont",
@@ -870,15 +871,15 @@ class GuangdongPricePage(ToolPage):
         )
         self.training_months = tk.IntVar(master=self, value=0)
 
-        form = ttk.LabelFrame(self.content, text="1. 补齐历史数据总表", padding=12)
+        form = ttk.LabelFrame(self.content, text="1. 补齐历史数据总表", padding=10)
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
-        ttk.Label(form, text="运行日 D").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(form, text="运行日 D").grid(row=0, column=0, sticky="w", pady=3)
         DateInput(form, textvariable=self.run_date, width=16).grid(
-            row=0, column=1, sticky="w", pady=4
+            row=0, column=1, sticky="w", pady=3
         )
         ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
-            row=0, column=2, sticky="w", padx=(8, 0), pady=4
+            row=0, column=2, sticky="w", padx=(8, 0), pady=3
         )
         master_button = _add_path_row(
             form,
@@ -894,12 +895,14 @@ class GuangdongPricePage(ToolPage):
             style="Muted.TLabel",
         ).grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
-        prediction = ttk.LabelFrame(self.content, text="2. 使用总表预测 D+1", padding=12)
-        prediction.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        prediction = ttk.LabelFrame(self.content, text="2. 使用总表预测 D+1", padding=10)
+        prediction.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         prediction.columnconfigure(1, weight=1)
-        ttk.Label(prediction, text="建模输入表").grid(row=0, column=0, sticky="w", pady=4)
-        ttk.Label(prediction, textvariable=self.prediction_input).grid(
-            row=0, column=1, columnspan=4, sticky="w", pady=4
+        ttk.Label(prediction, text="建模输入表").grid(row=0, column=0, sticky="w", pady=3)
+        # 建模输入表路径可能很长：限制换行宽度，避免把页面撑到需要横向滚动条
+        ttk.Label(prediction, textvariable=self.prediction_input,
+                  wraplength=520, justify="left").grid(
+            row=0, column=1, columnspan=4, sticky="w", pady=3
         )
         prediction_dir_button = _add_path_row(
             prediction,
@@ -910,21 +913,21 @@ class GuangdongPricePage(ToolPage):
             button_text="选择目录",
         )
         ttk.Label(prediction, text="滚动训练月数").grid(
-            row=3, column=0, sticky="w", pady=4
+            row=3, column=0, sticky="w", pady=3
         )
         ttk.Spinbox(
             prediction, from_=0, to=24, textvariable=self.training_months, width=8
-        ).grid(row=3, column=1, sticky="w", pady=4)
+        ).grid(row=3, column=1, sticky="w", pady=3)
         ttk.Label(
             prediction,
             text="0 为自动：当日供需齐全用 12 个月，否则用 3 个月历史信息回退。",
             style="Muted.TLabel",
-        ).grid(row=3, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=4)
+        ).grid(row=3, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=3)
         ttk.Label(
             prediction,
             text="自动核验预测日供需发布时间；固定输出 D+1 的 96 点电价。",
             style="Muted.TLabel",
-        ).grid(row=2, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=4)
+        ).grid(row=2, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=3)
 
         self.update_button = ttk.Button(
             self.actions, text="补齐数据总表", command=self.start_update

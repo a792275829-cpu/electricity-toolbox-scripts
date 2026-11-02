@@ -78,21 +78,24 @@ class MinimumWindowLayoutTests(unittest.TestCase):
 
     def test_common_window_needs_no_scrollbar_so_switching_stays_off_the_clipped_canvas(self):
         app = self.app
-        app.geometry("1360x820")
-        app.update()
         view = app.page_viewport
-        if view.canvas.winfo_height() < 780 or view.canvas.winfo_width() < 820:
-            self.skipTest("当前屏幕放不下 1360x820 窗口，无法验证常见笔记本尺寸")
-        for name in PAGE_NAMES:
-            with self.subTest(page=name):
-                app.show_page(name)
+        for geometry, minimum in (("1360x820", (820, 780)), ("1280x720", (740, 680))):
+            with self.subTest(window=geometry):
+                app.geometry(geometry)
                 app.update()
-                # 页面一旦超出视口就必须滚动，切换会走 Tk 裁剪画布的重绘路径
-                # （实测约为完整显示时的 3 倍），因此常见窗口下应全部放得下。
-                self.assertEqual(view.vertical.winfo_manager(), "",
-                                 f"{name} 需要纵向滚动条")
-                self.assertEqual(view.horizontal.winfo_manager(), "",
-                                 f"{name} 需要横向滚动条")
+                if (view.canvas.winfo_width() < minimum[0]
+                        or view.canvas.winfo_height() < minimum[1]):
+                    continue  # 当前屏幕放不下该窗口，跳过这一尺寸
+                for name in PAGE_NAMES:
+                    with self.subTest(window=geometry, page=name):
+                        app.show_page(name)
+                        app.update()
+                        # 页面一旦超出视口就必须滚动，切换会走 Tk 裁剪画布的重绘路径
+                        # （实测约为完整显示时的 3 倍），因此常见窗口下应全部放得下。
+                        self.assertEqual(view.vertical.winfo_manager(), "",
+                                         f"{name} 在 {geometry} 下需要纵向滚动条")
+                        self.assertEqual(view.horizontal.winfo_manager(), "",
+                                         f"{name} 在 {geometry} 下需要横向滚动条")
 
     def test_small_display_caps_window_and_keeps_overflow_scrollable(self):
         app = self.app
@@ -105,8 +108,11 @@ class MinimumWindowLayoutTests(unittest.TestCase):
         app.show_page("现货价格分析表更新")
         app.update()
         page = app.pages[app.current_page]
+        view = app.page_viewport
+        # 小屏上表单必须完整可及：日志面板先让出行数，仍放不下时用滚动条兜底。
         self.assertGreaterEqual(page.winfo_height(), page.winfo_reqheight())
-        self.assertEqual(app.page_viewport.vertical.winfo_manager(), "grid")
+        if page.winfo_reqheight() > view.canvas.winfo_height():
+            self.assertEqual(view.vertical.winfo_manager(), "grid")
 
 
 if __name__ == "__main__":

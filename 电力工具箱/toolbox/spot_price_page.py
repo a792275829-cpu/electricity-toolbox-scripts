@@ -62,7 +62,7 @@ class SpotPriceUpdatePage(ToolPage):
         self.overwrite = tk.BooleanVar(master=self, value=True)
         self.create_backup = tk.BooleanVar(master=self, value=False)
 
-        form = ttk.LabelFrame(self.content, text="更新设置", padding=10)
+        form = ttk.LabelFrame(self.content, text="更新设置", padding=8)
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
         ttk.Label(form, text="开始日期").grid(row=0, column=0, sticky="w", pady=3)
@@ -113,12 +113,13 @@ class SpotPriceUpdatePage(ToolPage):
 
         options = ttk.Frame(form)
         options.grid(row=5, column=0, columnspan=5, sticky="w", pady=(5, 0))
-        SettingCheckbutton(options, text="覆盖已有非空价格", variable=self.overwrite).pack(anchor="w")
+        # 并排显示，避免多占一行把页面顶出视口（超出后每次切换都要整幅重绘）
+        SettingCheckbutton(options, text="覆盖已有非空价格", variable=self.overwrite).pack(side="left")
         SettingCheckbutton(options, text="写入前生成时间戳备份", variable=self.create_backup).pack(
-            anchor="w", pady=(4, 0)
+            side="left", padx=(16, 0)
         )
 
-        mapping = ttk.LabelFrame(self.content, text="固定映射", padding=10)
+        mapping = ttk.LabelFrame(self.content, text="固定映射", padding=8)
         mapping.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(
             mapping,

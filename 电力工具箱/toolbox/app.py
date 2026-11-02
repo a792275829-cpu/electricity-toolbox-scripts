@@ -293,6 +293,10 @@ class ToolboxApp(tk.Tk):
             if hide is not None:
                 hide()
             self._visible_page.grid_remove()
+        prepare = getattr(page, "prepare_for_display", None)
+        if prepare is not None:
+            # Sizing that must settle before the page is painted once.
+            prepare()
         page.grid()
         page.tkraise()
         self.page_viewport.reset()

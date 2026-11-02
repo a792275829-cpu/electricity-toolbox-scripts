@@ -289,11 +289,11 @@ class PowerBenefitPageTests(unittest.TestCase):
             app.show_page("功率调整收益统计表更新")
             app.update()
             page=app.pages["功率调整收益统计表更新"]
-            # 10 行日志面板使该页达到 816 px，超过该窗口的约 790 px 可视高度，
-            # 每次切换都要走 Tk 裁剪画布的重绘路径（实测约 3 倍）。
-            self.assertEqual(int(page.log_text.cget("height")),8)
+            # 页面一旦高于视口就必须滚动，切换会走 Tk 裁剪画布的重绘路径
+            # （实测约 3 倍）；日志面板会先让出行数，保证表单放得下。
             self.assertLessEqual(page.winfo_reqheight(),app.page_viewport.canvas.winfo_height())
             self.assertEqual(app.page_viewport.vertical.winfo_manager(),"")
+            self.assertGreaterEqual(int(page.log_text.cget("height")),3)
         finally:
             app.destroy()
 

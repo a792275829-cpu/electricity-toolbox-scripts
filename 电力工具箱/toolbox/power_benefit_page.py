@@ -34,7 +34,7 @@ class PowerBenefitUpdatePage(ToolPage):
         self.start_date = tk.StringVar(master=self, value="")
         self.end_date = tk.StringVar(master=self, value=(today or date.today()).isoformat())
         self.create_backup = tk.BooleanVar(master=self, value=True)
-        form = ttk.LabelFrame(self.content, text="更新设置", padding=12)
+        form = ttk.LabelFrame(self.content, text="更新设置", padding=8)
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
         buttons = []
@@ -44,14 +44,18 @@ class PowerBenefitUpdatePage(ToolPage):
                 command=lambda i=index: self.choose_workbook(i), button_text="选择文件"))
             OptionCheckbutton(form, text="更新", variable=self.selected[index]).grid(
                 row=index, column=3, padx=(8, 0))
-        for row, label, variable in ((3, "开始日期", self.start_date), (4, "截止日期 D", self.end_date)):
-            ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", pady=3)
-            DateInput(form, textvariable=variable, width=16).grid(row=row, column=1, sticky="w", pady=3)
+        # 两个日期并排，避免多占一行把页面顶出视口（超出后每次切换都要整幅重绘）
+        ttk.Label(form, text="开始日期").grid(row=3, column=0, sticky="w", pady=3)
+        DateInput(form, textvariable=self.start_date, width=16).grid(
+            row=3, column=1, sticky="w", pady=3)
+        ttk.Label(form, text="截止日期 D").grid(row=3, column=2, sticky="w", padx=(16, 0), pady=3)
+        DateInput(form, textvariable=self.end_date, width=16).grid(
+            row=3, column=3, sticky="w", padx=(8, 0), pady=3)
         ttk.Label(form, text="海风覆盖必须填写开始日期；其他场站留空检查历史空白；" + DATE_INPUT_HINT,
-                  style="Muted.TLabel").grid(row=5, column=0, columnspan=4, sticky="w", pady=3)
+                  style="Muted.TLabel").grid(row=4, column=0, columnspan=4, sticky="w", pady=3)
         SettingCheckbutton(form, text="写入前生成时间戳备份", variable=self.create_backup).grid(
-            row=6, column=0, columnspan=3, sticky="w", pady=3)
-        mapping = ttk.LabelFrame(self.content, text="更新口径", padding=12)
+            row=5, column=0, columnspan=3, sticky="w", pady=3)
+        mapping = ttk.LabelFrame(self.content, text="更新口径", padding=8)
         mapping.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(mapping, text=(
             "归湖/鮀莲：C 原始功率；J 申报功率；K 日前电量；L 日前电价；M 上网电量；N 实时电价。\n"
