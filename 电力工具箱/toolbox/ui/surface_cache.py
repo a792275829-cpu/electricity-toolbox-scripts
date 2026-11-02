@@ -83,11 +83,20 @@ class SurfaceCache:
         """Register a bounded pool before widgets exist to avoid theme-wide
         invalidation when a module is opened for the first time."""
         for base, count in sizes.items():
+            if not self._has_surface(base):
+                # Styles painted with a plain fill (no image element) need no
+                # pre-rendered surface.
+                continue
             self._spares[base] = []
             for _ in range(count):
                 if len(self._slots) >= self.max_entries:
                     break
                 self._spares[base].append(self._new_slot(base))
+
+    def _has_surface(self, base: str) -> bool:
+        layout = self.style.layout(base)
+        specs = getattr(self.root, "_toolbox_surface_specs", {})
+        return bool(layout) and layout[0][0] in specs
 
     def _new_slot(self, base: str) -> _Entry:
         layout = self.style.layout(base)
@@ -166,7 +175,10 @@ class SurfaceCache:
         if key in self.entries:
             return self.entries[key]
         layout = self.style.layout(base)
-        spec = self.root._toolbox_surface_specs[layout[0][0]]
+        spec = getattr(self.root, "_toolbox_surface_specs", {}).get(layout[0][0]) if layout else None
+        if spec is None:
+            # Plain-fill style: nothing to rasterise, keep the scalable skin.
+            return None
         if min(width, height) < spec.minimum:
             return None
         pixels = (width + 1) * (height + 1) * len(spec.bitmaps)

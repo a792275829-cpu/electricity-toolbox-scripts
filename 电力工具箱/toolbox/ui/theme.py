@@ -28,6 +28,9 @@ def _rounded_element(style: ttk.Style, name: str, fill: str, *, outline: str | N
         # leaves only a 4 px center on cards, producing thousands of CoreGraphics
         # image draws per panel on macOS. Keep a large tile and declare the small
         # minimum size separately so controls retain their compact geometry.
+        # ttk tiles the centre at 1:1, so the tile size decides how many image
+        # blits each control costs; every blit is a 3x Retina upscale. 256 is
+        # the sweet spot measured on macOS (Card panels stay at 512).
         size, scale = (512 if name == "Card" else 128), 3
         # All surfaces have a known solid parent color. Precompose the corners
         # instead of making macOS alpha-blend every tiled image on each hover.
@@ -61,6 +64,15 @@ def _rounded_element(style: ttk.Style, name: str, fill: str, *, outline: str | N
 def _button_style(style: ttk.Style, name: str, fill: str, foreground: str,
                   *, outline: str | None = None, hover: str, pressed: str,
                   padding: tuple[int, int] = (12, 7), anchor: str = "center") -> None:
+    background = SIDEBAR if name.startswith("Nav") else BACKGROUND
+    if outline is None and fill == background:
+        # Resting surface is the parent colour, so every draw of the rounded
+        # image is invisible work: on Retina each one is a 3x upscale blit and
+        # the 15 sidebar entries alone cost about 3.5 ms per window repaint.
+        # Keep the highlight colours as flat fills instead.
+        _flat_button_style(style, name, background, foreground, hover=hover,
+                           pressed=pressed, padding=padding, anchor=anchor)
+        return
     element = _rounded_element(style, name, fill, outline=outline, states=(
         ("disabled", "#f5f5f3", "#f0f0ed" if outline else None),
         ("pressed", pressed, outline),
@@ -72,11 +84,26 @@ def _button_style(style: ttk.Style, name: str, fill: str, foreground: str,
             ("Button.label", {"sticky": "nsew"}),
         ]}),
     ]})])
-    background = SIDEBAR if name.startswith("Nav") else BACKGROUND
     style.configure(name, background=background, foreground=foreground, padding=padding, anchor=anchor,
                     width=-1, borderwidth=0, relief="flat", bordercolor=background,
                     lightcolor=background, darkcolor=background)
     style.map(name, foreground=[("disabled", "#b5b5b0"), ("!disabled", foreground)])
+
+
+def _flat_button_style(style: ttk.Style, name: str, background: str, foreground: str,
+                       *, hover: str, pressed: str, padding: tuple[int, int],
+                       anchor: str) -> None:
+    style.layout(name, [("Button.padding", {"sticky": "nsew", "children": [
+        ("Button.label", {"sticky": "nsew"}),
+    ]})])
+    style.configure(name, background=background, foreground=foreground, padding=padding, anchor=anchor,
+                    width=-1, borderwidth=0, relief="flat", bordercolor=background,
+                    lightcolor=background, darkcolor=background)
+    style.map(name,
+              background=[("pressed", pressed), ("active", hover), ("disabled", background),
+                          ("!disabled", background)],
+              foreground=[("disabled", "#b5b5b0"), ("!disabled", foreground)],
+              relief=[("pressed", "flat"), ("active", "flat")])
 
 
 def _choice_styles(style: ttk.Style) -> None:

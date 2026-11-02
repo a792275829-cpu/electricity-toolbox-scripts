@@ -99,7 +99,7 @@ class ToolboxApp(tk.Tk):
         if render_prototype:
             from .ui.surface_cache import SurfaceCache
             self.surface_cache = SurfaceCache(self)
-            self.surface_cache.prepare_styles({"Nav.TButton": 2, "NavSelected.TButton": 2,
+            self.surface_cache.prepare_styles({"NavSelected.TButton": 2,
                                                "TLabelframe": 2, "TEntry": 3,
                                                "TButton": 6, "Primary.TButton": 2})
         # Keep startup limited to the shell and dashboard. Business pages are

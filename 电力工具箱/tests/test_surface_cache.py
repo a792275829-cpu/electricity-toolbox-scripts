@@ -135,6 +135,18 @@ class SurfaceCacheTests(unittest.TestCase):
         self.assertNotIn(frame, self.cache.widgets)
         self.assertNotIn(callback, self.root.tk.call("after", "info"))
 
+    def test_background_matching_buttons_draw_no_surface_image(self) -> None:
+        """侧栏未选中项与 Quiet 按钮的底色就是父容器底色：贴图是不可见的
+        3 倍 Retina 放大绘制，占每次整窗重绘的约三分之一耗时就够了。"""
+        style = ttk.Style(self.root)
+        specs = self.root._toolbox_surface_specs
+        for name in ("Nav.TButton", "Quiet.TButton"):
+            layout = style.layout(name)
+            self.assertNotIn(layout[0][0], specs, f"{name} 不应再绘制贴图表面")
+            self.assertEqual(layout[0][0], "Button.padding")
+        for name in ("NavSelected.TButton", "Primary.TButton", "TButton"):
+            self.assertIn(style.layout(name)[0][0], specs, f"{name} 仍需圆角表面")
+
     def test_prototype_only_caches_navigation_and_summary_and_keeps_mode_inputs(self) -> None:
         from toolbox.app import ToolboxApp
         from toolbox.catalog import catalog_factories
