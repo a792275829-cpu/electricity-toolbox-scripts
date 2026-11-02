@@ -502,7 +502,7 @@ def collect_detail_rows(run_date: str, config: Config) -> list[dict[str, Any]]:
                     unit_name = unit_names.get(unit_id, unit_id or "未知机组")
                     values = online_energy_hours(item.get("onlineEle"),
                         label=f"{run_date} {company_name} / {unit_name}",
-                        allow_empty=company_name == "清远电厂")
+                        allow_empty=True)
                     missing_hours = sum(value is None for value in values)
                     if missing_hours:
                         log(f"  提示：{company_name} / {unit_name} 有 {missing_hours} 个时段实际上网电量未填报，导出为空白。")

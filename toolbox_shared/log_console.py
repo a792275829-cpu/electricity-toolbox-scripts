@@ -61,6 +61,16 @@ class _LogBuffer:
 def explain_error(text: str) -> tuple[str, str] | None:
     """Use specific failure signals, never ordinary mentions of login/network."""
     lower = text.lower()
+    # Keep the concrete date/field from the business error instead of showing
+    # the outer CalledProcessError and its command line.
+    data_context = any(word in text for word in (
+        "电量", "电价", "负荷", "出清", "开机台数", "市场行情", "运行日报", "数据", "时段"))
+    missing = any(word in text for word in (
+        "未填报", "无数据", "暂无数据", "未返回", "为空", "缺少", "缺失", "不足24", "不完整", "应有完整"))
+    if data_context and missing and not any(word in text for word in (
+        "Traceback", "CalledProcessError", "Command '[", "模板", "工作表 XML", "组件", "依赖", "字段名")):
+        message = re.sub(r"^.*?(?:失败[：:]|(?:ValueError|RuntimeError|KeyError)[：:])\s*", "", text).strip()
+        return (message[:500], "请核对提示中的日期、公司和字段，在来源网页或文件中确认是否已填报完整；数据补齐后重新运行。未填报值不能按 0 参与计算或覆盖已有数据。")
     rules = (
         (("modulenotfounderror", "importerror", "no module named", "缺少运行依赖"), "缺少运行依赖", "开发版请运行 setup_macos.command；安装版请更新或重新安装工具箱。"),
         (("executable doesn't exist", "playwright install", "找不到浏览器"), "浏览器组件缺失", "开发版请重新初始化环境；安装版请更新或重新安装工具箱。"),
