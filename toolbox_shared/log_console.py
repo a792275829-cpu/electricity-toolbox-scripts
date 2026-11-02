@@ -129,7 +129,11 @@ class LogConsole(ttk.Frame):
         self.expand_button = ttk.Button(self.header, text="展开", command=self.expand)
         self.expand_button.grid(row=0, column=3)
 
-        self.body = ttk.Frame(self, style="Card.TFrame", padding=8)
+        # 圆角卡片是 ttk 图片元素，首次绘制要在大面积上平铺并做 3 倍 Retina
+        # 放大（单页约 5 ms）；日志区改用 Tk 自绘 1 px 描边，观感接近。
+        self.body = tk.Frame(self, background="#fbfbf9", highlightthickness=1,
+                             highlightbackground="#e3e3de", highlightcolor="#e3e3de",
+                             padx=7, pady=6)
         self.body.grid(row=1, column=0, sticky="nsew")
         self.body.columnconfigure(0, weight=1)
         self.body.rowconfigure(1, weight=1)

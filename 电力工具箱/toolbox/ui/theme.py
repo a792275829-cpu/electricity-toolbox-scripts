@@ -236,7 +236,11 @@ def configure_theme(style: ttk.Style) -> None:
         ("Frame.padding", {"sticky": "nsew"}),
     ]})])
     style.configure("Card.TFrame", background=SURFACE)
-    style.layout("TLabelframe", [(card, {"sticky": "nsew"})])
+    # 分组框面积大，圆角贴图在首次绘制时要平铺并做 3 倍 Retina 放大，单个页面
+    # 约多花 15 ms；改用 clam 自带的 1 px 描边，观感接近且几乎无绘制成本。
+    style.layout("TLabelframe", [("Labelframe.border", {"sticky": "nsew", "children": [
+        ("Frame.padding", {"sticky": "nsew"}),
+    ]})])
     style.configure("Card.TLabel", background=SURFACE)
     style.configure("CardMuted.TLabel", background=SURFACE, foreground=MUTED, font=(family, 10, "normal"))
     style.configure("CardTitle.TLabel", background=SURFACE, font=(family, 12, "normal"))

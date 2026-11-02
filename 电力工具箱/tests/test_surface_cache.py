@@ -119,21 +119,19 @@ class SurfaceCacheTests(unittest.TestCase):
         self.assertEqual(builds, self.cache.build_count)
         self.assertEqual(geometry, (button.winfo_reqwidth(), button.winfo_reqheight()))
 
-    def test_labelframe_uses_border_parcel_and_destroy_cancels_resize(self) -> None:
+    def test_labelframe_draws_no_surface_but_card_frames_still_do(self) -> None:
+        style = ttk.Style(self.root)
+        specs = self.root._toolbox_surface_specs
+        # 分组框面积大，圆角贴图在首次绘制时要平铺并 3 倍放大，单页约多花 15 ms，
+        # 现在用 clam 自带描边；Card 面板仍保留圆角贴图。
+        self.assertNotIn(style.layout("TLabelframe")[0][0], specs)
+        self.assertIn(style.layout("Card.TFrame")[0][0], specs)
         frame = ttk.LabelFrame(self.root, text="运行日志")
         frame.place(x=0, y=0, width=300, height=160)
         self.cache.track(frame)
         self.root.update()
-        self.cache.flush()
-        key = self.cache.widgets[frame].assigned
-        self.assertLess(key[2], frame.winfo_height())
-        self.assertTrue(frame.identify(150, 160 - key[2]))
-        frame.place_configure(width=320)
-        self.root.update()
-        callback = self.cache.widgets[frame].after_id
-        frame.destroy()
         self.assertNotIn(frame, self.cache.widgets)
-        self.assertNotIn(callback, self.root.tk.call("after", "info"))
+        frame.destroy()
 
     def test_background_matching_buttons_draw_no_surface_image(self) -> None:
         """侧栏未选中项与 Quiet 按钮的底色就是父容器底色：贴图是不可见的
