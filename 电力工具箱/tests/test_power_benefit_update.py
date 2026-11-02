@@ -278,6 +278,25 @@ class PowerBenefitPageTests(unittest.TestCase):
             page.destroy()
         finally: root.destroy()
 
+    def test_page_fits_the_viewport_so_switching_stays_off_the_clipped_canvas_path(self):
+        from unittest.mock import patch
+        from toolbox.app import ToolboxApp
+        with patch("toolbox.ui.credentials_panel.CredentialStore.load", return_value={}):
+            app=ToolboxApp(workspace=Path(__file__).resolve().parents[2])
+        try:
+            app.geometry("1360x820")
+            app.update()
+            app.show_page("功率调整收益统计表更新")
+            app.update()
+            page=app.pages["功率调整收益统计表更新"]
+            # 10 行日志面板使该页达到 816 px，超过该窗口的约 790 px 可视高度，
+            # 每次切换都要走 Tk 裁剪画布的重绘路径（实测约 3 倍）。
+            self.assertEqual(int(page.log_text.cget("height")),8)
+            self.assertLessEqual(page.winfo_reqheight(),app.page_viewport.canvas.winfo_height())
+            self.assertEqual(app.page_viewport.vertical.winfo_manager(),"")
+        finally:
+            app.destroy()
+
 
 class PowerBenefitDesktopTests(unittest.TestCase):
     def test_service_routes_haifeng_and_requires_explicit_overwrite_dates(self):

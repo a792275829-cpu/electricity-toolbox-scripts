@@ -42,15 +42,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def measure(app, name: str, rounds: int, anchor: str) -> dict:
+def measure(app, name: str, rounds: int, anchor: str | None) -> dict:
     started = time.perf_counter()
     app.show_page(name)
     _pump(app)
     cold = time.perf_counter() - started
     page = app.pages[name]
+    if anchor is None:
+        others = [other for other in app.nav_buttons if other != name]
+        anchor = others[0] if others else None
     warm = []
     for _ in range(rounds):
-        if anchor != name and anchor in app.nav_buttons:
+        if anchor:
             app.show_page(anchor)
             _pump(app, 6)
         started = time.perf_counter()
@@ -91,8 +94,7 @@ def main() -> int:
             if unknown:
                 raise SystemExit(f"未知模块：{'、'.join(unknown)}")
             names = requested
-        anchor = names[0]
-        rows = [measure(app, name, max(1, args.rounds), anchor) for name in names]
+        rows = [measure(app, name, max(1, args.rounds), None) for name in names]
         width, height = app.winfo_width(), app.winfo_height()
     finally:
         app.destroy()

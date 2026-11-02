@@ -45,14 +45,14 @@ class PowerBenefitUpdatePage(ToolPage):
             OptionCheckbutton(form, text="更新", variable=self.selected[index]).grid(
                 row=index, column=3, padx=(8, 0))
         for row, label, variable in ((3, "开始日期", self.start_date), (4, "截止日期 D", self.end_date)):
-            ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", pady=4)
-            DateInput(form, textvariable=variable, width=16).grid(row=row, column=1, sticky="w", pady=4)
+            ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", pady=3)
+            DateInput(form, textvariable=variable, width=16).grid(row=row, column=1, sticky="w", pady=3)
         ttk.Label(form, text="海风覆盖必须填写开始日期；其他场站留空检查历史空白；" + DATE_INPUT_HINT,
-                  style="Muted.TLabel").grid(row=5, column=0, columnspan=4, sticky="w", pady=4)
+                  style="Muted.TLabel").grid(row=5, column=0, columnspan=4, sticky="w", pady=3)
         SettingCheckbutton(form, text="写入前生成时间戳备份", variable=self.create_backup).grid(
-            row=6, column=0, columnspan=3, sticky="w", pady=4)
+            row=6, column=0, columnspan=3, sticky="w", pady=3)
         mapping = ttk.LabelFrame(self.content, text="更新口径", padding=12)
-        mapping.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        mapping.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(mapping, text=(
             "归湖/鮀莲：C 原始功率；J 申报功率；K 日前电量；L 日前电价；M 上网电量；N 实时电价。\n"
             "海风：C 原始功率；R 申报功率；N 上网电量；M 日前电价；O 实时电价。覆盖所选日期内五列的值及公式。\n"
@@ -64,6 +64,10 @@ class PowerBenefitUpdatePage(ToolPage):
         self.update_button.pack(side="left")
         ttk.Button(self.actions, text="打开工作簿目录", command=lambda: open_directory(
             Path(self.workbooks[0].get()).expanduser().parent)).pack(side="left", padx=(8, 0))
+        # A page taller than the viewport sends every switch through Tk's
+        # clipped-canvas repaint (measured ~3x): 10 log lines push this form to
+        # 816 px against ~790 px of space. Two fewer lines keep it in view.
+        self.log_text.configure(height=8)
         self.register_busy_widgets(*buttons, self.update_button)
 
     def choose_workbook(self, index: int) -> None:
