@@ -126,10 +126,13 @@ class MinimumWindowLayoutTests(unittest.TestCase):
                             continue
                         # 页面一旦超出视口就必须滚动，切换会走 Tk 裁剪画布的重绘路径
                         # （实测约为完整显示时的 3 倍），因此常见窗口下应全部放得下。
-                        self.assertEqual(view.vertical.winfo_manager(), "",
-                                         f"{name} 在 {geometry} 下需要纵向滚动条")
-                        self.assertEqual(view.horizontal.winfo_manager(), "",
-                                         f"{name} 在 {geometry} 下需要横向滚动条")
+                        page = app.pages[name]
+                        detail = (f"{name} 在 {geometry} 下需要滚动条："
+                                  f"页面 {page.winfo_reqwidth()}x{page.winfo_reqheight()}，"
+                                  f"视口 {view.canvas.winfo_width()}x{view.canvas.winfo_height()}，"
+                                  f"日志 {page.log_text.cget('height')} 行")
+                        self.assertEqual(view.vertical.winfo_manager(), "", detail + "（纵向）")
+                        self.assertEqual(view.horizontal.winfo_manager(), "", detail + "（横向）")
 
     def test_small_display_caps_window_and_keeps_overflow_scrollable(self):
         app = self.app
