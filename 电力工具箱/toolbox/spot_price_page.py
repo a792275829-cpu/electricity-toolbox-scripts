@@ -57,7 +57,7 @@ class SpotPriceUpdatePage(ToolPage):
             "海风": self.haifeng_workbook,
         }
         self.selected_stations = {
-            label: tk.BooleanVar(master=self, value=True) for label in self.station_workbooks
+            label: tk.BooleanVar(master=self, value=False) for label in self.station_workbooks
         }
         self.overwrite = tk.BooleanVar(master=self, value=True)
         self.create_backup = tk.BooleanVar(master=self, value=False)

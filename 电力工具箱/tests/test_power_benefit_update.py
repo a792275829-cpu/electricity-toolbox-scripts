@@ -274,7 +274,7 @@ class PowerBenefitPageTests(unittest.TestCase):
             self.assertNotIn("--start-date",command)
             self.assertEqual(len(page.workbooks),3)
             self.assertIn("海风博弈收益统计-新.xlsx",page.workbooks[2].get())
-            self.assertFalse(page.selected[2].get())
+            self.assertEqual([variable.get() for variable in page.selected],[False,False,False])
             page.destroy()
         finally: root.destroy()
 

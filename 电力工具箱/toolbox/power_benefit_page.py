@@ -30,7 +30,7 @@ class PowerBenefitUpdatePage(ToolPage):
         self.file_dialogs = FileDialogState(paths.file_dialog_settings)
         self.workbooks = [tk.StringVar(master=self, value=str(DEFAULT_DIRECTORY / name))
                           for name in DEFAULT_NAMES]
-        self.selected = [tk.BooleanVar(master=self, value=(index < 2)) for index, _ in enumerate(DEFAULT_NAMES)]
+        self.selected = [tk.BooleanVar(master=self, value=False) for _ in DEFAULT_NAMES]
         self.start_date = tk.StringVar(master=self, value="")
         self.end_date = tk.StringVar(master=self, value=(today or date.today()).isoformat())
         self.create_backup = tk.BooleanVar(master=self, value=True)

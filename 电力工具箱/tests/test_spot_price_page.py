@@ -37,6 +37,7 @@ class SpotPriceUpdatePageTests(unittest.TestCase):
             Path("/tmp/鮀莲.xlsx"),
             overwrite=False,
             create_backup=False,
+            selected_stations=("归湖", "鮀莲", "海风"),
         )
         self.assertEqual(page.start_date.get(), "2026-09-01")
         self.assertIn(str(paths.spot_price_update), command)
@@ -97,6 +98,19 @@ class SpotPriceUpdatePageTests(unittest.TestCase):
                 page.station_workbooks[label].set(str(workbook))
             with self.assertRaisesRegex(ValueError, "同一个工作簿"):
                 page.selected_workbooks()
+
+
+    def test_station_checks_default_unchecked(self) -> None:
+        page = SpotPriceUpdatePage(
+            self.root, ToolPaths(Path(__file__).resolve().parents[2]), TaskRegistry()
+        )
+        self.addCleanup(page.destroy)
+        self.assertEqual(
+            {label: variable.get() for label, variable in page.selected_stations.items()},
+            {"归湖": False, "鮀莲": False, "海风": False},
+        )
+        self.assertTrue(page.overwrite.get())
+        self.assertFalse(page.create_backup.get())
 
 
 if __name__ == "__main__":
