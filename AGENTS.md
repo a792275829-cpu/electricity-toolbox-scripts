@@ -4,11 +4,11 @@
 
 - 当前仓库仅维护 macOS 版，不再添加或恢复 Windows 专用启动器、安装器、打包流程和系统适配。
 
-- 对修改、安装、配置、修复类请求，默认直接实施，不先输出长篇方案。
+- 对修改、安装、配置、修复类请求，默认直接实施，不先输出方案文档；需要解释取舍时，结论在前、细节在后。
 - 只有业务口径、覆盖范围或破坏性操作存在实质歧义时才询问用户；其余小问题自行检查并处理。
 - 优先复用仓库已有的解析、计算、登录、写入和 GUI 适配逻辑，不创建功能重复的旁路实现。
 - 用户给出的中文字段名、日期口径、工作表名、单元格范围、文件路径和输出文件名均视为精确契约，不要擅自改写或推断。
-- 最终汇报保持简洁，只说明：完成内容、验证结果、输出路径和仍存在的问题。
+- 最终汇报先给结论和验证数字（测试计数、体积、回读值），再列改动文件与未解决问题；细节压成表格或短列表，不粘贴完整日志。
 
 ## 仓库与改动边界
 
@@ -18,16 +18,16 @@
 - 根目录存在 `.codegraph/` 时，定位代码先用 `codegraph explore "<问题或符号>"`，更新索引用 `codegraph sync .`，不要重新初始化。
 - 修改现有功能前先查调用方、测试和 GUI 入口，避免只修脚本而漏掉工具箱页面或启动路径。
 - 完成源码更新及必要验证后，默认提交本次改动并同步 `origin/main`，回读远端确认一致；同步失败须说明原因和未同步内容。
-- 只维护最新 `main` 工作副本，保留提交历史与版本标签；清理旧源码副本及已合并分支时，混有配置、登录态、业务数据或样例的目录只清程序源码，保留这些本地文件。
+- 只维护最新 `main` 工作副本，保留提交历史与版本标签；清理旧源码副本及已合并分支时，混有配置、登录态、业务数据或样例的目录只清程序源码，保留这些本地文件。`.worktrees/`、`.archive/`、`.toolbox/` 由工具维护，不要手工整理或删除，工作区清理统一走 `tooling/clean_workspace.py`。
 
 ## 启动与依赖
 
 - 项目 Python 环境以根目录 `.venv` 为准；不要把个人机器上的绝对解释器路径写入代码。
 - macOS 初始化入口是 `./setup_macos.command`，GUI 启动入口是 `./00_启动/电力工具箱.command`。
 - 保持“复制整个文件夹到另一台 Mac 后可初始化并运行”的可移植目标。
-- 界面调试统一使用 `00_启动/源码调试版.command`，涉及 Tauri 生命周期时使用 `00_启动/Tauri开发版.command`；仅修改当前仓库源码，禁止向正式版用户目录的 `app/` 或已安装 `.app` 复制调试代码。开发数据使用独立的 `development/data/`。
+- 界面调试统一使用 `00_启动/源码调试版.command`，涉及 Tauri 生命周期时使用 `00_启动/Tauri开发版.command`；仅修改当前仓库源码，禁止向正式版用户目录的 `app/` 或已安装 `.app` 复制调试代码。开发数据由该脚本通过 `TOOLBOX_DATA_ROOT` 指向 `~/Library/Application Support/com.electricity.toolbox/development/data`，不在仓库内，也不要让它回落到正式目录。
 - 正式版因本地源码冲突无法启动时，先保留第一条异常、冲突清单和安装记录，按 `desktop/docs/startup-recovery.md` 备份、校验并恢复发行源码；不得伪造安装清单、关闭冲突保护或清空用户数据。恢复后回读发行清单校验源码，并实际重启验证主界面。
-- 路径处理使用 `pathlib.Path` 和脚本/仓库相对定位；打开目录时使用平台适配逻辑，不新增仅 Windows 可用的 `os.startfile` 或 `explorer` 调用。
+- 路径处理使用 `pathlib.Path` 和脚本／仓库相对定位，打开目录走平台适配逻辑，保持跨 Mac 可移植；不要为省事引入平台专用调用（如 `os.startfile`、`explorer`）。
 - Node/npm 依赖只应作用于实际需要它们的子工具，不得变成所有 Python 工具的强制前置条件。
 
 ## Excel 与数据任务
@@ -54,7 +54,7 @@
 - 文案或小范围 GUI 修改：至少完成模块导入或页面创建 smoke test。
 - 计算、解析、映射修改：运行针对性测试，并用小型或真实样本核对结果。
 - 登录、真实写入、安装、并发和跨 Mac 改动：运行端到端流程，并检查实际产物或持久化状态。
-- 完整分模块测试用 `.venv/bin/python tooling/run_tests.py`（与 CI 同一入口）；针对性单测从 `电力工具箱/` 目录运行：`PYTHONPATH=.. .venv/bin/python -m unittest tests.test_xxx`。
+- 完整验证用 `.venv/bin/python tooling/run_tests.py --native --report logs/tests.json`（与 CI 同一入口，先跑 `native/price-xlsx/build.py` 准备 Rust 后端）；针对性单测从 `电力工具箱/` 目录运行：`PYTHONPATH=.. .venv/bin/python -m unittest tests.test_xxx`。
 - 启动器 smoke test 使用：`TOOLBOX_SMOKE=1 ./00_启动/电力工具箱.command`。
 - 修改依赖或启动流程时，运行 `./setup_macos.command` 或等价的 `.venv` 导入检查，并验证启动器实际可用。
 - 测试被环境、权限或外部服务阻塞时，明确报告未验证部分及具体原因，不要把部分成功表述成全部完成。
@@ -68,7 +68,7 @@
 ## 文档
 
 - 根 `README.md` 只放全局内容：项目简介、DMG 与源码安装、启动、账号与登录、输出位置、迁移、代理、常见问题和测试；工具的操作步骤、字段口径、写入口径和故障处理写在该工具目录的 `README.md`，根 README 只保留索引链接。
-- 修改工具行为时同步该工具的模块 README；改动安装、登录、打包发布或测试入口时，同步根 README、`tooling/README.md`、`desktop/README.md` 中对应的一处，不要在多处各写一份操作步骤。
+- 修改工具行为时同步该工具的模块 README；改动安装、登录、打包发布或测试入口时，同步根 README、`tooling/README.md`、`desktop/README.md`、`packaging/tauri/README.md` 中对应的一处，不要在多处各写一份操作步骤。
 - 模块 README 描述当前行为，不写“取消／移除／上一版改成”这类变更史；历史设计、计划和性能测量放各自的 `docs/`，并在该目录 `README.md` 标注状态与失效提示。
 - 文档里的路径、命令、默认值必须能在仓库中验证；`config.example.json` 只列真正被代码读取的字段（`tooling/tests/test_maintenance_next.py` 会检查）。
 - 新增工具目录时要同时提供该模块的 `README.md`，并在根 README 的索引表中登记。
@@ -79,11 +79,11 @@
 - 发布 DMG 固定用 LZMA（`desktop/python/installer_image.py` 的 `RELEASE_FORMAT`，即 `hdiutil -format ULMO`），不要退回 `hdiutil` 默认的 `UDZO`：默认是 zlib 1 级，同内容比 LZMA 大约 165 MiB。不会被下载的本地产物（应用内增量更新重建的镜像）用 `LOCAL_FORMAT`（ULFO），否则每次更新都多等约 2.5 分钟。
 - 减包只做在打包阶段（`prune_runtime.py`、`subset_font.py`、`forecast_seed.py` 一类），仓库里的源文件、原始字体和总表保持不动；每项裁剪都要给出等价性证据（特征矩阵相等、渲染像素对比、运行时校验），并在缺依赖时退回完整资源而不是中断构建。
 - 不为体积牺牲运行行为：不删 `chromium_headless_shell`（headless 启动 0.12→0.21 秒、单浏览器 255→743 MiB）、不对 `500kV断面分析/接线图.png` 做有损量化（锚点定位依赖像素）、不删 sklearn／scipy（电价预测硬依赖）。
-- 报告体积改动时给出 `.app` 与 DMG 的前后值和验证结论；新的测量结论写进 `packaging/tauri/README.md` 的「安装包体积控制」，本文件只保留决策口径与禁止项，避免数字过期。
+- 报告体积改动时给出 `.app` 与 DMG 的前后值和验证结论；完整测量数据与复现方法写进 `packaging/tauri/README.md` 的「安装包体积控制」。本文件只保留决策口径、禁止项和判断取舍所必需的数字。
 
 ## 版本与更新日志
 
-- 自动维护根目录 `CHANGELOG.md`：用 `.venv/bin/python packaging/tauri/version.py set X.Y.Z --notes "具体变更"` 同步版本和日志（多项变更重复传入 `--notes`，日期默认 Asia/Shanghai，历史记录必须保留）；开发期的零散条目写在顶部 `## 未发布` 段，`set` 时会并入新版本并整段移除。每条只写用户可见的变更与验证结果，逐次调试过程放提交信息或 `logs/`，单条控制在 200 字内。
+- 自动维护根目录 `CHANGELOG.md`：用 `.venv/bin/python packaging/tauri/version.py set X.Y.Z --notes "具体变更"` 同步版本和日志（多项变更重复传入 `--notes`，日期默认 Asia/Shanghai，历史记录必须保留）；开发期的零散条目写在顶部 `## 未发布` 段，`set` 时会并入新版本并整段移除。每条只写用户可见的变更与验证结果，逐次调试过程放提交信息或 `logs/`，单条控制在 200 个字符内。
 - `CHANGELOG.md` 是逐版本内容的唯一来源，`packaging/tauri/release_notes.md` 只维护通用安装说明；发布前执行 `version.py check --tag vX.Y.Z --require-notes`，版本不一致或更新内容为空时禁止打包发布。已发布版本不得覆盖，下一次递增版本号。
 - 只发布 macOS Apple 芯片的完整 DMG 与 `.dmg.sha256`，加 `update-manifest.json` 和适用的 `.patch.tar.xz` 增量补丁；不发布独立 `.app`、`.app.tar.gz`、`.sig` 或旧 `latest.json`，也不恢复 PKG，构建产物与签名私钥不进入 Git。发布前跑完针对性测试，并用 `validate_installer.py` 核对安装包、补丁、索引与摘要后再发 GitHub 正式版。
 - 日常维护优先增量更新：为最近三个正式版本生成直达补丁并保留历史升级路径，客户端走总下载量最小且小于完整包的路径，缺少路径、旧应用被改动或补丁失败时自动回退完整 DMG（用户取消不触发回退）；跨主／次版本或 `--full-only` 的重大更新用完整包重设基线。发布补丁前必须用未改动的旧应用副本实际还原，核对文件／权限／符号链接与签名，禁止拿测试补丁当发行包；清理本地源码副本时不得删除旧版本发行附件与索引。
