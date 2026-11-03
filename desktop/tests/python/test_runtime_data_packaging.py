@@ -50,7 +50,10 @@ class RuntimeDataPackagingTests(unittest.TestCase):
     def test_seed_roundtrip_and_upgrade_preserve_updated_workbook(self):
         before = self.original.read_bytes()
         target = prepare_payload.prepare_forecast_seed(self.payload / "defaults", self.original)
-        self.assertEqual(target.read_bytes(), before)
+        seeded = load_workbook(target, data_only=True)
+        self.assertEqual(seeded["整合数据"]["C2"].value, 123.45)
+        self.assertEqual(seeded["整合数据"]["C2"].number_format, "0.00")
+        seeded.close()
         self.write_manifest("first")
         self.install()
         installed = self.base / "user/data" / prepare_payload.FORECAST_SEED
@@ -77,7 +80,9 @@ class RuntimeDataPackagingTests(unittest.TestCase):
             prepare_payload.prepare_forecast_seed(self.base, self.base / "missing.xlsx")
         with mock.patch.dict("os.environ", {"FORECAST_MASTER_WORKBOOK": str(self.original)}):
             target = prepare_payload.prepare_forecast_seed(self.payload / "defaults")
-        self.assertEqual(target.read_bytes(), self.original.read_bytes())
+        seeded = load_workbook(target, data_only=True)
+        self.assertEqual(seeded["整合数据"]["C2"].value, 123.45)
+        seeded.close()
         book = Workbook()
         book.save(self.original)
         book.close()

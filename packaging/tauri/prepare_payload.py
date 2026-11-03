@@ -76,7 +76,7 @@ def prepare_forecast_seed(defaults: Path, workbook: Path | None = None) -> Path 
     grid API on first run (``update_gdfire_data.update_master_workbook``).
     Explicitly requested workbooks must exist and stay valid.
     """
-    from migrate_forecast_data import copy_atomic, resolve_paths
+    from migrate_forecast_data import resolve_paths
     from openpyxl import load_workbook
 
     explicit = workbook is not None
@@ -117,7 +117,14 @@ def prepare_forecast_seed(defaults: Path, workbook: Path | None = None) -> Path 
     finally:
         book.close()
     target = defaults / FORECAST_SEED
-    copy_atomic(workbook, target)
+    from forecast_seed import build as build_seed
+    stats = build_seed(workbook, target)
+    print(
+        f"预测种子表：近 {stats['months']} 个月 {stats['rows']} 行 × {stats['columns']} 列"
+        f"（{stats['first_date']} → {stats['last_date']}），"
+        f"{stats['source_bytes'] / 1048576:.1f} → {stats['target_bytes'] / 1048576:.1f} MiB",
+        flush=True,
+    )
     return target
 
 
