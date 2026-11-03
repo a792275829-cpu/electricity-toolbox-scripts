@@ -377,6 +377,21 @@ def pythonw_executable() -> str:
     return python_executable()
 
 
+def playwright_driver_node() -> Path | None:
+    """Node shipped inside the Playwright wheel, reused by the JavaScript tools.
+
+    Resolved on disk: the UI thread must never import or even probe Playwright.
+    """
+    bases = (Path(sys.prefix) / "lib", Path(sys.executable).resolve().parent.parent / "lib")
+    for base in bases:
+        for pattern in ("python3.*/site-packages/playwright/driver/node",
+                        "site-packages/playwright/driver/node"):
+            for driver in sorted(base.glob(pattern)):
+                if driver.is_file():
+                    return driver
+    return None
+
+
 def node_executable() -> str:
     configured = os.environ.get("TOOLBOX_NODE")
     if configured and Path(configured).is_file():
@@ -384,6 +399,9 @@ def node_executable() -> str:
     bundled = portable_runtime_root() / "node/bin/node"
     if bundled.is_file():
         return str(bundled)
+    driver = playwright_driver_node()
+    if driver is not None:
+        return str(driver)
 
     discovered = shutil.which("node")
     if discovered:

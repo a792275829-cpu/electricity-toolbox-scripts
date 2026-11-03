@@ -10,6 +10,16 @@ import sys
 import tempfile
 
 
+def node_executable(payload: Path) -> str:
+    candidates = sorted(payload.glob(
+        "runtime/python/lib/python3.*/site-packages/playwright/driver/node"))
+    candidates.append(payload / "runtime/node/bin/node")
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    raise FileNotFoundError("打包运行环境缺少 Node 可执行文件")
+
+
 def validate(payload: Path, *, headed: bool = False) -> dict:
     payload = payload.resolve()
     sys.path.insert(0, str(payload / "app"))
@@ -57,7 +67,7 @@ try {
   await page.screenshot({path: process.argv[3]});
 } finally { await context.close(); }
 '''
-        subprocess.run([str(payload / "runtime/node/bin/node"), "--input-type=module", "-e", script,
+        subprocess.run([node_executable(payload), "--input-type=module", "-e", script,
                         module.as_uri(), str(temporary / "node"), str(temporary / "node.png")],
                        env=env, check=True, timeout=90)
     return {"python_persistent": True, "headed": headed, "screenshot": True,

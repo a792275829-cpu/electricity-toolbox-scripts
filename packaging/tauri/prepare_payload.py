@@ -260,26 +260,8 @@ def prepare(target: str, runtime_from: Path | None = None, forecast_workbook: Pa
                     ROOT / "packaging/tauri/requirements-macos.lock",
                 ]
             )
-            node_name = f"node-v{build_support.NODE_VERSION}-darwin-arm64"
-            archive_name = node_name + ".tar.gz"
-            base = f"https://nodejs.org/dist/v{build_support.NODE_VERSION}/"
-            checksums = build_support.download(
-                base + "SHASUMS256.txt",
-                cache / f"node-{build_support.NODE_VERSION}-SHASUMS256.txt",
-            )
-            expected = next(
-                line.split()[0]
-                for line in checksums.read_text().splitlines()
-                if line.split()[-1] == archive_name
-            )
-            archive = build_support.download(
-                base + archive_name, cache / archive_name, expected
-            )
-            unpack = cache / "node-unpack"
-            shutil.rmtree(unpack, ignore_errors=True)
-            unpack.mkdir()
-            build_support.extract(archive, unpack)
-            shutil.move(unpack / node_name, runtime / "node")
+            # Node is not staged separately: the Playwright wheel ships the
+            # interpreter that both the JS tools and its own driver use.
             env = {
                 **os.environ,
                 "PLAYWRIGHT_BROWSERS_PATH": str(runtime / "ms-playwright"),

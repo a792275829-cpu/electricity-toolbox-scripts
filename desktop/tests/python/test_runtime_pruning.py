@@ -18,14 +18,20 @@ class RuntimePruningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             site = "python/lib/python3.11/site-packages"
-            keep = ["python/bin/python3", "node/bin/node", "node/LICENSE", "python/include/Python.h",
-                    f"{site}/pandas/data/example.csv", f"{site}/numpy/testing/helper.py", f"{site}/numpy/_core/tests/_natype.py",
+            keep = ["python/bin/python3.11", "python/bin/python3",
+                    "python/include/Python.h", f"{site}/pandas/data/example.csv",
+                    f"{site}/numpy/testing/helper.py", f"{site}/numpy/_core/tests/_natype.py",
                     f"{site}/scipy/special/_ufuncs.so", f"{site}/pandas-1.dist-info/LICENSE",
-                    "python/share/licenses/tcl-tk/tcl.txt", "ms-playwright/chromium-1187/browser",
+                    f"{site}/playwright/driver/node",
+                    "python/share/licenses/tcl-tk/tcl.txt", "python/lib/tcl8.6/init.tcl",
+                    "ms-playwright/chromium-1187/browser",
                     "ms-playwright/chromium_headless_shell-1187/browser"]
-            remove = ["node/include/node.h",
+            remove = ["node/LICENSE", "node/bin/node", "node/include/node.h",
                       "python/lib/pkgconfig/python.pc", f"{site}/pandas/tests/test_frame.py",
-                      f"{site}/scipy/special/tests/test_basic.py"]
+                      f"{site}/scipy/special/tests/test_basic.py",
+                      f"{site}/pip/_internal/__init__.py", f"{site}/setuptools/_core.py",
+                      "python/lib/python3.11/ensurepip/__init__.py",
+                      "python/lib/tcl9.0/init.tcl", "python/lib/libtcl9.0.dylib"]
             for name in keep + remove:
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -35,11 +41,15 @@ class RuntimePruningTests(unittest.TestCase):
             registry.write_text(json.dumps({"browsers": [{"name": "chromium", "revision": "1187"},
                 {"name": "chromium-headless-shell", "revision": "1187"}]}))
             report = prune(root)
-            self.assertEqual(report["removed_bytes"], len(remove) * len("fixture"))
+            self.assertEqual(report["removed_bytes"], len("fixture") * len(remove))
+            self.assertEqual(report["deduped_bytes"], len("fixture"))
+            self.assertTrue(os.path.samefile(root / "python/bin/python3",
+                                             root / "python/bin/python3.11"))
             for name in keep:
                 self.assertTrue((root / name).is_file(), name)
             for name in remove:
                 self.assertFalse((root / name).exists(), name)
+            self.assertFalse((root / "node").exists())
             self.assertEqual(prune(root)["removed_bytes"], 0)
             (root / "ms-playwright/chromium-1187/browser").unlink()
             (root / "ms-playwright/chromium-1187").rmdir()
@@ -49,6 +59,9 @@ class RuntimePruningTests(unittest.TestCase):
             (root / "ms-playwright/chromium_headless_shell-1187/browser").unlink()
             (root / "ms-playwright/chromium_headless_shell-1187").rmdir()
             with self.assertRaisesRegex(ValueError, "headless shell"):
+                prune(root)
+            (root / site / "playwright/driver/node").unlink()
+            with self.assertRaisesRegex(ValueError, "Node"):
                 prune(root)
 
     def test_portable_launch_and_fallback_retain_browser_defaults(self):

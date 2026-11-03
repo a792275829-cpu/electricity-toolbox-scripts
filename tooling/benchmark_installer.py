@@ -25,6 +25,17 @@ CASES = ("imports", "ui_start", "excel", "forecast", "browser_headless",
          "browser_headed", "browser_parallel", "pdf", "node")
 
 
+def payload_node(payload: Path) -> Path:
+    """Node ships inside the Playwright wheel; a separately staged tree is legacy."""
+    candidates = sorted(payload.glob(
+        "runtime/python/lib/python3.*/site-packages/playwright/driver/node"))
+    candidates.append(payload / "runtime/node/bin/node")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(f"应用缺少 Node 可执行文件：{payload}")
+
+
 class UsageInfo(ctypes.Structure):
     # macOS SDK sys/resource.h: struct rusage_info_v2 (16-byte UUID + 18 u64).
     _fields_ = [('uuid', ctypes.c_uint8 * 16)] + [(name, ctypes.c_uint64) for name in (
@@ -170,7 +181,7 @@ try {
  console.log(JSON.stringify({launch_s,screenshot_s:(performance.now()-s)/1000}));
 } finally {await context.close();}
 '''
-        output = subprocess.check_output([str(args.app / 'Contents/Resources/payload/runtime/node/bin/node'),
+        output = subprocess.check_output([str(payload_node(args.app / 'Contents/Resources/payload')),
             '--input-type=module', '-e', script, module.as_uri(), str(args.result.parent / 'node-profile'),
             str(args.result.with_suffix('.phase'))], text=True, timeout=60)
         metrics.update(json.loads(output))

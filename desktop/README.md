@@ -14,11 +14,11 @@
 
 双击仓库的 `00_启动/Tauri开发版.command`。
 
-首次开发需要 Node 22.23.3、Rust stable、项目根目录 `.venv`。需要 Xcode Command Line Tools；Python 依赖由根目录 `setup_macos.command` 初始化。前端首次执行 `cd desktop && npm ci`。
+首次开发需要 Node 22、Rust stable、项目根目录 `.venv`。需要 Xcode Command Line Tools；Python 依赖由根目录 `setup_macos.command` 初始化。前端首次执行 `cd desktop && npm ci`。
 
 开发启动器运行 `npm run dev`，自动编译必要的 Rust 改动。界面仍维护原 Python 页面；任务适配在 `toolbox/ui_tasks.py`，业务服务和工作流在 `toolbox/service.py`、`toolbox/workflows.py`。修改已加载的界面或服务后重启应用；脚本任务在下一次运行时读取业务脚本源码。React/CSS 只影响启动故障提示。`00_启动/电力工具箱.command` 保留不依赖 Node/Rust 的原版源码启动方式。
 
-接收电脑安装发行包即可使用，内置 Python 3.11.15、Node 22.23.3、Playwright 1.55.0 和 Chromium。浏览器登录和网站取数仍需要网络。
+接收电脑安装发行包即可使用，内置 Python 3.11.15、Node 22.18.0（随 Playwright 轮子）、Playwright 1.55.0 和 Chromium。浏览器登录和网站取数仍需要网络。
 
 ## 本地构建
 
@@ -34,6 +34,8 @@ python packaging/tauri/build_dmg.py desktop/src-tauri/target/release/bundle/maco
 ```
 
 构建机需要 `uv`、Node/npm、Rust 和根目录 Python 依赖。资源输出到 Git 忽略的 `desktop/src-tauri/payload/`；安装包位于 `desktop/src-tauri/target/release/bundle/`，指定 `--target` 时多一层目标目录。
+
+`payload/runtime/` 只保留一份 Node：Python Playwright 轮子自带的 `driver/node`，业务 JS 脚本通过 `toolbox.runtime.node_executable()` 复用它；打包时 `prune_runtime.py` 会删除独立暂存的 `runtime/node`、`pip`/`setuptools`、Tk 9 和重复的 `python3` 副本。
 
 DMG 内部仍需构建 `.app` 作为中间产物，并保留 macOS ad-hoc 代码签名；不生成或分发独立 App 压缩包。
 

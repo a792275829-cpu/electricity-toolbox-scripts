@@ -338,9 +338,35 @@ class RuntimeTests(unittest.TestCase):
             with (
                 mock.patch("toolbox.runtime.sys.platform", "darwin"),
                 mock.patch("toolbox.runtime.shutil.which", return_value=None),
-                mock.patch.dict(os.environ, {"HOME": folder}),
+                mock.patch("toolbox.runtime.playwright_driver_node", return_value=None),
+                mock.patch.dict(os.environ, {"HOME": folder, "TOOLBOX_NODE": ""}),
             ):
                 self.assertEqual(node_executable(), str(local_node))
+
+    def test_node_executable_prefers_playwright_driver_node(self) -> None:
+        from toolbox.runtime import node_executable
+
+        with tempfile.TemporaryDirectory() as folder:
+            driver = Path(folder) / "driver" / "node"
+            driver.parent.mkdir(parents=True)
+            driver.touch(mode=0o755)
+            with (
+                mock.patch("toolbox.runtime.portable_runtime_root",
+                           return_value=Path(folder) / "runtime"),
+                mock.patch("toolbox.runtime.playwright_driver_node", return_value=driver),
+                mock.patch("toolbox.runtime.shutil.which", return_value="/usr/bin/node"),
+                mock.patch.dict(os.environ, {"TOOLBOX_NODE": ""}),
+            ):
+                self.assertEqual(node_executable(), str(driver))
+
+    def test_playwright_driver_node_reports_bundled_executable(self) -> None:
+        from toolbox.runtime import playwright_driver_node
+
+        driver = playwright_driver_node()
+        if driver is None:
+            self.skipTest("当前环境未安装 Playwright")
+        self.assertTrue(driver.is_file())
+        self.assertEqual(driver.parent.name, "driver")
 
     def test_task_registry_tracks_and_terminates_owned_process(self) -> None:
         from toolbox.runtime import TaskRegistry

@@ -132,11 +132,13 @@ impl Backend {
         if runtime.is_dir() {
             command
                 .env("TOOLBOX_PORTABLE", "1")
-                .env("PLAYWRIGHT_BROWSERS_PATH", runtime.join("ms-playwright"))
-                .env(
-                    "TOOLBOX_NODE",
-                    runtime.join("node/bin/node"),
-                );
+                .env("PLAYWRIGHT_BROWSERS_PATH", runtime.join("ms-playwright"));
+            // Packaged runtimes fall back to the Node build inside the Playwright
+            // wheel, so the separately staged tree is optional.
+            let node = runtime.join("node/bin/node");
+            if node.is_file() {
+                command.env("TOOLBOX_NODE", node);
+            }
             let tcl = runtime.join("python/lib/tcl8.6");
             if tcl.is_dir() {
                 command
