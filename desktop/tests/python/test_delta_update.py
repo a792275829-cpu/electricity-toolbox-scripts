@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT / 'desktop/python'), str(ROOT / 'packaging/tauri')]
 from delta_update import (apply_patch, app_version, create_patch, digest, inventory,
                           select_route, validate_inventory, INDEX_NAME)
+from installer_image import LOCAL_FORMAT
 from github_update import GitHubUpdater, Release, UpdateError, Cancelled, REPOSITORY
 from validate_installer import validate
 from prepare_payload import runtime_source
@@ -196,8 +197,10 @@ class DeltaTests(unittest.TestCase):
         updater=GitHubUpdater('1.0.1',opener=opener,app_bundle=old)
         if modify:(old/'Contents/Resources/source.py').write_text('local edit')
         candidate=Release('v1.0.3','notes','page',full,index_asset)
-        def build(app,out,installer):
+        def build(app,out,installer,image_format=None):
             self.assertEqual(inventory(app),inventory(new))
+            # Locally rebuilt images are never downloaded; keep them fast.
+            self.assertEqual(image_format, LOCAL_FORMAT)
             p=out/'reconstructed.dmg';p.write_bytes(b'local image');return p
         with patch('installer_image.build',side_effect=build):
             result=updater.download(candidate,cancel or threading.Event(),lambda _:None)

@@ -49,3 +49,9 @@ print(json.dumps({'id': 2, 'result': str(image)}), file=transport, flush=True)
             verified = subprocess.run(['/usr/bin/hdiutil', 'verify', str(image)],
                                       capture_output=True, timeout=60)
             self.assertEqual(verified.returncode, 0, verified.stderr)
+            # Release images must keep LZMA; the hdiutil default (zlib) ships
+            # ~27% larger on the real payload.
+            info = subprocess.run(['/usr/bin/hdiutil', 'imageinfo', str(image)],
+                                  capture_output=True, text=True, timeout=60)
+            self.assertEqual(info.returncode, 0, info.stderr)
+            self.assertIn('Format: ULMO', info.stdout)

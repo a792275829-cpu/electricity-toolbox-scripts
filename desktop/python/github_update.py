@@ -306,7 +306,7 @@ class GitHubUpdater:
 
     def download_delta(self, release, cancel, progress):
         from delta_update import apply_patch, app_version, cancelled, select_route, INDEX_NAME
-        from installer_image import build
+        from installer_image import build, LOCAL_FORMAT
         target = release.version.removeprefix("v")
         if app_version(self.app_bundle) != self.current.removeprefix("v"):
             raise UpdateError("当前安装版本不匹配")
@@ -340,7 +340,9 @@ class GitHubUpdater:
                 patch.unlink()
             cancelled(cancel)
             progress(.9)
-            result = build(app, directory, installer)
+            # Rebuilt locally from the patched clone and never downloaded, so
+            # take the fast format: LZMA would add ~2.5 min to every update.
+            result = build(app, directory, installer, image_format=LOCAL_FORMAT)
             cancelled(cancel)
             progress(1)
             # Retain just the verified image and checksum for installation/re-opening.

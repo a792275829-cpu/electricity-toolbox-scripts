@@ -7,7 +7,14 @@ import shutil
 import subprocess
 import tempfile
 
-def build(app: Path, output: Path, installer: Path) -> Path:
+# LZMA (ULMO) instead of the hdiutil default zlib (UDZO): on the 1.1 GiB payload
+# it cuts the release image by ~27% for ~2.5 min of extra build time. Locally
+# rebuilt images that users never download pass a faster format instead.
+RELEASE_FORMAT = "ULMO"
+LOCAL_FORMAT = "ULFO"
+
+
+def build(app: Path, output: Path, installer: Path, image_format: str = RELEASE_FORMAT) -> Path:
     app = app.resolve()
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     if info["CFBundleIdentifier"] != "com.electricity.toolbox":
@@ -40,7 +47,7 @@ image_root=${0:A:h}
         # stdout is the desktop service's JSON-lines transport. Reassigning
         # sys.stdout does not redirect the OS descriptor inherited by children;
         # hdiutil's unterminated "created:" output can swallow the next reply.
-        subprocess.run(["/usr/bin/hdiutil", "create", "-ov", "-volname", "电力工具箱", "-srcfolder", str(root), "-format", "UDZO", str(package)], check=True, capture_output=True)
+        subprocess.run(["/usr/bin/hdiutil", "create", "-ov", "-volname", "电力工具箱", "-srcfolder", str(root), "-format", image_format, str(package)], check=True, capture_output=True)
     with package.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     package.with_suffix(".dmg.sha256").write_text(f"{digest}  {package.name}\n")
