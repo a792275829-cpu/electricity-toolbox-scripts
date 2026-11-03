@@ -74,6 +74,14 @@
 - 文档里的路径、命令、默认值必须能在仓库中验证；`config.example.json` 只列真正被代码读取的字段（`tooling/tests/test_maintenance_next.py` 会检查）。
 - 新增工具目录时要同时提供该模块的 `README.md`，并在根 README 的索引表中登记。
 
+## 安装包体积与压缩
+
+- 体积一律以 `.app` 的 `du -sk` 比较；DMG 是发行物不是尺子，单次数字受分块压缩影响（同内容 UDZO 波动可达约 20 MiB），不足以判断收益。
+- 发布 DMG 固定用 LZMA（`desktop/python/installer_image.py` 的 `RELEASE_FORMAT`，即 `hdiutil -format ULMO`），不要退回 `hdiutil` 默认的 `UDZO`：默认是 zlib 1 级，同内容比 LZMA 大约 165 MiB。不会被下载的本地产物（应用内增量更新重建的镜像）用 `LOCAL_FORMAT`（ULFO），否则每次更新都多等约 2.5 分钟。
+- 减包只做在打包阶段（`prune_runtime.py`、`subset_font.py`、`forecast_seed.py` 一类），仓库里的源文件、原始字体和总表保持不动；每项裁剪都要给出等价性证据（特征矩阵相等、渲染像素对比、运行时校验），并在缺依赖时退回完整资源而不是中断构建。
+- 不为体积牺牲运行行为：不删 `chromium_headless_shell`（headless 启动 0.12→0.21 秒、单浏览器 255→743 MiB）、不对 `500kV断面分析/接线图.png` 做有损量化（锚点定位依赖像素）、不删 sklearn／scipy（电价预测硬依赖）。
+- 报告体积改动时给出 `.app` 与 DMG 的前后值和验证结论；新的测量结论写进 `packaging/tauri/README.md` 的「安装包体积控制」，本文件只保留决策口径与禁止项，避免数字过期。
+
 ## 版本与更新日志
 
 - 自动维护根目录 `CHANGELOG.md`。每次更新版本时，同步记录该版本日期、用户可见的新增／修复／变更及实际验证结果，不得只改版本号或使用空泛占位内容。
