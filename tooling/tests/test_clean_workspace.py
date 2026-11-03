@@ -120,5 +120,67 @@ class PlanTests(unittest.TestCase):
             self.assertGreaterEqual(removed, 22)
 
 
+class LogArchiveTests(unittest.TestCase):
+    def build_logs(self, base: Path) -> Path:
+        logs = base / "logs"
+        (logs / "release-archive").mkdir(parents=True)
+        (logs / "release-archive" / "old.md").write_text("archived", encoding="utf-8")
+        (logs / "tests.json").write_text("{}", encoding="utf-8")
+        (logs / "ci-tests.json").write_text("{}", encoding="utf-8")
+        for version in ("0.1.10", "0.1.22", "0.1.26"):
+            folder = logs / f"release-v{version}"
+            folder.mkdir()
+            (folder / "notes.md").write_text(version, encoding="utf-8")
+        (logs / "逐模块代码审查-2026-10-27.md").write_text("report", encoding="utf-8")
+        (logs / "module-switch").mkdir()
+        (logs / "module-switch" / "result.md").write_text("x", encoding="utf-8")
+        return logs
+
+    def test_plan_keeps_archive_reports_and_newest_releases(self):
+        with tempfile.TemporaryDirectory() as folder:
+            logs = self.build_logs(Path(folder))
+            names = {item.name for item in clean_workspace.plan_logs(logs=logs, keep_release=1)}
+            self.assertEqual(names, {"release-v0.1.10", "release-v0.1.22",
+                                     "逐模块代码审查-2026-10-27.md", "module-switch"})
+
+    def test_zero_keep_release_moves_every_release_directory(self):
+        with tempfile.TemporaryDirectory() as folder:
+            logs = self.build_logs(Path(folder))
+            names = {item.name for item in clean_workspace.plan_logs(logs=logs, keep_release=0)}
+            self.assertIn("release-v0.1.26", names)
+            self.assertNotIn("release-archive", names)
+
+    def test_negative_keep_release_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "不能为负数"):
+            clean_workspace.kept_release_dirs(["release-v0.1.26"], -1)
+
+    def test_archive_moves_without_deleting_or_overwriting(self):
+        with tempfile.TemporaryDirectory() as folder:
+            logs = self.build_logs(Path(folder))
+            items = clean_workspace.plan_logs(logs=logs, keep_release=1)
+            moved = clean_workspace.archive(items, logs=logs)
+
+            self.assertEqual(len(moved), 4)
+            self.assertFalse((logs / "release-v0.1.10").exists())
+            self.assertTrue((logs / "release-v0.1.26" / "notes.md").is_file())
+            self.assertTrue((logs / "release-archive" / "old.md").is_file())
+            self.assertTrue((logs / "release-archive" / "release-v0.1.22" / "notes.md").is_file())
+            self.assertEqual(
+                (logs / "release-archive" / "逐模块代码审查-2026-10-27.md").read_text(encoding="utf-8"),
+                "report",
+            )
+            self.assertEqual(clean_workspace.plan_logs(logs=logs, keep_release=1), [])
+
+    def test_archive_skips_paths_outside_logs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            logs = self.build_logs(base)
+            outside = base / "keep.md"
+            outside.write_text("x", encoding="utf-8")
+            moved = clean_workspace.archive([outside], logs=logs)
+            self.assertEqual(moved, [])
+            self.assertTrue(outside.is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

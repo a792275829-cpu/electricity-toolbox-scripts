@@ -85,7 +85,7 @@
 
 - 桌面发行每个版本保留完整 DMG 和 `.dmg.sha256`，另发布 `update-manifest.json` 及适用的 `.patch.tar.xz` 增量补丁；不发布独立 `.app`、`.app.tar.gz`、`.sig` 或旧 `latest.json`，也不恢复 PKG。内部 `.app` 仅作构建与验证中间产物。
 - 本地 `dist/` 的完整安装包及其摘要仅保留最新两个正式版本，清理更早版本的本地副本；此规则不影响 GitHub 历史发行附件、增量补丁及升级索引。
-- `dist/` 只放产物：版本化 DMG 及其 `.sha256`、`updates/`、`tauri-build/`、迁移 `*.zip`。发布过程的日志、一次性脚本、分片与索引快照放 `logs/release-<tag>/`，不要写进 `dist/`；`tooling/clean_workspace.py` 按该白名单清理 `dist/` 的其余条目。大安装包直传中断时用 `packaging/tauri/transfer_asset.py`（split／upload／join／clean），分片只在发布上出现摘要一致的完整包后清理。
+- `dist/` 只放产物：版本化 DMG 及其 `.sha256`、`updates/`、`tauri-build/`、迁移 `*.zip`。发布过程的日志、一次性脚本、分片与索引快照放 `logs/release-<tag>/`，不要写进 `dist/`；`tooling/clean_workspace.py` 按该白名单清理 `dist/` 的其余条目，`--archive-logs` 把 `logs/` 顶层的一次性报告和旧发布目录移入 `logs/release-archive/`（只移动不删除）。大安装包直传中断时用 `packaging/tauri/transfer_asset.py`（split／upload／join／clean），分片只在发布上出现摘要一致的完整包后清理。
 - 日常维护优先增量更新，为最近三个正式版本生成直达补丁，保留历史补丁与索引中的升级路径；不得因只保留最新源码副本而删除旧版本发行附件。客户端选择总下载量最小且小于完整包的升级路径，逐步校验与还原；缺少路径、旧应用被改动或补丁失败时自动回退完整 DMG，用户取消不触发回退。
 - 跨主／次版本或显式 `--full-only` 的重大更新使用完整包重设补丁基线。首次引入增量机制时，旧更新器仍需完整升级一次。发布补丁前必须用旧应用副本实际还原，核对全部文件／权限／符号链接与应用签名，并校验索引及 GitHub 附件摘要；禁止将测试补丁直接当发行包。
 - 增量更新只在临时副本还原完整应用并本地生成 DMG。安装到 `~/Applications/电力工具箱.app`；校验后打开镜像，退出旧程序后运行镜像内安装命令，继续复用安装回滚逻辑，保留原配置、用户数据和样例。

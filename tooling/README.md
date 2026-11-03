@@ -10,6 +10,7 @@
 - 每个测试模块使用独立进程与工作目录，超时默认 180 秒，超时会终止其进程组；失败保留原始输出。无测试用例也视为失败。结果 JSON 包含用例计数、耗时、退出码和完整诊断，每完成一个模块立即原子保存；中断保留已完成结果。每个模块使用独立临时数据目录，避免读写真实配置或登录态。
 - CI 与正式发布共用这个入口。新增目录必须登记到 `SUITES`；维护测试会检查是否有遗漏，防止新工具测试游离于 CI。
 - 清理工作区：`.venv/bin/python tooling/clean_workspace.py`（干跑，列出待删项与体积），确认后加 `--apply`。`dist/` 按白名单当纯产物目录处理：只保留最新 `--keep` 个安装包及其 `.sha256`、`updates/`、`tauri-build/` 与迁移 `*.zip`，其余条目（发布日志、一次性脚本、旧版本暂存目录）一律视为可回收。另清 `desktop/src-tauri/target` 与 `payload`。`--keep N` 调整保留版本数，`--keep-build` 只清 `dist` 残留、保留构建缓存。
+- 归档 `logs/` 顶层：`clean_workspace.py --archive-logs`（默认干跑）把一次性验证报告和旧的 `release-v*` 目录移入 `logs/release-archive/`，保留 `release-archive/`、`tests.json`、`ci-tests.json` 与最新 `--keep-release` 个发布目录；只移动、不删除，重名自动加序号。
 - 更新依赖时重新生成并审查锁文件，在源码环境执行初始化、全量测试和启动器 smoke。涉及 openpyxl 时必须保留私有接口兼容测试和现有 Excel 写入／格式／公式回读测试，不单凭版本号判断兼容。
 
 ## 业务与模块边界

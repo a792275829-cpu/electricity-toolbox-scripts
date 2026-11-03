@@ -6,7 +6,13 @@ installers, their digests, ``updates/`` (incremental patches), ``tauri-build/``
 Anything else there is release staging left behind by a publish run and belongs
 under ``logs/release-<tag>/`` instead.
 
-Dry run by default; pass ``--apply`` to delete.
+``--archive-logs`` keeps the top of ``logs/`` readable: one-off verification
+reports and older ``release-v*`` copies are moved into
+``logs/release-archive/`` (never deleted), keeping the archive itself, the test
+reports and the newest ``--keep-release`` release directories in place.
+
+Dry run by default; pass ``--apply`` to delete (or, with ``--archive-logs``,
+to move).
 """
 
 from __future__ import annotations
@@ -20,12 +26,17 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 TARGET = ROOT / "desktop/src-tauri/target"
 PAYLOAD = ROOT / "desktop/src-tauri/payload"
+LOGS = ROOT / "logs"
 
 INSTALLER_RE = re.compile(r"^ElectricityToolbox-(\d+)\.(\d+)\.(\d+)-apple-silicon\.dmg$")
+RELEASE_DIR_RE = re.compile(r"^release-v(\d+)\.(\d+)\.(\d+)$")
 BUILD_DIRS = ("debug", "release", "aarch64-apple-darwin")
 # Products other tooling depends on: patch index, download cache, migration samples.
 KEEP_NAMES = {"updates", "tauri-build"}
 KEEP_SUFFIXES = (".zip",)
+# logs/ entries that stay at the top level when archiving.
+LOG_ARCHIVE = "release-archive"
+LOG_KEEP_NAMES = {LOG_ARCHIVE, "tests.json", "ci-tests.json"}
 
 
 def installer_versions(names):
@@ -119,13 +130,80 @@ def apply(items):
     return removed
 
 
+def kept_release_dirs(names, keep):
+    """Newest ``release-vX.Y.Z`` directories that stay visible in ``logs/``."""
+
+    if keep < 0:
+        raise ValueError("--keep-release 不能为负数")
+    versions = {}
+    for name in names:
+        match = RELEASE_DIR_RE.match(name)
+        if match:
+            versions[tuple(int(part) for part in match.groups())] = name
+    ordered = sorted(versions, reverse=True)
+    return {versions[version] for version in ordered[:keep]}
+
+
+def plan_logs(*, logs=LOGS, keep_release=2):
+    """Top-level ``logs/`` entries that :func:`archive` would move away."""
+
+    if not logs.is_dir():
+        return []
+    keep = kept_release_dirs([path.name for path in logs.iterdir() if path.is_dir()], keep_release)
+    items = []
+    for entry in sorted(logs.iterdir()):
+        if entry.name in LOG_KEEP_NAMES or entry.name in keep:
+            continue
+        if entry == logs / LOG_ARCHIVE:
+            continue
+        items.append(entry)
+    return items
+
+
+def archive(items, *, logs=LOGS):
+    """Move entries into ``logs/release-archive/`` without deleting anything."""
+
+    destination = logs / LOG_ARCHIVE
+    destination.mkdir(parents=True, exist_ok=True)
+    moved = []
+    for path in items:
+        path = Path(path)
+        if not path.exists() or path.parent != logs:
+            continue
+        target = destination / path.name
+        index = 1
+        while target.exists():
+            target = destination / f"{path.name}-{index}"
+            index += 1
+        shutil.move(str(path), str(target))
+        moved.append((path.name, target.name))
+    return moved
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep", type=int, default=2, help="保留最新几个版本的安装包")
     parser.add_argument("--keep-build", action="store_true",
                         help="保留 target 与 payload，只清理安装包与 dist 残留")
-    parser.add_argument("--apply", action="store_true", help="真正删除；默认只列出")
+    parser.add_argument("--archive-logs", action="store_true",
+                        help="只把 logs/ 顶层的一次性报告与旧版释放目录移入 logs/release-archive/")
+    parser.add_argument("--keep-release", type=int, default=2,
+                        help="logs/ 顶层保留最新几个 release-v* 目录（配合 --archive-logs）")
+    parser.add_argument("--apply", action="store_true", help="真正执行；默认只列出")
     args = parser.parse_args(argv)
+
+    if args.archive_logs:
+        items = plan_logs(keep_release=args.keep_release)
+        total = sum(path_size(item) for item in items)
+        for item in items:
+            print(f"{human(path_size(item)):>7}  {item.name}")
+        print(f"{len(items)} 项，合计 {human(total)}，将移入 logs/{LOG_ARCHIVE}/")
+        if not args.apply:
+            print("干跑：确认后加 --apply 执行归档（只移动，不删除）")
+            return 0
+        moved = archive(items)
+        print(f"已归档 {len(moved)} 项；logs/ 顶层剩余 {len(list(LOGS.iterdir()))} 项")
+        return 0
 
     items = plan(args.keep)
     if args.keep_build:
