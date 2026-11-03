@@ -198,5 +198,35 @@ r.run(['fixture'],report=Path({str(report)!r}))
                     process.communicate()
 
 
+    def test_example_config_keys_are_read_by_tool_code(self):
+        """config.example.json 只允许列出真正被代码读取的字段，避免文档承诺无效开关。"""
+        examples = sorted(ROOT.glob('*/config.example.json')) + sorted(
+            ROOT.glob('*/*/config.example.json')
+        )
+        self.assertTrue(examples)
+        shared = '\n'.join(
+            path.read_text(encoding='utf-8')
+            for path in (ROOT / 'toolbox_shared').glob('*.py')
+        )
+        for example in examples:
+            keys = json.loads(example.read_text(encoding='utf-8'))
+            self.assertTrue(keys, example)
+            source = '\n'.join(
+                path.read_text(encoding='utf-8', errors='ignore')
+                for path in example.parent.rglob('*.py')
+                if '__pycache__' not in path.parts
+                and 'tests' not in path.parts
+                and '输出' not in path.parts
+            )
+            for key in keys:
+                with self.subTest(example=str(example.relative_to(ROOT)), key=key):
+                    quoted = (f'"{key}"', f"'{key}'")
+                    self.assertTrue(
+                        any(token in source for token in quoted)
+                        or any(token in shared for token in quoted),
+                        f'{key} 未被任何代码读取',
+                    )
+
+
 if __name__ == '__main__':
     unittest.main()

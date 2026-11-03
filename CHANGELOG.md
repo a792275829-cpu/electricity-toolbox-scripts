@@ -7,6 +7,11 @@
 - 验证：maintenance 套件 33 项（含清理脚本 7 项、补传工具 11 项）与全量套件通过；`split`／`join` 用 5 MB 随机文件实跑，8 片合并后 sha256 与源文件一致；`transfer_asset.py --help`、`clean_workspace.py` 干跑正常（`dist/` 已无待清理条目）。
 - 文档校正：根 README 的 500kV 默认阈值改为代码实际的 80 元/MWh，结果目录改为 `~/Downloads` 且说明不再按文件建子目录，移除已删的“打开最近网页”；运行诊断改为 17 个入口文件；集团每日上传补回 `config.json` 及其 `headless` 适用范围；源码系统要求统一为 macOS 14；15 个工具名称与侧栏一致，功能章节按 1—15 连续编号，并补上此前缺失的风力预测截图、现货价格分析表更新两节；独立登录态清单由 7 项补到 11 项。
 - 文档校正：修正 `AGENTS.md`、`500kV断面分析/README.md` 中不存在的 `电力工具箱.command` 路径（实际为 `00_启动/电力工具箱.command`），桌面目录文档的 `toolbox_storage` 改为 `toolbox_shared.storage`；README 与 `AGENTS.md` 的完整测试入口统一为 `tooling/run_tests.py`，与 CI 一致。
+- 文档结构：根 README 收为入口索引（安装、账号、全局约定、15 个工具索引），逐工具的操作步骤和写入口径下沉到模块 `README.md`；新增或重写 11 个模块文档（上网电量、风力预测、市场表、广东电价预测、出力受限、南方日报、出清汇总、早报、集团上传、WPS、工具箱界面层），新增 `电力工具箱/docs/README.md` 标注历史设计与性能测量的状态。
+- 修复更新日志发布插入点：`version.py` 过去把新版本插在“未发布”上方，已发布条目会残留在下方成为重复记录；现在发布时自动并入“未发布”条目并移除该段，新增 3 项回归（`test_version.py` 共 8 项）。
+- 清理无效配置字段：从示例文件移除从未被代码读取的 `unitIdsMode`、`skipExisting`、`exportTimeoutSeconds`、`downloadDir`，示例不再携带账号占位符；新增维护测试检查 `config.example.json` 中每个字段都能在代码里找到引用。
+- 500kV 模块文档改写为当前行为说明，去掉“取消／移除／上一版”式的变更史段落，保留判定规则、输出结构、校准、区域分类、Rust 加速与测试入口。
+- 验证：maintenance 套件 40 项（含新增配置字段校验）、`test_version.py` 8 项通过；全仓 50 个 Markdown 文件的相对链接与锚点检查为 0 失效。
 
 ## [0.1.26] - 2026-11-02
 

@@ -27,6 +27,18 @@ def release_changes(version):
     return content[match.start():end].strip()
 
 
+def _unreleased_block(content):
+    """返回 '未发布' 段范围与条目；该段在发布时并入新版本，避免留下重复记录。"""
+    heading = re.search(r"^## 未发布(?: - \d{4}-\d{2}-\d{2})?\s*$", content, re.M)
+    if heading is None:
+        return None
+    following = re.search(r"^## ", content[heading.end():], re.M)
+    end = heading.end() + following.start() if following else len(content)
+    body = content[heading.end():end]
+    bullets = [line[2:].strip() for line in body.splitlines() if line.startswith("- ")]
+    return heading.start(), end, bullets
+
+
 def update_changelog(version, notes, date=None):
     notes = [note.strip() for note in notes if note.strip()]
     if not notes or any("\n" in note or "\r" in note for note in notes):
@@ -37,6 +49,11 @@ def update_changelog(version, notes, date=None):
     content = path.read_text(encoding="utf-8") if path.exists() else "# 更新日志\n\n"
     if re.search(rf"^## \[{re.escape(version)}\]", content, re.M):
         raise ValueError(f"{version} 已有更新日志，请编辑已有记录或递增版本")
+    pending = _unreleased_block(content)
+    if pending is not None:
+        start, end, bullets = pending
+        notes.extend(item for item in bullets if item not in notes)
+        content = content[:start] + content[end:].lstrip("\n")
     section = f"## [{version}] - {date}\n\n" + "\n".join(f"- {note}" for note in notes) + "\n\n"
     first = re.search(r"^## ", content, re.M)
     position = first.start() if first else len(content.rstrip()) + 2
