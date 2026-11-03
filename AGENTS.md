@@ -84,16 +84,8 @@
 
 ## 版本与更新日志
 
-- 自动维护根目录 `CHANGELOG.md`。每次更新版本时，同步记录该版本日期、用户可见的新增／修复／变更及实际验证结果，不得只改版本号或使用空泛占位内容。
-- 使用 `.venv/bin/python packaging/tauri/version.py set X.Y.Z --notes "具体变更"` 同步版本和日志；多项变更重复传入 `--notes`。日期默认采用 Asia/Shanghai，历史记录必须保留。
-- 开发期的零散记录写在 CHANGELOG 顶部的 `## 未发布` 段；执行 `set` 时该段条目会并入新版本并整段移除，所以不要在该段保留已发布内容。每个版本只保留面向用户的变更与验证结论，逐次调试过程放提交信息或 `logs/`，单条尽量控制在 200 字内。
-- `CHANGELOG.md` 是逐版本更新内容的唯一来源；`packaging/tauri/release_notes.md` 只维护通用安装说明。发布时由版本脚本提取当前版本内容并拼接安装说明，用于 GitHub Release 与应用内更新说明。
-- 发布前执行 `version.py check --tag vX.Y.Z --require-notes`，确认版本一致且更新内容非空；缺少对应日志时禁止打包发布。已发布版本不得覆盖，下一次发布递增版本号。
-- 仅构建和发布 macOS Apple 芯片安装包，完成针对性测试、安装包与摘要校验后再发布 GitHub 正式版；生成物和签名私钥不进入 Git。
-
-- 桌面发行每个版本保留完整 DMG 和 `.dmg.sha256`，另发布 `update-manifest.json` 及适用的 `.patch.tar.xz` 增量补丁；不发布独立 `.app`、`.app.tar.gz`、`.sig` 或旧 `latest.json`，也不恢复 PKG。内部 `.app` 仅作构建与验证中间产物。
-- 本地 `dist/` 的完整安装包及其摘要仅保留最新两个正式版本，清理更早版本的本地副本；此规则不影响 GitHub 历史发行附件、增量补丁及升级索引。
-- `dist/` 只放产物：版本化 DMG 及其 `.sha256`、`updates/`、`tauri-build/`、迁移 `*.zip`。发布过程的日志、一次性脚本、分片与索引快照放 `logs/release-<tag>/`，不要写进 `dist/`；`tooling/clean_workspace.py` 按该白名单清理 `dist/` 的其余条目，`--archive-logs` 把 `logs/` 顶层的一次性报告和旧发布目录移入 `logs/release-archive/`（只移动不删除）。大安装包直传中断时用 `packaging/tauri/transfer_asset.py`（split／upload／join／clean），分片只在发布上出现摘要一致的完整包后清理。
-- 日常维护优先增量更新，为最近三个正式版本生成直达补丁，保留历史补丁与索引中的升级路径；不得因只保留最新源码副本而删除旧版本发行附件。客户端选择总下载量最小且小于完整包的升级路径，逐步校验与还原；缺少路径、旧应用被改动或补丁失败时自动回退完整 DMG，用户取消不触发回退。
-- 跨主／次版本或显式 `--full-only` 的重大更新使用完整包重设补丁基线。首次引入增量机制时，旧更新器仍需完整升级一次。发布补丁前必须用旧应用副本实际还原，核对全部文件／权限／符号链接与应用签名，并校验索引及 GitHub 附件摘要；禁止将测试补丁直接当发行包。
-- 增量更新只在临时副本还原完整应用并本地生成 DMG。安装到 `~/Applications/电力工具箱.app`；校验后打开镜像，退出旧程序后运行镜像内安装命令，继续复用安装回滚逻辑，保留原配置、用户数据和样例。
+- 自动维护根目录 `CHANGELOG.md`：用 `.venv/bin/python packaging/tauri/version.py set X.Y.Z --notes "具体变更"` 同步版本和日志（多项变更重复传入 `--notes`，日期默认 Asia/Shanghai，历史记录必须保留）；开发期的零散条目写在顶部 `## 未发布` 段，`set` 时会并入新版本并整段移除。每条只写用户可见的变更与验证结果，逐次调试过程放提交信息或 `logs/`，单条控制在 200 字内。
+- `CHANGELOG.md` 是逐版本内容的唯一来源，`packaging/tauri/release_notes.md` 只维护通用安装说明；发布前执行 `version.py check --tag vX.Y.Z --require-notes`，版本不一致或更新内容为空时禁止打包发布。已发布版本不得覆盖，下一次递增版本号。
+- 只发布 macOS Apple 芯片的完整 DMG 与 `.dmg.sha256`，加 `update-manifest.json` 和适用的 `.patch.tar.xz` 增量补丁；不发布独立 `.app`、`.app.tar.gz`、`.sig` 或旧 `latest.json`，也不恢复 PKG，构建产物与签名私钥不进入 Git。发布前跑完针对性测试，并用 `validate_installer.py` 核对安装包、补丁、索引与摘要后再发 GitHub 正式版。
+- 日常维护优先增量更新：为最近三个正式版本生成直达补丁并保留历史升级路径，客户端走总下载量最小且小于完整包的路径，缺少路径、旧应用被改动或补丁失败时自动回退完整 DMG（用户取消不触发回退）；跨主／次版本或 `--full-only` 的重大更新用完整包重设基线。发布补丁前必须用未改动的旧应用副本实际还原，核对文件／权限／符号链接与签名，禁止拿测试补丁当发行包；清理本地源码副本时不得删除旧版本发行附件与索引。
+- 具体操作细节以 `packaging/tauri/README.md` 为准：`dist/` 白名单与 `tooling/clean_workspace.py --keep`（默认 2 个版本）、`transfer_asset.py` 分片直传、`build_updates.py` 与 `delta_update.py` 的补丁生成和安装流程。本节只定规则。
