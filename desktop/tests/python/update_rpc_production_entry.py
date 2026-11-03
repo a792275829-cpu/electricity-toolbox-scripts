@@ -22,7 +22,7 @@ os.environ['TOOLBOX_DATA_ROOT'] = str(folder / 'data')
 old_app = Path.home() / 'Applications/电力工具箱.app'
 assert app_version(old_app) == '0.1.13', 'production test requires an installed v0.1.13'
 original = inventory(old_app)
-release_folder = ROOT / 'dist/release-v0.1.14'
+release_folder = ROOT / 'logs/release-v0.1.14'
 release = json.loads((release_folder / 'published.json').read_text())
 assert release['tag_name'] == 'v0.1.14' and not release['draft']
 assets = {item['name']: item for item in release['assets']}

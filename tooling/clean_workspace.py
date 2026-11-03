@@ -1,8 +1,10 @@
 """Reclaim workspace space without touching anything that cannot be rebuilt.
 
-Keeps the newest ``--keep`` installers in ``dist`` together with the incremental
-patch assets and the download cache the packaging scripts reuse. Everything else
-it reports is either a duplicate copy or a build output that a rebuild recreates.
+``dist`` is treated as a pure artifact directory: only the newest ``--keep``
+installers, their digests, ``updates/`` (incremental patches), ``tauri-build/``
+(the packaging download cache) and migration ``*.zip`` deliverables survive.
+Anything else there is release staging left behind by a publish run and belongs
+under ``logs/release-<tag>/`` instead.
 
 Dry run by default; pass ``--apply`` to delete.
 """
@@ -21,6 +23,9 @@ PAYLOAD = ROOT / "desktop/src-tauri/payload"
 
 INSTALLER_RE = re.compile(r"^ElectricityToolbox-(\d+)\.(\d+)\.(\d+)-apple-silicon\.dmg$")
 BUILD_DIRS = ("debug", "release", "aarch64-apple-darwin")
+# Products other tooling depends on: patch index, download cache, migration samples.
+KEEP_NAMES = {"updates", "tauri-build"}
+KEEP_SUFFIXES = (".zip",)
 
 
 def installer_versions(names):
@@ -44,29 +49,32 @@ def stale_installers(names, keep):
     return [versions[version] for version in ordered[keep:]]
 
 
+def kept_installers(names, keep):
+    versions = installer_versions(names)
+    ordered = sorted(versions, reverse=True)
+    return {versions[version] for version in ordered[:keep]}
+
+
 def plan(keep, *, dist=DIST, target=TARGET, payload=PAYLOAD):
-    """List every path that :func:`apply` would delete, keeping newest installers."""
+    """List every path that :func:`apply` would delete."""
 
     items = []
-    installers = sorted(path.name for path in dist.glob("*.dmg"))
-    for name in stale_installers(installers, keep):
+    names = sorted(path.name for path in dist.glob("*.dmg"))
+    keep_set = kept_installers(names, keep)
+    for name in stale_installers(names, keep):
         items.append(dist / name)
         digest = dist / f"{name}.sha256"
         if digest.exists():
             items.append(digest)
 
-    for release in sorted(dist.glob("release-v*")):
-        if not release.is_dir():
-            continue
-        # The versioned installer at the dist root is the single copy worth keeping.
-        for copy in sorted(release.glob("*.dmg")):
-            items.append(copy)
-            digest = release / f"{copy.name}.sha256"
-            if digest.exists():
-                items.append(digest)
-        transfer = release / "transfer"
-        if transfer.is_dir():
-            items.append(transfer)
+    if dist.is_dir():
+        for entry in sorted(dist.iterdir()):
+            name = entry.name
+            if name in KEEP_NAMES or name.endswith(KEEP_SUFFIXES):
+                continue
+            if name in keep_set or name in {f"{kept}.sha256" for kept in keep_set}:
+                continue
+            items.append(entry)
 
     for name in BUILD_DIRS:
         candidate = target / name
@@ -115,7 +123,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep", type=int, default=2, help="保留最新几个版本的安装包")
     parser.add_argument("--keep-build", action="store_true",
-                        help="保留 target 与 payload，只清理安装包副本")
+                        help="保留 target 与 payload，只清理安装包与 dist 残留")
     parser.add_argument("--apply", action="store_true", help="真正删除；默认只列出")
     args = parser.parse_args(argv)
 

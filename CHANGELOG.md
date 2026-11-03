@@ -1,5 +1,11 @@
 # 更新日志
 
+## 未发布 - 2026-11-03
+
+- `dist/` 改为纯产物目录：只放版本化 DMG 及其 `.sha256`、`updates/`、`tauri-build/` 与迁移 `*.zip`。发布过程的日志、一次性脚本、分片与索引快照统一放 `logs/release-<tag>/`；此前 106 个条目里只有 8 个是产物，其余（旧版本暂存目录、`transfer/` 分片、build-v0.1.4 起的日志）已归档到 `logs/release-archive/`，`dist/release-v0.1.*` 归入 `logs/release-v0.1.*`，`update_rpc_production_entry.py` 的取数路径同步改为 `logs/`。`tooling/clean_workspace.py` 相应改成白名单规则：`dist/` 中不在白名单内的条目一律可回收，不再逐个列举特例。
+- 新增 `packaging/tauri/transfer_asset.py`（11 项测试）：700 MB 安装包直传中断时的补传工具。`split` 切成同源分片并写 manifest（默认 16 片，拒绝写进 `dist/`），`upload` 只补传草稿发布上缺失或摘要不符的分片（已一致则跳过），`join` 合并并按分片与总摘要双重校验、失败不留半成品，`clean` 只在发布上出现摘要一致的完整包后才删除分片资产与本地分片，否则保留并报错。替换原先散落在 `dist/release-v0.1.22/` 里的 16 线程 curl 固定 IP 脚本，那种脚本既无校验收尾，也会把整份 DMG 再复制一遍。
+- 验证：maintenance 套件 33 项（含清理脚本 7 项、补传工具 11 项）与全量套件通过；`split`／`join` 用 5 MB 随机文件实跑，8 片合并后 sha256 与源文件一致；`transfer_asset.py --help`、`clean_workspace.py` 干跑正常（`dist/` 已无待清理条目）。
+
 ## [0.1.26] - 2026-11-02
 
 - 页面切换与首次打开更省重绘：分组框与日志面板改用描边绘制，背景同色按钮改为纯色填充，切换时省掉多余的画布复位与重复置顶。
