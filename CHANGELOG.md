@@ -2,6 +2,9 @@
 
 ## 未发布 - 2026-11-03
 
+- 兜底中文字体改为子集：`packaging/tauri/subset_font.py` 按 GB2312 全部字符加源码非 ASCII 字符裁剪，保留可变字重轴与字形宽度，23.96 → 5.45 MiB。`.app` 累计 1373 → 1183.4 MiB（−13.8%）。200／400／700／900 字重下字形宽度与原始字体完全一致；整表渲染 364.7 万像素中 229 个有差异，集中在「万」字变体边缘，系统字体可用时不会走该兜底分支。缺 `fontTools` 时保留完整字体并打印警告，构建不中断。
+- 验证：desktop 141 项（含 2 项字体子集回归）、wind 12 项、maintenance 45 项通过，`validate_runtime.py` 六项校验通过；同内容连续三次 `build_dmg.py` 得到 592.7／611.6／612.3 MiB，UDZO 体积波动约 20 MiB，此后体积对比一律以 `.app` 的 `du -sk` 为准。
+
 - 安装包瘦身 171 MiB：`.app` 由 1373 MiB 降到 1202 MiB（−12.5%），DMG 由 677.7 MiB 降到 616.6 MiB（−9.0%）。打包不再单独暂存 Node，业务 JS 脚本改用 Python Playwright 轮子自带的 `driver/node`，`node_executable()` 按 `sys.prefix` 在磁盘上解析该路径、不 import Playwright；`prune_runtime.py` 追加删除独立 `runtime/node`、`pip`/`setuptools`/`_distutils_hack` 及其 `distutils-precedence.pth`、`ensurepip`、Tk 9 目录与 dylib，并把 `python3`/`python` 硬链接到 `python3.11`（三份 16 MiB 副本合一）。测试同时发现并修掉了“UI 线程探测 Playwright”的回归。
 - 验证：真实 payload 上 `validate_runtime.py` 六项校验全通过（Python persistent 上下文、截图、PDF、node persistent、科学计算）；安装包内 `node_executable()` 解析到 `runtime/python/lib/python3.11/site-packages/playwright/driver/node`（v22.18.0），并用该 Node 启动打包内 Chromium 的 JS persistent 上下文成功；toolbox 680 项、desktop 139 项、maintenance 45 项测试全部通过；实建 `.app` 1201.9 MiB 与 DMG 616.6 MiB 复核。
 - `dist/` 改为纯产物目录：只放版本化 DMG 及其 `.sha256`、`updates/`、`tauri-build/` 与迁移 `*.zip`。发布过程的日志、一次性脚本、分片与索引快照统一放 `logs/release-<tag>/`；此前 106 个条目里只有 8 个是产物，其余（旧版本暂存目录、`transfer/` 分片、build-v0.1.4 起的日志）已归档到 `logs/release-archive/`（18 MB）；其中 `installer-ab`（3.9 G）与 `installer-a-only`（2.0 G）是旧 A/B 安装器验证留下的整包解压夹具，含 Chromium 与 Python 运行时且无任何代码引用，直接删除而非归档，`dist/release-v0.1.*` 归入 `logs/release-v0.1.*`，`update_rpc_production_entry.py` 的取数路径同步改为 `logs/`。`tooling/clean_workspace.py` 相应改成白名单规则：`dist/` 中不在白名单内的条目一律可回收，不再逐个列举特例。

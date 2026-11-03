@@ -30,7 +30,9 @@
 
 ## 安装包体积控制
 
-- `prune_runtime.py` 在签名前裁剪 staging 运行环境：移除单独暂存的 `runtime/node`、`pip`／`setuptools`／`_distutils_hack`（连同会让解释器启动报错的 `distutils-precedence.pth`）、`ensurepip`、Tk 9 目录与 dylib、明确列出的依赖测试目录；保留许可证、包元数据、字体、模板及全部业务依赖。NumPy 的测试树存在运行时导入，必须保留；Python 头文件用于重复构建 Tk 扩展，同样保留。`python3`／`python` 与 `python3.11` 硬链接为同一份解释器。
+- `prune_runtime.py` 在签名前裁剪 staging 运行环境：移除单独暂存的 `runtime/node`、`pip`／`setuptools`／`_distutils_hack`（连同会让解释器启动报错的 `distutils-precedence.pth`）、`ensurepip`、Tk 9 目录与 dylib、明确列出的依赖测试目录；保留许可证、包元数据、模板及全部业务依赖。NumPy 的测试树存在运行时导入，必须保留；Python 头文件用于重复构建 Tk 扩展，同样保留。`python3`／`python` 与 `python3.11` 硬链接为同一份解释器。
 - 仅保留 A 方案。完整 Chromium 与 headless shell 同时打包，Python 后台／PDF 沿用 Playwright 默认 headless shell，可见窗口使用完整 Chromium。删掉 headless shell 改让后台也用完整 Chromium，DMG 可再小约 82 MiB，但 2026-11 复测（单浏览器打开一页、4 次取中位）headless 启动 0.12 → 0.21 秒、进程树 RSS 255 → 743 MiB，双浏览器并发约 1.5 GB，因此仍不采用。源码运行仍优先系统 Chrome，Node 上传逻辑不变；各工具的 profile、登录态和锁保持独立。
 - 新环境使用 `playwright install chromium`；复用曾按 B 裁剪的 staging 时自动补回缺失浏览器，跨平台传入不完整运行环境则拒绝构建。运行环境不内置 Node/npm 与 pip：业务 JS 脚本复用 Playwright 轮子自带的 `driver/node`，`toolbox.runtime.node_executable()` 按 `sys.prefix` 在磁盘上解析该路径，不 import Playwright。
+- `subset_font.py` 把兜底中文字体按 GB2312 全部字符加该模块源码里出现的非 ASCII 字符做子集，保留可变字重轴与字形宽度：23.96 → 5.45 MiB。缺 `fontTools` 时保留完整字体并打印警告，构建不中断。
 - 构建生成 `payload/runtime-pruning.json` 记录当次移除项及逻辑字节数。该数值不是 DMG 压缩收益。原生构建会执行 `validate_runtime.py`，离线验证科学计算、Python/Node 独立临时 profile、截图与 PDF。可用包内 Python 执行 `validate_runtime.py /绝对路径/payload --headed` 追加可见窗口验证；不会读取生产登录态或上传数据。
+- 比较体积以 `.app` 的 `du -sk` 为准：同一内容连续执行 `build_dmg.py` 的 UDZO 体积实测波动可达约 20 MiB，小于该量级的差异不能当作真实收益。

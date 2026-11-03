@@ -186,6 +186,26 @@ def ensure_browser_runtime(runtime: Path, *, native: bool) -> None:
         raise RuntimeError("Playwright 安装后仍缺少 Chromium / headless shell")
 
 
+def shrink_fallback_font(source: Path) -> None:
+    """Subset the bundled CJK fallback font; keep it whole without fontTools."""
+    from subset_font import shrink
+    font = source / "风力预测截图/fonts/NotoSerifSC.ttf"
+    try:
+        stats = shrink(font, sorted((source / "风力预测截图").rglob("*.py")))
+    except ImportError:
+        print(
+            "警告：未安装 fontTools，保留完整兜底字体，安装包多约 18 MiB；"
+            "需要瘦身请执行 .venv/bin/pip install fonttools",
+            flush=True,
+        )
+        return
+    print(
+        f"兜底字体子集化：{stats['characters']} 字，"
+        f"{stats['before_bytes'] / 1048576:.1f} → {stats['after_bytes'] / 1048576:.1f} MiB",
+        flush=True,
+    )
+
+
 def prepare(target: str, runtime_from: Path | None = None, forecast_workbook: Path | None = None):
     native = (
         "aarch64-apple-darwin"
@@ -208,6 +228,7 @@ def prepare(target: str, runtime_from: Path | None = None, forecast_workbook: Pa
     build_support.export_source(source, predicate=runtime_source)
     prepare_price_xlsx(source, target)
     validate_runtime_assets(source)
+    shrink_fallback_font(source)
     defaults = payload / "defaults"
     prepare_defaults(source, defaults)
     if prepare_forecast_seed(defaults, forecast_workbook) is None:

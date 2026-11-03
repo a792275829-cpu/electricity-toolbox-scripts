@@ -33,7 +33,7 @@ cd ..
 python packaging/tauri/build_dmg.py desktop/src-tauri/target/release/bundle/macos/电力工具箱.app --output dist
 ```
 
-构建机需要 `uv`、Node/npm、Rust 和根目录 Python 依赖。资源输出到 Git 忽略的 `desktop/src-tauri/payload/`；安装包位于 `desktop/src-tauri/target/release/bundle/`，指定 `--target` 时多一层目标目录。
+构建机需要 `uv`、Node/npm、Rust 和根目录 Python 依赖；`.venv` 里装有 `fontTools` 时打包会把兜底中文字体裁成 GB2312 子集（23.96 → 5.45 MiB），没有则保留完整字体并打印警告。资源输出到 Git 忽略的 `desktop/src-tauri/payload/`；安装包位于 `desktop/src-tauri/target/release/bundle/`，指定 `--target` 时多一层目标目录。
 
 `payload/runtime/` 只保留一份 Node：Python Playwright 轮子自带的 `driver/node`，业务 JS 脚本通过 `toolbox.runtime.node_executable()` 复用它；打包时 `prune_runtime.py` 会删除独立暂存的 `runtime/node`、`pip`/`setuptools`、Tk 9 和重复的 `python3` 副本。
 
