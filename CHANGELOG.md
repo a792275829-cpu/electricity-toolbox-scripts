@@ -11,7 +11,7 @@
 - 修复更新日志发布插入点：`version.py` 过去把新版本插在“未发布”上方，已发布条目会残留在下方成为重复记录；现在发布时自动并入“未发布”条目并移除该段，新增 3 项回归（`test_version.py` 共 8 项）。
 - 清理无效配置字段：从示例文件移除从未被代码读取的 `unitIdsMode`、`skipExisting`、`exportTimeoutSeconds`、`downloadDir`，示例不再携带账号占位符；新增维护测试检查 `config.example.json` 中每个字段都能在代码里找到引用。
 - 500kV 模块文档改写为当前行为说明，去掉“取消／移除／上一版”式的变更史段落，保留判定规则、输出结构、校准、区域分类、Rust 加速与测试入口。
-- 验证：maintenance 套件 40 项（含新增配置字段校验）、`test_version.py` 8 项通过；全仓 50 个 Markdown 文件的相对链接与锚点检查为 0 失效。
+- 验证：maintenance 套件 40 项（含新增配置字段校验）、toolbox 套件 678 项、`test_version.py` 8 项全部通过；全仓 50 个 Markdown 文件的相对链接与锚点检查为 0 失效；用当前日志模拟 `version.py set` 后新版本位于顶部、`未发布` 段已并入。
 
 ## [0.1.26] - 2026-11-02
 
