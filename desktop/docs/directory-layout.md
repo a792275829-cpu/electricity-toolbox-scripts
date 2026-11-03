@@ -40,7 +40,7 @@ Mac 用户目录：`~/Library/Application Support/com.electricity.toolbox`。
   development/          开发版独立使用同样的 v2 结构
 ```
 
-数据中保留原模块中文名称、内部相对路径和输出文件名。源代码和静态模板从 `app/` 读取；需要写入的内部路径统一通过 `toolbox_storage.data_path()`，Node 上传模块使用对应的 `storage-paths.mjs`。它们只在桌面进程设置 `TOOLBOX_CODE_ROOT`、`TOOLBOX_DATA_ROOT` 时生效。外部工作簿路径保持原值，原版源码启动没有这些变量时保持原行为。
+数据中保留原模块中文名称、内部相对路径和输出文件名。源代码和静态模板从 `app/` 读取；需要写入的内部路径统一通过 `toolbox_shared.storage.data_path()`，Node 上传模块使用对应的 `storage-paths.mjs`。它们只在桌面进程设置 `TOOLBOX_CODE_ROOT`、`TOOLBOX_DATA_ROOT` 时生效。外部工作簿路径保持原值，原版源码启动没有这些变量时保持原行为。
 
 开发版直接执行仓库源码，数据保存在 `development/data/`，修改 Python 后重启即可，不需要打包。开发数据与已安装版本的数据独立；首次测试可从旧版工作目录复制一份，再执行目录迁移。不会在每次启动时覆盖开发配置。
 

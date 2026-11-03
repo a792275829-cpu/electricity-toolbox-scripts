@@ -24,7 +24,7 @@
 ## 启动与依赖
 
 - 项目 Python 环境以根目录 `.venv` 为准；不要把个人机器上的绝对解释器路径写入代码。
-- macOS 初始化入口是 `./setup_macos.command`，GUI 启动入口是 `./电力工具箱.command`。
+- macOS 初始化入口是 `./setup_macos.command`，GUI 启动入口是 `./00_启动/电力工具箱.command`。
 - 保持“复制整个文件夹到另一台 Mac 后可初始化并运行”的可移植目标。
 - 界面调试统一使用 `00_启动/源码调试版.command`，涉及 Tauri 生命周期时使用 `00_启动/Tauri开发版.command`；仅修改当前仓库源码，禁止向正式版用户目录的 `app/` 或已安装 `.app` 复制调试代码。开发数据使用独立的 `development/data/`。
 - 正式版因本地源码冲突无法启动时，先保留第一条异常、冲突清单和安装记录，按 `desktop/docs/startup-recovery.md` 备份、校验并恢复发行源码；不得伪造安装清单、关闭冲突保护或清空用户数据。恢复后回读发行清单校验源码，并实际重启验证主界面。
@@ -55,8 +55,8 @@
 - 文案或小范围 GUI 修改：至少完成模块导入或页面创建 smoke test。
 - 计算、解析、映射修改：运行针对性测试，并用小型或真实样本核对结果。
 - 登录、真实写入、安装、并发和跨 Mac 改动：运行端到端流程，并检查实际产物或持久化状态。
-- 工具箱测试通常从 `电力工具箱/` 目录运行：`python3 -m unittest discover -s tests`。
-- 启动器 smoke test 使用：`TOOLBOX_SMOKE=1 ./电力工具箱.command`。
+- 完整分模块测试用 `.venv/bin/python tooling/run_tests.py`（与 CI 同一入口）；针对性单测从 `电力工具箱/` 目录运行：`PYTHONPATH=.. .venv/bin/python -m unittest tests.test_xxx`。
+- 启动器 smoke test 使用：`TOOLBOX_SMOKE=1 ./00_启动/电力工具箱.command`。
 - 修改依赖或启动流程时，运行 `./setup_macos.command` 或等价的 `.venv` 导入检查，并验证启动器实际可用。
 - 测试被环境、权限或外部服务阻塞时，明确报告未验证部分及具体原因，不要把部分成功表述成全部完成。
 
