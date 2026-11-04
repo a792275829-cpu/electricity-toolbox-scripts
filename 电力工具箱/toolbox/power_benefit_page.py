@@ -38,7 +38,7 @@ class PowerBenefitUpdatePage(ToolPage):
         form.columnconfigure(1, weight=1)
         add_date_row(
             form, row=0, start_variable=self.start_date, end_variable=self.end_date,
-            end_label="截止日期 D")
+            label="日期范围", hint="结束日期为 D", start_optional=True)
         buttons = []
         for index, station in enumerate(("归湖", "鮀莲", "海风")):
             buttons.append(add_path_row(

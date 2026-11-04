@@ -65,7 +65,8 @@ class SpotPriceUpdatePage(ToolPage):
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
         add_date_row(
-            form, row=0, start_variable=self.start_date, end_variable=self.end_date
+            form, row=0, start_variable=self.start_date, end_variable=self.end_date,
+            label="更新日期",
         )
 
         self.guihu_button = add_path_row(

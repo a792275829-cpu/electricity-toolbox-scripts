@@ -44,28 +44,24 @@ def default_review_folder_for_date(today: date, review_root: Path | None = None)
 
 
 DATE_ROW_GAP = 20
-DATE_FIELD_CHARS = 12
 # 提示文字按固定宽度换行：字体更宽的机器上只会多占一行（日志面板会让出行数），
 # 不会把日期行撑到比视口还宽。
 DATE_HINT_WRAP = 150
 
 
 def add_date_row(parent: ttk.Frame, *, row: int, start_variable: tk.StringVar,
-                 end_variable: tk.StringVar, start_label: str = "开始日期",
-                 end_label: str = "结束日期", hint: str = DATE_INPUT_HINT) -> ttk.Frame:
-    """Single-line 开始日期/结束日期 row aligned to the path entry column.
+                 end_variable: tk.StringVar, label: str = "日期范围",
+                 hint: str = "", start_optional: bool = False) -> ttk.Frame:
+    """Single-line 开始日期/结束日期 row starting at the path entry column.
 
-    The two date fields share one cell so the stretched entry column cannot push
-    结束日期 to the far right; the gap stays fixed and compact.
+    开始与结束横向排在同一行（``[开始] 至 [结束]``），点任一日期框弹出左右双月历；
+    标签只占一行左列，与工作簿选择行的“标签 + 输入”结构对齐。
     """
-    ttk.Label(parent, text=start_label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=3)
+    ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=3)
     line = ttk.Frame(parent)
     line.grid(row=row, column=1, sticky="w", pady=3)
-    # 日期框按 12 个字符取宽（"2026-11-02" 占 10 个），比按 16 个取宽省下两格，
-    # 换到字体更宽的机器上也不会把整行顶出视口宽度。
-    DateInput(line, textvariable=start_variable, width=DATE_FIELD_CHARS).pack(side="left")
-    ttk.Label(line, text=end_label).pack(side="left", padx=(DATE_ROW_GAP, 0))
-    DateInput(line, textvariable=end_variable, width=DATE_FIELD_CHARS).pack(side="left", padx=(8, 0))
+    DateRangeInput(line, start_variable=start_variable, end_variable=end_variable,
+                   start_optional=start_optional).pack(side="left")
     if hint:
         ttk.Label(line, text=hint, style="Muted.TLabel", wraplength=DATE_HINT_WRAP).pack(
             side="left", padx=(DATE_ROW_GAP, 0))

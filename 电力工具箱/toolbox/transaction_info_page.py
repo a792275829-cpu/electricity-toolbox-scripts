@@ -10,7 +10,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .file_dialogs import FileDialogState
-from .page_support import DateInput, DATE_INPUT_ERROR, DATE_INPUT_HINT, parse_date_input
+from .page_support import DateRangeInput, DATE_HINT_WRAP, DATE_INPUT_ERROR, DATE_ROW_GAP, parse_date_input
 from .page_support import add_path_row, open_directory
 from .runtime import TaskRegistry, ToolPaths, python_executable
 from .widgets import ToolPage
@@ -60,25 +60,22 @@ class TransactionInfoUpdatePage(ToolPage):
             command=self.choose_workbook,
             button_text="选择文件",
         )
-        ttk.Label(form, text="日前开始日期").grid(row=1, column=0, sticky="w", pady=4)
-        DateInput(form, textvariable=self.start_date, width=16).grid(
-            row=1, column=1, sticky="w", pady=4
-        )
+        ttk.Label(form, text="日前日期范围").grid(row=1, column=0, sticky="w", pady=4)
+        date_line = ttk.Frame(form)
+        date_line.grid(row=1, column=1, columnspan=2, sticky="w", pady=4)
+        DateRangeInput(
+            date_line, start_variable=self.start_date, end_variable=self.end_date,
+            start_optional=True,
+        ).pack(side="left")
         ttk.Label(
-            form,
-            text="留空时优先补齐已有日期组的空值，再从表尾接续",
+            date_line,
+            text="开始日期可留空：先补空值，再表尾接续",
             style="Muted.TLabel",
-        ).grid(row=1, column=2, columnspan=2, sticky="w", padx=(8, 0), pady=4)
-        ttk.Label(form, text="日前结束日期").grid(row=2, column=0, sticky="w", pady=4)
-        DateInput(form, textvariable=self.end_date, width=16).grid(
-            row=2, column=1, sticky="w", pady=4
-        )
-        ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
-            row=2, column=2, sticky="w", padx=(8, 0), pady=4
-        )
+            wraplength=DATE_HINT_WRAP,
+        ).pack(side="left", padx=(DATE_ROW_GAP, 0))
         SettingCheckbutton(
             form, text="写入前生成时间戳备份", variable=self.create_backup
-        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(7, 0))
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(7, 0))
 
         mapping = ttk.LabelFrame(self.content, text="更新口径", padding=12)
         mapping.grid(row=1, column=0, sticky="ew", pady=(10, 0))

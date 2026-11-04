@@ -204,14 +204,17 @@ class CalendarInputTests(unittest.TestCase):
 
     def test_every_date_page_uses_calendar_and_commands_receive_iso_date(self):
         from toolbox.pages import (
-            GuangdongPricePage, MarketTableUpdatePage, OnlineEnergyPage, ReportPage,
-            MarketReportPage, SpotPriceUpdatePage, TransactionInfoUpdatePage, WindForecastPage,
+            GuangdongPricePage, MarketTableUpdatePage, OnlineEnergyPage, PowerBenefitUpdatePage,
+            ReportPage, MarketReportPage, SpotPriceUpdatePage, TransactionInfoUpdatePage,
+            WindForecastPage,
         )
 
-        for page_type, expected_count in (
-            (OnlineEnergyPage, 0), (ReportPage, 1), (MarketTableUpdatePage, 1),
-            (GuangdongPricePage, 1), (MarketReportPage, 1), (SpotPriceUpdatePage, 2),
-            (TransactionInfoUpdatePage, 2), (WindForecastPage, 1),
+        # 单日页面一张日历；日期范围页面一个双月历控件，不再有两个独立日历框。
+        for page_type, single_days, date_ranges in (
+            (OnlineEnergyPage, 0, 1), (ReportPage, 1, 0), (MarketTableUpdatePage, 1, 0),
+            (GuangdongPricePage, 1, 0), (MarketReportPage, 1, 0), (SpotPriceUpdatePage, 0, 1),
+            (TransactionInfoUpdatePage, 0, 1), (PowerBenefitUpdatePage, 0, 1),
+            (WindForecastPage, 1, 0),
         ):
             with self.subTest(page=page_type.__name__):
                 page = page_type(self.root, ToolPaths(ROOT), TaskRegistry())
@@ -219,14 +222,14 @@ class CalendarInputTests(unittest.TestCase):
                     def find_calendars(widget, kind):
                         return sum(isinstance(child, kind) + find_calendars(child, kind)
                                    for child in widget.winfo_children())
-                    self.assertEqual(find_calendars(page, DateInput), expected_count)
+                    self.assertEqual(find_calendars(page, DateInput), single_days)
+                    self.assertEqual(find_calendars(page, DateRangeInput), date_ranges)
                     if page_type is OnlineEnergyPage:
                         form = next(child for child in page.content.winfo_children()
                                     if isinstance(child, ttk.LabelFrame))
                         labels = [child.cget("text") for child in form.winfo_children()
                                   if isinstance(child, ttk.Label)]
                         self.assertIn("导出日期", labels)
-                        self.assertEqual(find_calendars(page, DateRangeInput), 1)
                         page.start_date.set("2026-5-3")
                         page.end_date.set("2026-5-6")
                         with patch.object(page, "run_process") as run:
@@ -313,8 +316,15 @@ class CalendarInputTests(unittest.TestCase):
         self.assertIsNone(widget.popup)
 
         widget.open_calendar()
+        # 弹层和两个日期框都绑了 Escape：点输入框打开时焦点仍在输入框，真实按键走这条路径。
+        self.assertTrue(widget.popup.bind("<Escape>"))
+        self.assertTrue(widget.start_entry.bind("<Escape>"))
+        self.assertTrue(widget.end_entry.bind("<Escape>"))
         widget.popup.focus_force()
         self.root.update()
+        if self.root.focus_get() is not widget.popup:
+            # 合成按键事件只会送给当前焦点窗口；其它应用抢走焦点时无法验证。
+            self.skipTest("系统焦点不在弹层上，跳过合成 Escape 验证")
         widget.popup.event_generate("<Escape>")
         self.root.update()
         self.assertIsNone(widget.popup)
@@ -343,6 +353,32 @@ class CalendarInputTests(unittest.TestCase):
         widget.open_calendar()
         self.assertEqual(widget.left_month, date(2026, 5, 1))
         self.assertEqual(widget.right_month, date(2026, 6, 1))
+
+    def test_date_range_fields_sit_horizontally_on_one_row(self):
+        widget = DateRangeInput(
+            self.root,
+            start_variable=tk.StringVar(master=self.root, value="2026-11-03"),
+            end_variable=tk.StringVar(master=self.root, value="2026-11-04"),
+        )
+        widget.pack()
+        self.root.update()
+        self.addCleanup(widget.destroy)
+        self.assertEqual(int(widget.start_entry.grid_info()["row"]), 0)
+        self.assertEqual(int(widget.end_entry.grid_info()["row"]), 0)
+        self.assertLess(widget.start_entry.winfo_x(), widget.end_entry.winfo_x())
+
+    def test_optional_start_hint_does_not_ask_for_a_start_date(self):
+        widget = DateRangeInput(
+            self.root,
+            start_variable=tk.StringVar(master=self.root, value=""),
+            end_variable=tk.StringVar(master=self.root, value="2026-11-04"),
+            start_optional=True,
+        )
+        widget.pack()
+        self.root.update()
+        self.addCleanup(widget.destroy)
+        widget.open_calendar()
+        self.assertIn("开始日期可留空", widget.hint_label.cget("text"))
 
     def test_standalone_report_gui_also_uses_calendar(self):
         module = load_module("test_date_standalone_gui", ROOT / "每日生产经营情况汇报自动生成工具/scripts/report_gui.py")

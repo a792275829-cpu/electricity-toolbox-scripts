@@ -250,6 +250,7 @@ class DateRangeInput(ttk.Frame):
         width: int = 12,
         link_months: bool = True,
         separator: str = "至",
+        start_optional: bool = False,
     ):
         super().__init__(parent)
         self.start_variable = start_variable
@@ -257,6 +258,8 @@ class DateRangeInput(ttk.Frame):
         self.popup: tk.Toplevel | None = None
         self._dismiss_binding: str | None = None
         self.link_months = bool(link_months)
+        # 业务允许开始日期留空时（补缺并接续一类），提示行不催用户补开始日期。
+        self.start_optional = bool(start_optional)
         self.link_var = tk.BooleanVar(master=self, value=self.link_months)
         self.left_month = date.today().replace(day=1)
         self.right_month = shift_month(self.left_month, 1)
@@ -408,7 +411,8 @@ class DateRangeInput(ttk.Frame):
         if start is None and end is None:
             text = "左侧选择开始日期，右侧选择结束日期"
         elif start is None:
-            text = f"结束 {end.isoformat()}，请在左侧选择开始日期"
+            text = (f"结束 {end.isoformat()}（开始日期可留空）" if self.start_optional
+                    else f"结束 {end.isoformat()}，请在左侧选择开始日期")
         elif end is None:
             text = f"开始 {start.isoformat()}，请在右侧选择结束日期"
         elif end < start:
