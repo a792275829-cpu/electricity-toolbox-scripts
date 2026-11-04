@@ -631,19 +631,35 @@ def write_to_wps(
                 ranges[i].Value = assignment;
               }
               await api.save();
-              const values = await Promise.all(results.map(async (result) => {
+              // The web SDK serialises its RPCs, so parallel reads measured the
+              // same as sequential ones; read in order to keep one request in
+              // flight at a time.
+              for (const result of results) {
                 const sheet = await app.Worksheets(result.targetSheet);
                 const range = await sheet.Range(result.targetRange);
-                return await range.Value;
-              }));
-              for (let i = 0; i < results.length; i++) {
-                results[i].value = values[i];
+                result.value = await range.Value;
               }
               return { saved: true, results };
             }
             """
             log(f"正在写入 {len(payload)} 个区域…")
-            return evaluate_wps_operation(page, writer_script, payload, log, 180)
+            try:
+                return evaluate_wps_operation(page, writer_script, payload, log, 180)
+            except Exception as exc:
+                # Playwright prefixes evaluate errors; the GUI and the daily log
+                # should show the business message only.
+                message = str(exc)
+                for prefix in ("Page.evaluate: Error: ", "Error: "):
+                    if message.startswith(prefix):
+                        message = message[len(prefix):]
+                        break
+                # Drop the JavaScript stack that Playwright appends; the daily
+                # log keeps the business message and the Python traceback.
+                message = "\n".join(
+                    line for line in message.splitlines()
+                    if not line.strip().startswith("at ")
+                )
+                raise RuntimeError(message.strip()) from exc
         finally:
             if close_context:
                 context.close()
