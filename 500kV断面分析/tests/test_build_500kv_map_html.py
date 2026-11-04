@@ -18,6 +18,18 @@ from src.build_500kv_map_html import (
 
 
 class Build500kVMapHtmlTest(unittest.TestCase):
+    def test_edge_payload_keeps_triggered_price_gaps_by_time(self):
+        edges = [TopologyEdge("测试", "甲", "乙"), TopologyEdge("测试", "乙", "丙")]
+        coordinates = {"甲": {"x": 0, "y": 0}, "乙": {"x": 1, "y": 1}, "丙": {"x": 2, "y": 2}}
+        details = [
+            {"edge": "甲-乙", "time": "12:00", "abs_diff": 125.5},
+            {"edge": "甲-乙", "time": "12:15", "abs_diff": 300.0},
+            {"edge": "乙-丙", "time": "12:15", "abs_diff": 90.0},
+        ]
+        result = _build_edge_payloads(edges, [], details, coordinates)
+        self.assertEqual(result[0]["congestion_by_time"], {"12:00": 125.5, "12:15": 300.0})
+        self.assertEqual(result[1]["congestion_by_time"], {"12:15": 90.0})
+
     def test_parse_node_regions_accepts_generic_numbered_section_heading(self):
         with tempfile.TemporaryDirectory() as tmp:
             topology_path = Path(tmp) / "topology.md"

@@ -609,6 +609,23 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     let nodePriceHover = null;
     const topologyTimes = Array.from({{length:96}}, (_, i) => `${{String(Math.floor(i / 4)).padStart(2,'0')}}:${{String(i % 4 * 15).padStart(2,'0')}}`);
     const topologyTimeIndices = topologyTimes.map(time => DATA.time_headers.indexOf(time));
+    // Sum price gaps of all sections actually triggered at each time, independent of the list filter.
+    const timelineCongestion = topologyTimeIndices.map((index, slot) => {{
+      if (index <= 0) return null;
+      const hasData = DATA.edges.some(edge => {{
+        const a = nodeByName.get(edge.a)?.prices, b = nodeByName.get(edge.b)?.prices;
+        return [a?.[index], b?.[index], a?.[index-1], b?.[index-1]].every(Number.isFinite);
+      }});
+      if (!hasData) return null;
+      return DATA.edges.reduce((sum, edge) => sum + (edge.congestion_by_time?.[topologyTimes[slot]] || 0), 0);
+    }});
+    const timelineMax = Math.max(0, ...timelineCongestion.filter(Number.isFinite));
+    const timelineStops = timelineCongestion.flatMap((value, i) => {{
+      const ratio = value === null ? null : (timelineMax ? value / timelineMax : 0);
+      const color = ratio === null ? '#cbd5e1' : `hsl(${{120 * (1 - ratio)}} 72% 42%)`;
+      return [`${{color}} ${{i / 96 * 100}}%`, `${{color}} ${{(i+1) / 96 * 100}}%`];
+    }});
+    document.getElementById('topologyTime').style.setProperty('--congestion-gradient', `linear-gradient(to right, ${{timelineStops.join(',')}})`);
 
     function clampView() {{
       const visibleMarginX = mapCanvas.width * .12;
@@ -1364,6 +1381,9 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       const time = topologyTimes[topologyTimeSlot];
       const slider = document.getElementById('topologyTime');
       slider.value = String(topologyTimeSlot);
+      const strength = timelineCongestion[topologyTimeSlot];
+      slider.title = strength === null ? `${{time}}：数据不足` : `${{time}}：触发断面价差合计 ${{strength.toFixed(2)}} 元/MWh`;
+
       slider.parentElement.style.setProperty('--time-progress', String(topologyTimeSlot / 95));
       slider.setAttribute('aria-valuetext', time);
       document.getElementById('topologyTimeLabel').textContent = time;

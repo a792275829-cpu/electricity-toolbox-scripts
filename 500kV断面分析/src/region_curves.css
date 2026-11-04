@@ -110,3 +110,8 @@ button,input,select,output,svg text { font-family:inherit; }
 #regionPriceChart text,#priceChart text { font-size:var(--font-note); }
 
 .zoom-controls #toggleFlow { line-height:1.5; }
+
+#topologyTime::-webkit-slider-runnable-track { background:var(--congestion-gradient, var(--line)); height:8px; }
+#topologyTime::-webkit-slider-thumb { margin-top:-3px; }
+#topologyTime::-moz-range-track { background:var(--congestion-gradient, var(--line)); height:8px; }
+#topologyTime::-moz-range-progress { background:transparent; }

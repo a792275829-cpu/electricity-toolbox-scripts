@@ -508,8 +508,11 @@ def _build_edge_payloads(
         if int(float(row.get("intervals", 0))) >= MIN_SECTION_INTERVALS
     }
     detail_counts = {}
+    congestion_by_edge: dict[str, dict[str, float]] = {}
     for row in interval_details:
-        detail_counts[str(row["edge"])] = detail_counts.get(str(row["edge"]), 0) + 1
+        edge_name = str(row["edge"])
+        detail_counts[edge_name] = detail_counts.get(edge_name, 0) + 1
+        congestion_by_edge.setdefault(edge_name, {})[str(row["time"])] = float(row["abs_diff"])
     flow_directions_by_edge = _build_flow_directions(
         edges,
         matched_rows or {},
@@ -563,6 +566,7 @@ def _build_edge_payloads(
                 "main_direction": summary.get("main_direction", "") if summary else "",
                 "direction_counts": summary.get("direction_counts", "") if summary else "",
                 "detail_count": detail_counts.get(edge_name, 0),
+                "congestion_by_time": congestion_by_edge.get(edge_name, {}),
                 "gap_severity": gap_severity,
                 "interval_severity": interval_severity,
                 "severity_score": severity,
