@@ -13,7 +13,7 @@
 - `workspace_layout.py`：将旧混合工作目录迁移到 v2 结构，保留账号、独立 profile、输出与样例，修正内部绝对路径；开发版使用独立目录。详见 `../../desktop/docs/directory-layout.md`。
 - `migrate_forecast_data.py`：退出新版后，以 `--source 原版工作目录 --destination 新版用户数据工作目录` 迁入实际配置的数据总表，设置模块相对路径和预测输出目录，备份旧配置并校验文件；保留已有不同数据。初始化底表存在时一起迁入。总表和账号配置保存在用户目录，后续源码更新保留这些本地文件。
 - `migrate_samples.py`：按原版本地 `.toolbox/migration-samples.json` 清单迁移全部模块的独立测试副本，校验哈希，保留已修改样例。参数为 `--source 原版工作目录 --destination 新版用户数据工作目录`，可加 `--zip 样例包.zip` 生成带相对路径说明的伴随分发包。增加 `--app-home` 时样例存放在新版 `samples/`（兼容旧目标的 `测试样例/`），本机来源快照位于原版 `.toolbox/`，均不进入源码发行包。
-- `version.py`：统一版本号并核对发布标签。
+- `version.py`：统一版本号并核对发布标签。`set` 时用 `--notes` 写完整变更、`--highlight` 写 GitHub Release 展示的要点（3～6 条、每条 ≤120 字，落在版本段的 `### 发布要点`）；`check --release-notes` 只导要点并拼接 `release_notes.md` 的通用安装说明，没有要点时才回退整段日志。
 - `release_index.py`：历史索引格式参考；命令行发布已停用，不再生成或上传 `latest.json`。
 - `build_dmg.py`、`install_user_app.py`：生成用户安装 DMG；首次复制到 `~/Applications`，保留数据、校验签名、替换失败回滚，不请求管理员权限。
 - `build_pkg.py`、`pkg-scripts/`：历史 PKG 兼容代码，不再用于当前发行流程。

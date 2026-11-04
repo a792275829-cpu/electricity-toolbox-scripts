@@ -109,5 +109,41 @@ class VersionTests(unittest.TestCase):
         self.assertNotIn("保留原版本", notes)
 
 
+    def test_highlights_are_written_and_used_for_release_notes(self):
+        version.set_version(
+            "0.1.4", ["完整记录一。", "完整记录二。"], "2026-10-19",
+            ["安装包小 205 MiB", "账号自动保存"],
+        )
+        self.assertIn("### 发布要点", (self.root / "CHANGELOG.md").read_text())
+        self.assertEqual(
+            version.release_highlights("0.1.4"), ["安装包小 205 MiB", "账号自动保存"])
+        install = self.root / "packaging/tauri/release_notes.md"
+        install.parent.mkdir(parents=True)
+        install.write_text("安装说明。\n")
+        notes = version.release_notes("0.1.4")
+        self.assertTrue(notes.startswith("## 更新要点"))
+        self.assertIn("- 安装包小 205 MiB", notes)
+        self.assertNotIn("完整记录一", notes)
+        self.assertIn("安装说明。", notes)
+
+    def test_release_notes_fall_back_to_the_full_section_without_highlights(self):
+        version.set_version("0.1.4", ["完整记录一。"], "2026-10-19")
+        install = self.root / "packaging/tauri/release_notes.md"
+        install.parent.mkdir(parents=True)
+        install.write_text("安装说明。\n")
+        notes = version.release_notes("0.1.4")
+        self.assertIn("完整记录一", notes)
+        self.assertIn("安装说明。", notes)
+        self.assertEqual(version.release_highlights("0.1.4"), [])
+
+    def test_highlights_are_capped_to_keep_the_release_short(self):
+        for highlights in (["要点"] * (version.MAX_HIGHLIGHTS + 1),
+                           ["要" * (version.MAX_HIGHLIGHT_CHARS + 1)]):
+            with self.subTest(highlights=len(highlights)), self.assertRaises(ValueError):
+                version.set_version("0.1.4", ["变更。"], "2026-10-19", highlights)
+            self.assertEqual(version.check(), "v0.1.3")
+            self.assertEqual((self.root / "CHANGELOG.md").read_text(), self.history)
+
+
 if __name__ == "__main__":
     unittest.main()

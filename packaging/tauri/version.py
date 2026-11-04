@@ -9,6 +9,10 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# GitHub Release 只呈现要点，避免把逐条开发记录整段贴上去。
+MAX_HIGHLIGHTS = 6
+MAX_HIGHLIGHT_CHARS = 120
+
 
 def release_changes(version):
     path = ROOT / "CHANGELOG.md"
@@ -39,10 +43,45 @@ def _unreleased_block(content):
     return heading.start(), end, bullets
 
 
-def update_changelog(version, notes, date=None):
+def release_highlights(version):
+    """GitHub Release 只呈现「发布要点」：完整逐条记录留在 CHANGELOG 版本段。"""
+    section = release_changes(version)
+    heading = re.search(r"^### 发布要点\s*$", section, re.M)
+    if heading is None:
+        return []
+    body = section[heading.end():]
+    highlights = []
+    for line in body.splitlines():
+        if line.startswith("- "):
+            highlights.append(line[2:].strip())
+        elif highlights or line.strip():
+            break  # 要点只取紧随标题的一段列表，后面的逐条记录不进发布说明
+    return highlights
+
+
+def release_notes(version):
+    """发布说明文本：要点（缺失时回退整段）+ 通用安装说明。"""
+    highlights = release_highlights(version)
+    body = (
+        "## 更新要点\n\n" + "\n".join(f"- {item}" for item in highlights)
+        if highlights
+        else release_changes(version)
+    )
+    install = (ROOT / "packaging/tauri/release_notes.md").read_text(encoding="utf-8").strip()
+    return body + "\n\n" + install + "\n"
+
+
+def update_changelog(version, notes, date=None, highlights=()):
     notes = [note.strip() for note in notes if note.strip()]
     if not notes or any("\n" in note or "\r" in note for note in notes):
         raise ValueError("更新版本须使用 --notes 提供具体变更，每项一行")
+    highlights = [item.strip() for item in highlights if item.strip()]
+    if len(highlights) > MAX_HIGHLIGHTS or any(
+        len(item) > MAX_HIGHLIGHT_CHARS or "\n" in item for item in highlights
+    ):
+        raise ValueError(
+            f"发布要点最多 {MAX_HIGHLIGHTS} 条、每条不超过 {MAX_HIGHLIGHT_CHARS} 字，且须各占一行"
+        )
     date = date or datetime.datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
     datetime.date.fromisoformat(date)
     path = ROOT / "CHANGELOG.md"
@@ -54,7 +93,10 @@ def update_changelog(version, notes, date=None):
         start, end, bullets = pending
         notes.extend(item for item in bullets if item not in notes)
         content = content[:start] + content[end:].lstrip("\n")
-    section = f"## [{version}] - {date}\n\n" + "\n".join(f"- {note}" for note in notes) + "\n\n"
+    section = f"## [{version}] - {date}\n\n"
+    if highlights:
+        section += "### 发布要点\n\n" + "\n".join(f"- {item}" for item in highlights) + "\n\n"
+    section += "\n".join(f"- {note}" for note in notes) + "\n\n"
     first = re.search(r"^## ", content, re.M)
     position = first.start() if first else len(content.rstrip()) + 2
     content = content[:position].rstrip() + "\n\n" + section + content[position:]
@@ -84,10 +126,10 @@ def check(tag=None):
     return "v" + package
 
 
-def set_version(version, notes=(), date=None):
+def set_version(version, notes=(), date=None, highlights=()):
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ValueError("版本号须为 X.Y.Z")
-    changelog_path, changelog_content = update_changelog(version, notes, date)
+    changelog_path, changelog_content = update_changelog(version, notes, date, highlights)
     for name in (
         "desktop/package.json",
         "desktop/src-tauri/tauri.conf.json",
@@ -128,19 +170,22 @@ if __name__ == "__main__":
     parser.add_argument("version", nargs="?")
     parser.add_argument("--tag")
     parser.add_argument("--notes", action="append", default=[])
+    parser.add_argument(
+        "--highlight", action="append", default=[],
+        help="GitHub Release 展示的要点，最多 6 条、每条 120 字内")
     parser.add_argument("--date", help="更新日志日期 YYYY-MM-DD，默认上海日期")
     parser.add_argument("--require-notes", action="store_true")
     parser.add_argument("--release-notes", type=Path, help="导出当前版本更新内容及安装说明")
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args()
     if args.action == "set":
-        set_version(args.version or "", args.notes, args.date)
+        set_version(args.version or "", args.notes, args.date, args.highlight)
     tag = check(args.tag)
     if args.require_notes or args.release_notes:
-        changes = release_changes(tag.removeprefix("v"))
+        version = tag.removeprefix("v")
+        release_changes(version)
         if args.release_notes:
-            install = (ROOT / "packaging/tauri/release_notes.md").read_text(encoding="utf-8").strip()
-            args.release_notes.write_text(changes + "\n\n" + install + "\n", encoding="utf-8")
+            args.release_notes.write_text(release_notes(version), encoding="utf-8")
     if args.github_output:
         with args.github_output.open("a") as stream:
             stream.write(f"tag={tag}\n")

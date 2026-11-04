@@ -84,6 +84,7 @@
 ## 版本与更新日志
 
 - 自动维护根目录 `CHANGELOG.md`：用 `.venv/bin/python packaging/tauri/version.py set X.Y.Z --notes "具体变更"` 同步版本和日志（多项变更重复传入 `--notes`，日期默认 Asia/Shanghai，历史记录必须保留）；开发期的零散条目写在顶部 `## 未发布` 段，`set` 时会并入新版本并整段移除。每条只写用户可见的变更与验证结果，逐次调试过程放提交信息或 `logs/`，单条控制在 200 个字符内。
+- GitHub Release 说明只呈现要点，不整段贴日志：在版本段写 `### 发布要点`（3～6 条、每条 ≤120 字），只讲用户可见变化、关键数字（体积、测试计数）和升级提示；`version.py set --highlight` 写入要点，`--release-notes` 只导要点，缺失时才回退整段。完整逐条记录、逐次调试与验证细节留在 `CHANGELOG.md`。
 - `CHANGELOG.md` 是逐版本内容的唯一来源，`packaging/tauri/release_notes.md` 只维护通用安装说明；发布前执行 `version.py check --tag vX.Y.Z --require-notes`，版本不一致或更新内容为空时禁止打包发布。已发布版本不得覆盖，下一次递增版本号。
 - 只发布 macOS Apple 芯片的完整 DMG 与 `.dmg.sha256`，加 `update-manifest.json` 和适用的 `.patch.tar.xz` 增量补丁；不发布独立 `.app`、`.app.tar.gz`、`.sig` 或旧 `latest.json`，也不恢复 PKG，构建产物与签名私钥不进入 Git。发布前跑完针对性测试，并用 `validate_installer.py` 核对安装包、补丁、索引与摘要后再发 GitHub 正式版。
 - 日常维护优先增量更新：为最近三个正式版本生成直达补丁并保留历史升级路径，客户端走总下载量最小且小于完整包的路径，缺少路径、旧应用被改动或补丁失败时自动回退完整 DMG（用户取消不触发回退）；跨主／次版本或 `--full-only` 的重大更新用完整包重设基线。发布补丁前必须用未改动的旧应用副本实际还原，核对文件／权限／符号链接与签名，禁止拿测试补丁当发行包；清理本地源码副本时不得删除旧版本发行附件与索引。
