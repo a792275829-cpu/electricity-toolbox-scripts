@@ -591,28 +591,53 @@ def write_to_wps(
                 throw new Error("WPS_API_NOT_READY: 表格保存功能尚未就绪");
               }
               const results = [];
+              const ranges = [];
+              // KDocs saves continuously, so resolve every target before the
+              // first assignment: a typo in a later region must not leave the
+              // earlier regions half-written.
               for (const item of payload) {
-                const sheet = app.Worksheets(item.targetSheet);
-                const range = sheet.Range(item.targetRange);
-                const assignment = item.rows === 1 && item.cols === 1 ? item.values[0][0] : item.values;
-                const mergeCells = await range.MergeCells;
-                range.Value = assignment;
+                let range;
+                try {
+                  const sheet = await app.Worksheets(item.targetSheet);
+                  if (!sheet || typeof sheet.Range !== "function") {
+                    throw new Error("目标工作表不存在");
+                  }
+                  range = await sheet.Range(item.targetRange);
+                  if (!range) {
+                    throw new Error("目标区域不存在");
+                  }
+                  // WPS proxies resolve lazily; awaiting a property forces the
+                  // lookup instead of accepting a placeholder object.
+                  await range.MergeCells;
+                } catch (error) {
+                  const reason = error && error.message ? error.message : String(error);
+                  throw new Error(
+                    "WPS_TARGET_INVALID: 第 " + item.index + " 个区域「"
+                    + item.targetSheet + "!" + item.targetRange + "」无法定位：" + reason
+                  );
+                }
+                ranges.push(range);
                 results.push({
                   index: item.index,
                   targetSheet: item.targetSheet,
                   targetRange: item.targetRange,
                   rows: item.rows,
-                  cols: item.cols,
-                  mergeCells
+                  cols: item.cols
                 });
               }
+              for (let i = 0; i < payload.length; i++) {
+                const item = payload[i];
+                const assignment = item.rows === 1 && item.cols === 1 ? item.values[0][0] : item.values;
+                ranges[i].Value = assignment;
+              }
               await api.save();
-              for (const result of results) {
-                const sheet = app.Worksheets(result.targetSheet);
-                const range = sheet.Range(result.targetRange);
-                result.value = await range.Value;
-                result.value2 = await range.Value2;
-                result.text = await range.Text;
+              const values = await Promise.all(results.map(async (result) => {
+                const sheet = await app.Worksheets(result.targetSheet);
+                const range = await sheet.Range(result.targetRange);
+                return await range.Value;
+              }));
+              for (let i = 0; i < results.length; i++) {
+                results[i].value = values[i];
               }
               return { saved: true, results };
             }

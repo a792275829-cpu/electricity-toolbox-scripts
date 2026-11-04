@@ -15,6 +15,8 @@
 9. 点“Write to WPS”，在页面专用日志确认写入与保存结果。
 10. 需要复用配置时使用 Import/Export。
 
+写入前会把所有目标工作表和单元格区域一次性定位校验；任意一个区域不存在或无法定位时立即报错，不写入任何单元格，错误信息标明第几个区域及其目标位置。赋值完成后保存一次，再回读每个区域的值与来源核对。
+
 写入前建议在目标表保留副本；不要同时用多个窗口写同一个目标区域。
 
 ## 专用 Chrome
@@ -44,7 +46,7 @@ wps自动/启动WPS专用Chrome.command
 - `wps自动/config_model.py`：配置字典与 `DocumentConfig`／`MappingRow` 互转。
 - `toolbox_shared/wps_values.py`：数值转换与区域逻辑。
 - `toolbox_shared/wps_browser.py`：浏览器与 CDP 生命周期（不依赖 Tk）。
-- `toolbox_shared/wps_service.py`：Excel 读取、映射、写入与回读。
+- `toolbox_shared/wps_service.py`：Excel 读取、映射、写入与回读。写入前统一预检目标工作表／区域，赋值后一次保存并并行回读核对值。
 - `toolbox_shared/wps_config.py`、`wps_urls.py`、`wps_paths.py`：默认配置合并、URL 解析、路径与启动锁。
 
 独立入口为 `wps自动/wps_excel_to_kdocs_gui.py`（`wps写入工具.pyw` 为双击版本）。登录状态、锁和浏览器 profile 按工具隔离，不进入版本控制。

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import importlib
+from dataclasses import replace
 
 import unittest
 from pathlib import Path
@@ -91,16 +92,21 @@ FIXTURE_HTML = """
   window.cells = JSON.parse(sessionStorage.getItem('cells') || '{}');
   window.writes = 0;
   window.saves = 0;
-  const worksheets = (name) => ({
-    Name: '目标',
-    Range: (address) => ({
-      MergeCells: false,
-      get Value() { return window.cells[address] ?? null; },
-      set Value(value) { window.writes++; window.cells[address] = value; },
-      get Value2() { return this.Value; },
-      get Text() { return this.Value; }
-    })
-  });
+  const worksheets = (name) => {
+    if (name !== '目标' && typeof name !== 'number') {
+      return null;
+    }
+    return {
+      Name: '目标',
+      Range: (address) => ({
+        MergeCells: false,
+        get Value() { return window.cells[address] ?? null; },
+        set Value(value) { window.writes++; window.cells[address] = value; },
+        get Value2() { throw new Error('Value2 should not be read'); },
+        get Text() { throw new Error('Text should not be read'); }
+      })
+    };
+  };
   worksheets.Count = 1;
   window.testApp = {Ready: Promise.resolve(true), Worksheets: worksheets};
   window.WPSOpenApi = {
@@ -237,6 +243,26 @@ class WpsBrowserRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "表格保存功能尚未就绪"):
             self.module.write_to_wps(self.page.url, self.mappings(), lambda _: None, browser_mode="cdp")
         self.assertEqual(self.page.evaluate("() => [window.writes, window.saves]"), [0, 0])
+
+    def test_invalid_target_sheet_fails_before_any_cell_assignment(self) -> None:
+        prepared = self.mappings()[:3]
+        prepared[2] = replace(prepared[2], target_sheet="不存在的工作表")
+        with self.assertRaisesRegex(Exception, "WPS_TARGET_INVALID.*第 3 个区域"):
+            self.module.write_to_wps(
+                self.page.url, prepared, lambda _: None, browser_mode="cdp"
+            )
+        self.assertEqual(self.page.evaluate("() => [window.writes, window.saves]"), [0, 0])
+
+    def test_write_result_only_carries_the_verification_value(self) -> None:
+        result = self.module.write_to_wps(
+            self.page.url, self.mappings(), lambda _: None, browser_mode="cdp"
+        )
+        self.assertTrue(result["saved"])
+        self.assertEqual(self.page.evaluate("() => [window.writes, window.saves]"), [6, 1])
+        for entry in result["results"]:
+            self.assertIn("value", entry)
+            for removed in ("mergeCells", "value2", "text"):
+                self.assertNotIn(removed, entry)
 
 
 if __name__ == "__main__":
