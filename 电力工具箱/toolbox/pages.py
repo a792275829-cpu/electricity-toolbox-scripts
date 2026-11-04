@@ -947,7 +947,7 @@ class GuangdongPricePage(ToolPage):
         ).grid(row=3, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=3)
         ttk.Label(
             prediction,
-            text="自动核验预测日供需发布时间；固定输出 D+1 的 96 点电价。",
+            text="预测前自动补齐总表，再核验供需发布时间并输出 D+1 的 96 点电价。",
             style="Muted.TLabel",
         ).grid(row=2, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=3)
 
@@ -970,7 +970,7 @@ class GuangdongPricePage(ToolPage):
             master_button,
             prediction_dir_button,
         )
-        self.append_log("总表缺失时会先按账号自动补齐，再运行 D+1 预测；账号使用右侧统一账号。")
+        self.append_log("运行预测前会先按运行日补齐近一年总表，再生成 D+1 预测；账号使用右侧统一账号。")
 
     def resolve_business_path(self, text: str) -> Path:
         if not text.strip():

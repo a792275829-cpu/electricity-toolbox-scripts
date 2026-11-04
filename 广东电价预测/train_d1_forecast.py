@@ -24,17 +24,18 @@ from gd_price_forecast.future_inputs import (
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
-def ensure_master_workbook(paths, input_path=None):
-    """Return the modelling input, generating the master workbook when absent.
+def ensure_master_workbook(paths, input_path=None, *, run_date=None, config_path=None, update=False):
+    """Return the modelling input, optionally refreshing the operational master.
 
-    First installs no longer ship a forecast master workbook, so a missing file
-    is filled from the grid API before training. An explicitly requested input
-    must still exist: silently training on another file would hide the mistake.
+    A missing default master is filled from the API before training. Explicit
+    inputs must exist and stay read-only unless update is requested. Refreshes
+    use that same selected file and the requested prediction date.
     """
     target = Path(input_path) if input_path is not None else Path(paths["masterWorkbook"])
-    if target.is_file():
+    exists = target.is_file()
+    if exists and not update:
         return target
-    if input_path is not None:
+    if input_path is not None and not exists:
         raise FileNotFoundError(f"指定的预测输入工作簿不存在：{target}")
     import sys
     if str(SCRIPT_DIR) not in sys.path:
@@ -43,16 +44,21 @@ def ensure_master_workbook(paths, input_path=None):
     target.parent.mkdir(parents=True, exist_ok=True)
     print(
         json.dumps(
-            {"stage": "生成数据总表", "master": str(target)},
+            {"stage": "预测前补齐数据总表" if exists else "生成数据总表", "master": str(target), "run_date": run_date},
             ensure_ascii=False,
         ),
         flush=True,
     )
-    result = update_gdfire_data.update_master_workbook(master_workbook=target)
+    options = {"master_workbook": target}
+    if run_date is not None:
+        options["run_date"] = run_date
+    if config_path is not None:
+        options["config_path"] = config_path
+    result = update_gdfire_data.update_master_workbook(**options)
     master = Path(result["master"])
     if not master.is_file():
         raise FileNotFoundError(f"数据总表生成失败，请检查账号与网络后重试：{master}")
-    print(json.dumps({"stage": "数据总表已生成", "master": str(master)}, ensure_ascii=False), flush=True)
+    print(json.dumps({"stage": "数据总表已更新" if exists else "数据总表已生成", "master": str(master)}, ensure_ascii=False), flush=True)
     return master
 
 
@@ -265,6 +271,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="广东 D+1 日前电价预测")
     parser.add_argument("--config", type=Path, help="模块配置文件")
     parser.add_argument("--input", type=Path)
+    parser.add_argument('--update-master', action='store_true', help='预测前按运行日补齐并截断当前总表')
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--forecast-days", type=int, choices=[1], default=1, help="固定输出 D+1")
     parser.add_argument("--training-months", type=int, default=0, help='0自动选择：当日供需12个月，历史回退3个月')
@@ -274,8 +281,12 @@ def main() -> None:
     parser.add_argument('--historical-only', action='store_true', help='只使用历史信息，禁用预测日供需抓取')
     args = parser.parse_args()
     paths = resolve_paths(config_path=args.config)
-    master_workbook = ensure_master_workbook(paths, args.input)
     as_of = args.as_of or datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
+    if args.update_master and args.compare_algorithms:
+        parser.error('--update-master 不适用于历史算法实验；请先单独准备历史输入表')
+    master_workbook = ensure_master_workbook(
+        paths, args.input, run_date=as_of, config_path=args.config, update=args.update_master,
+    )
     if args.compare_algorithms:
         from gd_price_forecast.experiments import run_comparison
         output=args.output_dir or paths['predictionOutputDir'] / '算法实验'

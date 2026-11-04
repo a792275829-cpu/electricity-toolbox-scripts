@@ -104,6 +104,6 @@ def word_report(paths, report_date, online, day_ahead, daily, template):
 def prediction(paths, input_path, output_dir, forecast_days, training_months, run_date):
     if forecast_days != 1:
         raise ValueError("本模块只输出 D+1 日前电价，预测天数必须为 1")
-    return [python_executable(), str(paths.guangdong_price_forecast), "--input", str(input_path),
+    return [python_executable(), str(paths.guangdong_price_forecast), "--update-master", "--input", str(input_path),
             "--output-dir", str(output_dir), "--as-of", run_date, "--forecast-days",
             str(forecast_days), "--training-months", str(training_months)]

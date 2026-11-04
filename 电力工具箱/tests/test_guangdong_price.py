@@ -186,6 +186,7 @@ class GuangdongPageTests(unittest.TestCase):
                 self.assertEqual("1", command[command.index("--forecast-days") + 1])
                 self.assertEqual("0", command[command.index("--training-months") + 1])
                 self.assertEqual("2026-10-10", command[command.index("--as-of") + 1])
+                self.assertIn('--update-master', command)
                 page.prediction_output_dir.set("")
                 with mock.patch.object(page, "run_process") as run, mock.patch("toolbox.pages.messagebox.showerror") as error:
                     page.start_prediction()
@@ -440,6 +441,55 @@ class ForecastMasterBootstrapTests(unittest.TestCase):
                 result = self.train.ensure_master_workbook({"masterWorkbook": master})
             self.assertEqual(master, result)
             stub.update_master_workbook.assert_not_called()
+
+    def test_prediction_refreshes_selected_master_with_exact_run_date_and_config(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            master = Path(folder) / '总表.xlsx'
+            master.write_bytes(b'old master')
+            config = Path(folder) / 'config.json'
+            stub = mock.Mock()
+            stub.update_master_workbook.return_value = {'master': master}
+            with mock.patch.dict(sys.modules, {'update_gdfire_data': stub}):
+                actual = self.train.ensure_master_workbook(
+                    {'masterWorkbook': Path(folder) / 'other.xlsx'}, master,
+                    run_date='2026-11-04', config_path=config, update=True,
+                )
+            self.assertEqual(actual, master)
+            stub.update_master_workbook.assert_called_once_with(
+                master_workbook=master, run_date='2026-11-04', config_path=config,
+            )
+
+    def test_prediction_update_failure_does_not_start_training(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            master = Path(folder) / '总表.xlsx'
+            master.write_bytes(b'old master')
+            stub = mock.Mock()
+            stub.update_master_workbook.side_effect = RuntimeError('更新失败')
+            with (
+                mock.patch.dict(sys.modules, {'update_gdfire_data': stub}),
+                mock.patch.object(sys, 'argv', ['train_d1_forecast.py', '--input', str(master),
+                    '--as-of', '2026-11-04', '--update-master']),
+                mock.patch.object(self.train, 'run_pipeline') as pipeline,
+                self.assertRaisesRegex(RuntimeError, '更新失败'),
+            ):
+                self.train.main()
+            pipeline.assert_not_called()
+            self.assertEqual(master.read_bytes(), b'old master')
+
+    def test_stale_labels_are_still_rejected_before_training(self) -> None:
+        frame = pd.DataFrame({
+            '日期': pd.Timestamp('2026-10-11'),
+            '时刻': pd.date_range('2026-10-11', periods=96, freq='15min').strftime('%H:%M'),
+            '全省日前平均电价': 300.,
+        })
+        with tempfile.TemporaryDirectory() as folder:
+            with (
+                mock.patch.object(self.train, 'load_model_data', return_value=frame),
+                mock.patch.object(self.train, 'fit_model') as fit,
+                self.assertRaisesRegex(ValueError, '要求截至2026-11-04.*2026-10-11'),
+            ):
+                self.train.run_pipeline(Path(folder) / '总表.xlsx', folder, as_of='2026-11-04')
+            fit.assert_not_called()
 
     def test_explicit_missing_input_is_not_silently_replaced(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

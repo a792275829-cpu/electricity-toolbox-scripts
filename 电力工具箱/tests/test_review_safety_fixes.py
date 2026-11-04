@@ -107,7 +107,7 @@ class ForecastCompletionTests(unittest.TestCase):
         with (patch.object(self.module, 'load_config', return_value=dict(username='test',password='test')),
              patch.object(self.module, 'resolve_paths', return_value=dict(masterWorkbook=master,initialWorkbook=folder/'absent.xlsx')),
              patch.object(self.module, 'GDFireClient', return_value=client),
-             patch.object(self.module, 'build_increment', return_value=increment)):
+             patch.object(self.module, 'fetch_increment', return_value=increment)):
             result = self.module.update_master_workbook(run_date=str(DAY))
         return master, result, client
 
@@ -135,7 +135,7 @@ class ForecastCompletionTests(unittest.TestCase):
             master, _, _ = self.update(folder, incomplete)
             published = self.sample(); published.loc[0,'日前统调负荷(MW)'] = np.nan
             _, result, client = self.update(folder, published)
-            client.get.assert_called()
+            client.login.assert_called_once()
             self.assertEqual(len(result['requested_dates']), 365)
             self.assertEqual(result['requested_dates'][-1], str(DAY))
             book = load_workbook(master)
@@ -154,7 +154,7 @@ class ForecastCompletionTests(unittest.TestCase):
             revised = self.sample(); revised.loc[0,'全省日前平均电价'] = -25.
             revised['日前光伏出力(MW)'] = np.arange(96.) + 200
             _, result, client = self.update(folder, revised)
-            client.get.assert_called()
+            client.login.assert_called_once()
             self.assertEqual(len(result['requested_dates']), 365)
             self.assertEqual(result['requested_dates'][-1], str(DAY))
             book = load_workbook(master)

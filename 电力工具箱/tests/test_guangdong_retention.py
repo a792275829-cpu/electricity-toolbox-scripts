@@ -55,7 +55,7 @@ class MasterRetentionTests(unittest.TestCase):
             patch.object(self.module, 'read_data_workbook', return_value=current),
             patch.object(self.module, 'write_large_xlsx') as writer,
             patch.object(self.module, 'GDFireClient', return_value=client) as factory,
-            patch.object(self.module, 'build_increment', return_value=increment) as builder,
+            patch.object(self.module, 'fetch_increment', return_value=increment) as builder,
         ):
             result = self.module.update_master_workbook(run_date='2026-11-04')
         return result, writer, factory, client, builder
@@ -79,8 +79,7 @@ class MasterRetentionTests(unittest.TestCase):
         current = self.curve('2026-11-04', '2026-11-05')
         increment = self.curve('2025-11-04', '2026-11-05')
         result, writer, _, client, builder = self.run_update(current, increment=increment)
-        self.assertEqual(builder.call_args.args[:2], ('2025-11-05', '2026-11-03'))
-        self.assertEqual(client.get.call_args_list[0].args[1]['startDate'], '2025-11-05')
+        self.assertEqual(builder.call_args.args, (client, '2025-11-05', '2026-11-03'))
         self.assertEqual(result['requested_dates'][0], '2025-11-05')
         self.assertEqual(result['requested_dates'][-1], '2026-11-03')
         self.assertEqual(result['remaining_missing_dates'], [])
@@ -91,7 +90,7 @@ class MasterRetentionTests(unittest.TestCase):
             None, config={'initialDate': '1900-01-01'},
             increment=self.curve('2025-11-05', '2026-11-04'),
         )
-        self.assertEqual(builder.call_args.args[:2], ('2025-11-05', '2026-11-04'))
+        self.assertEqual(builder.call_args.args[1:], ('2025-11-05', '2026-11-04'))
         self.assertEqual(len(result['requested_dates']), 365)
         self.assertEqual(len(writer.call_args.args[0]), 365 * 96)
 
@@ -100,7 +99,7 @@ class MasterRetentionTests(unittest.TestCase):
             self.curve('2020-01-01', '2020-01-01'),
             increment=self.curve('2025-11-05', '2026-11-04'),
         )
-        self.assertEqual(builder.call_args.args[:2], ('2025-11-05', '2026-11-04'))
+        self.assertEqual(builder.call_args.args[1:], ('2025-11-05', '2026-11-04'))
         self.assertEqual(result['remaining_missing_dates'], [])
         self.assertEqual(writer.call_args.args[0]['日期'].min().date(), date(2025, 11, 5))
 
@@ -109,5 +108,32 @@ class MasterRetentionTests(unittest.TestCase):
         result, _, _, _, builder = self.run_update(
             frame, config={'refreshDays': 999}, increment=frame,
         )
-        self.assertEqual(builder.call_args.args[:2], ('2025-11-05', '2026-11-04'))
+        self.assertEqual(builder.call_args.args[1:], ('2025-11-05', '2026-11-04'))
         self.assertEqual(len(result['requested_dates']), 365)
+
+    def test_fetch_batches_cover_leap_month_without_gaps_or_duplicate_slots(self):
+        client = Mock()
+        def get(path, params):
+            days = pd.date_range(params['startDate'], params['endDate'])
+            self.assertLessEqual(len(days), 31)
+            if path.endswith('/load'):
+                return {'data': {'dataNetLoadDTOList': [{
+                    'loadType': '1', 'forecastPeriodList': [
+                        {'date': str(day.date()), 'loadVal': [60000.] * 96} for day in days],
+                }]}}
+            return {'data': {'preAvgNodePriceDTOList': [
+                {'date': str(day.date()), 'avgNodePrice': [300.] * 96} for day in days],
+            }}
+        client.get.side_effect = get
+        actual = self.module.fetch_increment(client, '2024-01-01', '2024-03-03')
+        self.assertEqual(client.get.call_count, 6)
+        self.assertEqual(len(actual), 63 * 96)
+        self.assertFalse(actual.duplicated(['日期', '时刻']).any())
+        self.assertEqual(self.module.missing_dates(actual, '2024-03-03'), [])
+        self.assertEqual(actual['全省日前平均电价'].tolist(), [300.] * (63 * 96))
+
+    def test_batch_failure_does_not_return_partial_data(self):
+        client = Mock()
+        client.get.side_effect = [{'data': {}}, {'data': {}}, RuntimeError('second batch failed')]
+        with self.assertRaisesRegex(RuntimeError, 'second batch failed'):
+            self.module.fetch_increment(client, '2026-01-01', '2026-03-01')

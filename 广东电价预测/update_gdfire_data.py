@@ -491,6 +491,22 @@ def build_modeling_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return result.drop(columns=empty)
 
 
+def fetch_increment(client: GDFireClient, start: str, end: str) -> pd.DataFrame:
+    """Bound API response size while sharing one tool-local authenticated session."""
+    frames = []
+    for batch_start in pd.date_range(start, end, freq="31D"):
+        batch_end = min(batch_start + pd.Timedelta(days=30), pd.Timestamp(end))
+        first, last = str(batch_start.date()), str(batch_end.date())
+        print(f"补抓总表数据：{first} 至 {last}", flush=True)
+        common = {"startDate": first, "endDate": last, "provinceAreaId": PROVINCE_AREA_ID}
+        load_payload = client.get("/gdfire/api/data/net/load", common)
+        price_payload = client.get(
+            "/gdfire/api/data/price/avg/node/price", {"startDate": first, "endDate": last},
+        )
+        frames.append(build_increment(first, last, load_payload, price_payload))
+    return pd.concat(frames, ignore_index=True, sort=False)
+
+
 def master_date_window(run_date: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     """Keep the last calendar year, with D included and its anniversary excluded."""
     end = pd.Timestamp(normalize_date_input(run_date))
@@ -551,19 +567,13 @@ def update_master_workbook(
             "updated": truncated,
         }
 
-    # One API interval keeps the update path simple. Existing values survive because
-    # merge_data_frames takes the latest non-empty value per field.
+    # Fetch bounded intervals in one session, then publish once. Existing values
+    # survive because merge_data_frames takes the latest non-empty value per field.
     start = min(gaps).isoformat()
     end = max(gaps).isoformat()
     with GDFireClient() as client:
         client.login(str(config["username"]), str(config["password"]))
-        common = {"startDate": start, "endDate": end, "provinceAreaId": PROVINCE_AREA_ID}
-        load_payload = client.get("/gdfire/api/data/net/load", common)
-        price_payload = client.get(
-            "/gdfire/api/data/price/avg/node/price",
-            {"startDate": start, "endDate": end},
-        )
-    increment = build_increment(start, end, load_payload, price_payload)
+        increment = fetch_increment(client, start, end)
 
     merged = trim_master_frame(merge_data_frames(current, increment), window_start, window_end)
     write_large_xlsx(merged, master_path, "整合数据", format_source=master_path)
