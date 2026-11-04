@@ -877,7 +877,7 @@ class GuangdongPricePage(ToolPage):
             parent,
             registry=registry,
             title="广东电价预测",
-            description="登录华能广东现货系统，按 96 个十五分钟时点更新数据，并运行 D+1 日前电价预测。",
+            description="登录华能广东现货系统，按 96 个十五分钟时点更新数据，并运行 D+1 至 D+15 日前电价预测。",
         )
         self.paths = paths
         self.file_dialogs = _file_dialog_state(paths)
@@ -892,6 +892,7 @@ class GuangdongPricePage(ToolPage):
             master=self, value=str(paths.guangdong_prediction_output_dir)
         )
         self.training_months = tk.IntVar(master=self, value=0)
+        self.forecast_days = tk.IntVar(master=self, value=1)
 
         form = ttk.LabelFrame(self.content, text="1. 补齐历史数据总表", padding=10)
         form.grid(row=0, column=0, sticky="ew")
@@ -917,7 +918,7 @@ class GuangdongPricePage(ToolPage):
             style="Muted.TLabel",
         ).grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
-        prediction = ttk.LabelFrame(self.content, text="2. 使用总表预测 D+1", padding=10)
+        prediction = ttk.LabelFrame(self.content, text="2. 使用总表预测 D+1 至 D+15", padding=10)
         prediction.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         prediction.columnconfigure(1, weight=1)
         ttk.Label(prediction, text="建模输入表").grid(row=0, column=0, sticky="w", pady=3)
@@ -942,12 +943,23 @@ class GuangdongPricePage(ToolPage):
         ).grid(row=3, column=1, sticky="w", pady=3)
         ttk.Label(
             prediction,
-            text="0 为自动：当日供需齐全用 12 个月，否则用 3 个月历史信息回退。",
+            text="0 为自动：当日供需齐全用 12 个月，否则用 3 个月历史信息回退；手工填写最少 1 个月。",
             style="Muted.TLabel",
         ).grid(row=3, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=3)
+        ttk.Label(prediction, text="预测天数").grid(
+            row=4, column=0, sticky="w", pady=3
+        )
+        ttk.Spinbox(
+            prediction, from_=1, to=15, textvariable=self.forecast_days, width=8
+        ).grid(row=4, column=1, sticky="w", pady=3)
         ttk.Label(
             prediction,
-            text="预测前自动补齐总表，再核验供需发布时间并输出 D+1 的 96 点电价。",
+            text="1 只输出 D+1，15 输出 D+1 至 D+15；D+2 起没有已发布供需，误差随天数放大。",
+            style="Muted.TLabel",
+        ).grid(row=4, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=3)
+        ttk.Label(
+            prediction,
+            text="预测前自动补齐总表，再核验供需发布时间并输出每日 96 点电价。",
             style="Muted.TLabel",
         ).grid(row=2, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=3)
 
@@ -956,7 +968,7 @@ class GuangdongPricePage(ToolPage):
         )
         self.update_button.pack(side="left")
         self.predict_button = ttk.Button(
-            self.actions, text="运行 D+1 预测", command=self.start_prediction
+            self.actions, text="运行日前预测", command=self.start_prediction
         )
         self.predict_button.pack(side="left", padx=(8, 0))
         ttk.Button(
@@ -970,7 +982,7 @@ class GuangdongPricePage(ToolPage):
             master_button,
             prediction_dir_button,
         )
-        self.append_log("运行预测前会先按运行日补齐近一年总表，再生成 D+1 预测；账号使用右侧统一账号。")
+        self.append_log("运行预测前会先按运行日补齐近一年总表，再按设定的预测天数生成每日 96 点电价；账号使用右侧统一账号。")
 
     def resolve_business_path(self, text: str) -> Path:
         if not text.strip():
@@ -1065,22 +1077,26 @@ class GuangdongPricePage(ToolPage):
             input_path = self.resolve_business_path(input_text)
             output_dir = self.resolve_business_path(output_text)
             training_months = self.training_months.get()
+            forecast_days = self.forecast_days.get()
         except (ValueError, tk.TclError) as exc:
             messagebox.showerror("参数无效", str(exc), parent=self)
             return
         if not input_path.is_file():
             messagebox.showerror("文件不存在", "请选择有效的建模输入表。", parent=self)
             return
-        if training_months != 0 and training_months < 2:
-            messagebox.showerror("训练窗口无效", "填 0 自动选择，或填写至少 2 个月。", parent=self)
+        if training_months != 0 and training_months < 1:
+            messagebox.showerror("训练窗口无效", "填 0 自动选择，或填写至少 1 个月。", parent=self)
+            return
+        if not 1 <= forecast_days <= 15:
+            messagebox.showerror("预测天数无效", "预测天数必须在 1 至 15 之间。", parent=self)
             return
         self.clear_log()
         self.run_process(
             self.build_prediction_command(
-                input_path, output_dir, 1, training_months
+                input_path, output_dir, forecast_days, training_months
             ),
             action='predict', cwd=self.paths.guangdong_price_dir,
-            status="正在训练并生成 D+1 日前电价预测...",
+            status="正在训练并生成日前电价预测...",
             on_success=lambda _code: messagebox.showinfo(
                 "预测完成", f"预测结果已保存到：\n{output_dir}", parent=self
             ),

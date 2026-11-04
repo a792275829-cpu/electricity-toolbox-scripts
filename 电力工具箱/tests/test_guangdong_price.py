@@ -187,6 +187,20 @@ class GuangdongPageTests(unittest.TestCase):
                 self.assertEqual("0", command[command.index("--training-months") + 1])
                 self.assertEqual("2026-10-10", command[command.index("--as-of") + 1])
                 self.assertIn('--update-master', command)
+                page.forecast_days.set(15)
+                page.training_months.set(1)
+                with mock.patch.object(page, "run_process") as run:
+                    page.start_prediction()
+                command = run.call_args.args[0]
+                self.assertEqual("15", command[command.index("--forecast-days") + 1])
+                self.assertEqual("1", command[command.index("--training-months") + 1])
+                page.forecast_days.set(16)
+                with mock.patch.object(page, "run_process") as run, mock.patch("toolbox.pages.messagebox.showerror") as error:
+                    page.start_prediction()
+                run.assert_not_called()
+                error.assert_called_once()
+                page.forecast_days.set(1)
+                page.training_months.set(0)
                 page.prediction_output_dir.set("")
                 with mock.patch.object(page, "run_process") as run, mock.patch("toolbox.pages.messagebox.showerror") as error:
                     page.start_prediction()
@@ -286,8 +300,46 @@ class GuangdongForecastTests(unittest.TestCase):
             finally:
                 book.close()
             self.assertEqual(original, input_path.read_bytes())
-            with self.assertRaisesRegex(ValueError, "预测天数必须为 1"):
-                self.forecast.run_pipeline(input_path, output_dir, forecast_days=2)
+            with self.assertRaisesRegex(ValueError, "预测天数必须在 1 至 15 之间"):
+                self.forecast.run_pipeline(input_path, output_dir, forecast_days=16)
+            with self.assertRaisesRegex(ValueError, "预测天数必须在 1 至 15 之间"):
+                self.forecast.run_pipeline(input_path, output_dir, forecast_days=0)
+
+    def test_pipeline_exports_each_forecast_day_to_its_own_sheet(self) -> None:
+        times = pd.date_range("2026-05-01", periods=50 * 96, freq="15min")
+        frame = pd.DataFrame({
+            "日期": times.normalize(),
+            "时刻": times.strftime("%H:%M"),
+            "全省日前平均电价": 300 + np.sin(np.arange(len(times)) / 96) * 20,
+        })
+        with tempfile.TemporaryDirectory() as folder:
+            input_path = Path(folder) / "输入.xlsx"
+            output_dir = Path(folder) / "多日结果"
+            frame.to_excel(input_path, index=False, sheet_name="整合数据")
+            summary = self.forecast.run_pipeline(
+                input_path, output_dir, forecast_days=3,
+                configs=[{"name": "smoke", "kind": "hist_gradient_boosting", "params": {"max_iter": 5}}],
+            )
+            self.assertEqual(3, summary["forecast_days"])
+            self.assertEqual(
+                ["2026-06-20", "2026-06-21", "2026-06-22"], summary["target_dates"]
+            )
+            path = output_dir / "D+1至D+3日前电价.xlsx"
+            book = load_workbook(path)
+            try:
+                self.assertEqual(
+                    ["D+1日前电价", "D+2日前电价", "D+3日前电价"], book.sheetnames
+                )
+                for index, sheet_name in enumerate(book.sheetnames, start=1):
+                    sheet = book[sheet_name]
+                    self.assertEqual((97, 3), (sheet.max_row, sheet.max_column))
+                    self.assertEqual(
+                        pd.Timestamp("2026-06-19") + pd.Timedelta(days=index), sheet["A2"].value
+                    )
+                    self.assertEqual("23:45", sheet["B97"].value)
+                    self.assertTrue(all(np.isfinite(sheet.cell(row=row, column=3).value) for row in range(2, 98)))
+            finally:
+                book.close()
 
     def test_training_window_keeps_only_recent_three_months(self) -> None:
         dates = pd.date_range("2025-01-01", "2026-07-11", freq="D")
@@ -296,6 +348,15 @@ class GuangdongForecastTests(unittest.TestCase):
         result = self.forecast.slice_training_window(frame, 3)
 
         self.assertEqual(pd.Timestamp("2026-04-11"), result["日期"].min())
+        self.assertEqual(pd.Timestamp("2026-07-11"), result["日期"].max())
+
+    def test_training_window_accepts_a_single_month(self) -> None:
+        dates = pd.date_range("2026-01-01", "2026-07-11", freq="D")
+        frame = pd.DataFrame({"日期": dates, "时刻": "00:00", "全省日前平均电价": 1.0})
+
+        result = self.forecast.slice_training_window(frame, 1)
+
+        self.assertEqual(pd.Timestamp("2026-06-11"), result["日期"].min())
         self.assertEqual(pd.Timestamp("2026-07-11"), result["日期"].max())
 
     def test_sparse_exogenous_field_is_not_used_as_a_feature(self) -> None:
@@ -398,6 +459,36 @@ class GuangdongForecastTests(unittest.TestCase):
             )
 
         self.assertEqual([pd.Timestamp("2026-07-13")], list(result["日期"].unique()))
+
+
+class GuangdongWorkflowTests(unittest.TestCase):
+    def test_predict_plan_accepts_single_month_and_fifteen_days(self) -> None:
+        from toolbox import workflows
+        from toolbox.runtime import ToolPaths
+
+        paths = ToolPaths(ROOT)
+        with tempfile.TemporaryDirectory() as folder:
+            master = Path(folder) / "总表.xlsx"
+            master.touch()
+            values = {
+                "run_date": "2026-11-04",
+                "master_workbook": str(master),
+                "prediction_output_dir": folder,
+                "training_months": 1,
+                "forecast_days": 15,
+            }
+            resolved = workflows.validate(paths, "guangdong-price", "predict", values)
+            ((command, _cwd),) = workflows.plan(paths, "guangdong-price", "predict", resolved)
+            self.assertEqual("15", command[command.index("--forecast-days") + 1])
+            self.assertEqual("1", command[command.index("--training-months") + 1])
+            with self.assertRaisesRegex(ValueError, "预测天数必须在 1 至 15 之间"):
+                workflows.validate(
+                    paths, "guangdong-price", "predict", {**values, "forecast_days": 16}
+                )
+            with self.assertRaisesRegex(ValueError, "至少 1 个月"):
+                workflows.validate(
+                    paths, "guangdong-price", "predict", {**values, "training_months": 0.5}
+                )
 
 
 class ForecastMasterBootstrapTests(unittest.TestCase):
