@@ -99,7 +99,7 @@ class WpsBatchReadTests(unittest.TestCase):
              mock.patch.object(module, "open_browser_context", return_value=(None, context, True)) as opened, \
              mock.patch.object(module, "find_or_open_page") as find, \
              mock.patch.object(module, "evaluate_wps_operation", side_effect=[None, [0.125, "完成"], 42]):
-            result = module.read_online_ranges(requests, "persistent", "", lambda _: None)
+            result = module.read_online_ranges(requests, "cdp", "", lambda _: None)
         self.assertEqual(result, [[[""]], [[0.125, "完成"]], [[42]]])
         opened.assert_called_once()
         self.assertEqual(find.call_args_list, [mock.call(context, request[0]) for request in requests])

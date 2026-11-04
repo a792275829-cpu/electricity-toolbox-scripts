@@ -92,5 +92,21 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(mappings[0].source_type, "excel")
 
 
+class BrowserModeTests(unittest.TestCase):
+    def test_retired_and_unknown_modes_fall_back_to_managed_chrome(self):
+        from toolbox_shared.wps_config import normalize_browser_mode, normalize_runtime_config
+
+        self.assertEqual(normalize_browser_mode("persistent"), "managed_cdp")
+        self.assertEqual(normalize_browser_mode(""), "managed_cdp")
+        self.assertEqual(normalize_browser_mode(None), "managed_cdp")
+        self.assertEqual(normalize_browser_mode("cdp"), "cdp")
+        self.assertEqual(normalize_browser_mode("managed_cdp"), "managed_cdp")
+        self.assertEqual(
+            normalize_runtime_config({"browser_mode": "persistent"})["browser_mode"],
+            "managed_cdp",
+        )
+        self.assertEqual(normalize_runtime_config({})["browser_mode"], "managed_cdp")
+
+
 if __name__ == "__main__":
     unittest.main()

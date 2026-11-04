@@ -341,7 +341,7 @@ def read_excel_sheet_names(workbook_path: Path) -> list[str]:
 
 def prepare_mappings(
     mappings: list[MappingRow],
-    browser_mode: str = "persistent",
+    browser_mode: str = "managed_cdp",
     cdp_url: str = "http://127.0.0.1:9222",
     log=None,
 ) -> list[PreparedMapping]:
@@ -549,7 +549,7 @@ def write_to_wps(
     url: str,
     prepared: list[PreparedMapping],
     log,
-    browser_mode: str = "persistent",
+    browser_mode: str = "managed_cdp",
     cdp_url: str = "http://127.0.0.1:9222",
 ) -> dict[str, Any]:
     if sync_playwright is None:

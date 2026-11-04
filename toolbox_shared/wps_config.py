@@ -6,6 +6,13 @@ from pathlib import Path
 from typing import Any
 CONFIG_EXPORT_SCHEMA = "wps_excel_to_kdocs_config_export"
 CONFIG_EXPORT_VERSION = 1
+BROWSER_MODES = ("managed_cdp", "cdp")
+DEFAULT_BROWSER_MODE = "managed_cdp"
+
+def normalize_browser_mode(value: Any) -> str:
+    """Keep supported connection modes; retired ones fall back to the default."""
+    mode = str(value or "").strip()
+    return mode if mode in BROWSER_MODES else DEFAULT_BROWSER_MODE
 
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
@@ -47,7 +54,7 @@ def normalize_runtime_config(data: dict[str, Any]) -> dict[str, Any]:
         documents = legacy_documents(data)
     config = {
         "recent_urls": _string_list(data.get("recent_urls", [])),
-        "browser_mode": str(data.get("browser_mode", "persistent") or "persistent"),
+        "browser_mode": normalize_browser_mode(data.get("browser_mode")),
         "cdp_url": str(data.get("cdp_url", "http://127.0.0.1:9222") or "http://127.0.0.1:9222"),
         "configs": [
             _document_config_from_dict(row)

@@ -38,7 +38,7 @@ from toolbox_shared.wps_paths import (
     WPS_LOGIN_STATUS_URL,
     LOGIN_STATUS_POLL_MS,
 )
-from toolbox_shared.wps_config import (CONFIG_EXPORT_SCHEMA, CONFIG_EXPORT_VERSION, _document_config_from_dict, _region_config_from_dict, _string_list, build_config_export, load_config_export, normalize_runtime_config, runtime_config_from_export_payload, save_config_export)
+from toolbox_shared.wps_config import (CONFIG_EXPORT_SCHEMA, CONFIG_EXPORT_VERSION, _document_config_from_dict, _region_config_from_dict, _string_list, build_config_export, load_config_export, normalize_browser_mode, normalize_runtime_config, runtime_config_from_export_payload, save_config_export)
 from toolbox_shared.wps_values import (
     normalize_cell_value,
     normalize_for_compare,
@@ -157,7 +157,7 @@ class MappingDialog(tk.Toplevel):
         title: str,
         initial: MappingRow | None = None,
         recent_urls: list[str] | None = None,
-        browser_mode: str = "persistent",
+        browser_mode: str = "managed_cdp",
         cdp_url: str = "http://127.0.0.1:9222",
         log=None,
     ):
@@ -403,7 +403,7 @@ class DocumentConfigDialog(tk.Toplevel):
         title: str,
         initial: DocumentConfig | None = None,
         recent_urls: list[str] | None = None,
-        browser_mode: str = "persistent",
+        browser_mode: str = "managed_cdp",
         cdp_url: str = "http://127.0.0.1:9222",
         log=None,
         autosave=None,
@@ -682,7 +682,7 @@ class DocumentConfigDialog(tk.Toplevel):
             info: dict[str, Any] | None = None
             error: str | None = None
             try:
-                # A persistent Playwright profile cannot be opened twice at once.
+                # One browser profile serves one connection at a time.
                 with browser_read_lock:
                     info = read_online_document_info(
                         url, browser_mode, cdp_url, log
@@ -950,9 +950,9 @@ class WpsWriterFrame(ttk.Frame):
         ttk.Label(file_frame, text="连接方式").grid(row=0, column=0, padx=8, pady=8, sticky="w")
         mode_frame = SegmentedGroup(file_frame, variable=self.browser_mode, choices=(
             ("managed_cdp", "WPS 专用浏览器（推荐）"),
-            ("persistent", "临时浏览器"),
             ("cdp", "连接已打开的浏览器"),
         ))
+        self.browser_mode_group = mode_frame
         mode_frame.grid(row=0, column=1, padx=8, pady=8, sticky="w")
 
         ttk.Label(file_frame, text="浏览器连接地址").grid(row=1, column=0, padx=8, pady=8, sticky="w")
@@ -1575,10 +1575,7 @@ class WpsWriterFrame(ttk.Frame):
         self.recent_urls = [url for url in config.get("recent_urls", []) if isinstance(url, str) and url.strip()]
         if config.get("kdocs_url"):
             self.recent_urls = update_recent_urls(self.recent_urls, config["kdocs_url"])
-        saved_browser_mode = config.get("browser_mode", "managed_cdp")
-        if saved_browser_mode == "persistent" and sys.platform == "darwin":
-            saved_browser_mode = "managed_cdp"
-        self.browser_mode.set(saved_browser_mode)
+        self.browser_mode.set(normalize_browser_mode(config.get("browser_mode")))
         self.cdp_url.set(config.get("cdp_url", "http://127.0.0.1:9222"))
         default_url = config.get("kdocs_url", "")
         default_file = config.get("excel_path", "")

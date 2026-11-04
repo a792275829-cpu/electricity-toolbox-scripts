@@ -16,7 +16,6 @@ try:
 except ImportError:
     PlaywrightTimeoutError = Exception
 
-from .browser_runtime import chromium_launch_options
 from .wps_paths import (
     BASE_DIR,
     DATA_DIR,
@@ -686,21 +685,6 @@ def open_browser_context(
             context = browser.contexts[0] if browser.contexts else browser.new_context()
         return browser, context, False
 
-    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    log("正在启动临时浏览器，并载入已保存的登录信息…")
-    try:
-        context = playwright.chromium.launch_persistent_context(
-            str(PROFILE_DIR),
-            headless=for_login_check,
-            **chromium_launch_options(prefer_system=True),
-            viewport={"width": 1400, "height": 900},
-        )
-    except Exception:
-        log("未能启动系统浏览器，正在尝试使用内置浏览器。")
-        context = playwright.chromium.launch_persistent_context(
-            str(PROFILE_DIR),
-            headless=for_login_check,
-            **chromium_launch_options(),
-            viewport={"width": 1400, "height": 900},
-        )
-    return None, context, True
+    raise ValueError(
+        f"无法识别的浏览器连接方式：{browser_mode}。请选择“WPS 专用浏览器”或“连接已打开的浏览器”。"
+    )

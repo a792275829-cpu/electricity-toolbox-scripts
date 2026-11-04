@@ -249,7 +249,7 @@ cp "电力工具脚本/private-data-uploader-tool/upload.config.example.json" \
 
 软件自带 `wps自动/wps_excel_to_kdocs_config.defaults.json`（3 项写入配置、34 个写入区域），首次使用且没有本机配置时自动载入；已有本机配置优先保留。桌面安装包首次安装把它初始化到用户目录 `data/wps自动/`。默认配置保留目标链接、工作表和区域，本地来源文件留空，需在新电脑重新选择并登录。
 
-macOS 默认通过本机 `127.0.0.1:9222` 连接独立的专用 Chrome，可在 WPS 页面点“Start/open dedicated Chrome”和“Check status”，或双击：
+macOS 默认通过本机 `127.0.0.1:9222` 连接独立的专用 Chrome，可在 WPS 页面点“登录 WPS”和“刷新登录状态”，或双击：
 
 ```text
 wps自动/启动WPS专用Chrome.command
@@ -399,7 +399,7 @@ npm install
 wps自动/启动WPS专用Chrome.command
 ```
 
-回到 WPS 工具页点击“Check status”。专用 Chrome 需要保持运行，并使用独立 profile；不要让另一个 Chrome 进程占用 `127.0.0.1:9222`。
+回到 WPS 工具页点击“刷新登录状态”。专用 Chrome 需要保持运行，并使用独立 profile；不要让另一个 Chrome 进程占用 `127.0.0.1:9222`。
 
 ### 测试提示 `No module named 'toolbox'`
 

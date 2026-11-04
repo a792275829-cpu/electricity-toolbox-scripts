@@ -476,6 +476,10 @@ class WpsDialogAsyncTests(unittest.TestCase):
         }
         self.assertIn("登录 WPS", button_texts)
         self.assertIn("刷新登录状态", button_texts)
+        self.assertEqual(
+            [str(button.cget("text")) for button in frame.browser_mode_group.buttons],
+            ["WPS 专用浏览器（推荐）", "连接已打开的浏览器"],
+        )
 
     def test_writer_registers_and_releases_background_thread(self) -> None:
         from toolbox.runtime import ToolPaths, load_module

@@ -78,7 +78,7 @@ class WpsLoginStatusTests(unittest.TestCase):
         self.assertTrue(opened.call_args.kwargs["for_login_check"])
         self.context.close.assert_not_called()
 
-    def test_temporary_profile_is_closed_even_on_network_failure(self):
+    def test_owned_context_is_closed_even_on_network_failure(self):
         manager = mock.MagicMock()
         self.context.request.get.side_effect = RuntimeError("网络不可用")
         with tempfile.TemporaryDirectory() as folder:
@@ -88,7 +88,7 @@ class WpsLoginStatusTests(unittest.TestCase):
                 mock.patch.object(self.module, "open_browser_context", return_value=(None, self.context, True)),
             ):
                 with self.assertRaisesRegex(RuntimeError, "网络不可用"):
-                    self.module.check_wps_login_status("persistent", "local", mock.Mock())
+                    self.module.check_wps_login_status("managed_cdp", "local", mock.Mock())
         self.context.close.assert_called_once()
 
     def test_check_does_not_switch_visible_login_browser_to_headless(self):

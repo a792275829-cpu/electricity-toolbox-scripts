@@ -350,7 +350,7 @@ class PageAdapterTests(unittest.TestCase):
         module = importlib.import_module('toolbox_shared.wps_service')
         runtime_config = {
             "recent_urls": ["https://www.kdocs.cn/l/target"],
-            "browser_mode": "persistent",
+            "browser_mode": "managed_cdp",
             "cdp_url": "http://127.0.0.1:9222",
             "configs": [
                 {
