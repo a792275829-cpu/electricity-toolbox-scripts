@@ -448,9 +448,91 @@ def fetch_energy_rows(context, run_date: str, tenant_id: str, units: list[dict[s
     return rows
 
 
-def collect_detail_rows(run_date: str, config: Config) -> list[dict[str, Any]]:
+def collect_date_rows(run_date: str, context, companies: list[dict[str, str]],
+                      config: Config) -> list[dict[str, Any]]:
     detail_rows: list[dict[str, Any]] = []
 
+    for index, company in enumerate(companies, start=1):
+        tenant_id = company["tenantId"]
+        company_name = company["name"]
+        log(f"[{index}/{len(companies)}] 切换公司：{company_name}")
+        switch_company(context, tenant_id)
+        time.sleep(0.3)
+
+        units = sorted(get_units(context), key=lambda item: natural_key(unit_display_name(item)))
+        unit_names = {str(item.get("id")): unit_display_name(item) for item in units if item.get("id")}
+        unit_order = {str(item.get("id")): pos for pos, item in enumerate(units) if item.get("id")}
+
+        plans: dict[str, tuple[float | None, ...]] = {}
+        plan_date = ""
+        if company_name == "清远电厂":
+            raw_rows = fetch_qingyuan_rows(context, run_date, tenant_id)
+            plan_date = (datetime.strptime(run_date, "%Y-%m-%d") + timedelta(days=2)).date().isoformat()
+            plan_rows = fetch_qingyuan_rows(context, plan_date, tenant_id, metric="planValue")
+            if {row["unitId"] for row in plan_rows} != set(unit_names):
+                raise ValueError(f"清远 {plan_date} 计划电量机组与机组列表不符，停止导出。")
+            plans = {row["unitId"]: online_energy_hours(row["onlineEle"],
+                     label=f"{plan_date} 清远 / {unit_names[row['unitId']]} 计划值", allow_empty=True)
+                     for row in plan_rows}
+            for unit_id, values in plans.items():
+                missing_hours = sum(value is None for value in values)
+                if missing_hours:
+                    log(f"  提示：{plan_date} 清远 / {unit_names[unit_id]} 有 {missing_hours} 个时段计划值未填报，导出为空白。")
+        elif is_renewable_company(units):
+            raw_rows = fetch_energy_rows(context, run_date, tenant_id, units)
+        else:
+            raw_rows = fetch_fire_rows(context, run_date, tenant_id)
+
+        power_items = [item for item in raw_rows if str(item.get("unitId") or "") != "-"]
+        if not unit_names or len(unit_names) != len(units):
+            raise ValueError(f"{company_name} 机组列表为空、缺少ID或ID重复，停止导出。")
+        seen = set()
+        for item in power_items:
+            unit_id = str(item.get("unitId") or "")
+            if unit_id not in unit_names or unit_id in seen:
+                raise ValueError(f"{company_name} 返回未知或重复机组 {unit_id}，停止导出。")
+            if str(item.get("runDate") or "")[:10] != run_date:
+                raise ValueError(f"{company_name} / {unit_id} 返回日期与 {run_date} 不符，停止导出。")
+            seen.add(unit_id)
+        missing = set(unit_names) - seen
+        if missing:
+            raise ValueError(f"{company_name} 缺少机组数据：{'、'.join(unit_names[key] for key in sorted(missing))}，停止导出。")
+        power_items.sort(
+            key=lambda item: (
+                unit_order.get(str(item.get("unitId") or ""), 999),
+                natural_key(unit_names.get(str(item.get("unitId") or ""), str(item.get("unitId") or ""))),
+            )
+        )
+
+        for item in power_items:
+            unit_id = str(item.get("unitId") or "")
+            unit_name = unit_names.get(unit_id, unit_id or "未知机组")
+            values = online_energy_hours(item.get("onlineEle"),
+                label=f"{run_date} {company_name} / {unit_name}",
+                allow_empty=True)
+            missing_hours = sum(value is None for value in values)
+            if missing_hours:
+                log(f"  提示：{company_name} / {unit_name} 有 {missing_hours} 个时段实际上网电量未填报，导出为空白。")
+            for hour, value in enumerate(values):
+                detail_rows.append(
+                    {
+                        "company": company_name,
+                        "unit": unit_name,
+                        "time": f"{hour:02d}:00",
+                        "onlineEle": value,
+                        **({"planEle": plans[unit_id][hour], "planDate": plan_date}
+                           if plans else {}),
+                    }
+                )
+
+        log(f"  完成：{company_name}，记录 {len(power_items)} 条。")
+        time.sleep(config.request_delay_seconds)
+
+    return detail_rows
+
+
+def iter_detail_rows(dates: list[str], config: Config):
+    """Yield ``(日期, 明细行)`` per date while reusing one login session."""
     with sync_playwright() as playwright:
         context = launch_context(playwright, headless=config.headless)
         try:
@@ -458,85 +540,20 @@ def collect_detail_rows(run_date: str, config: Config) -> list[dict[str, Any]]:
             companies = get_companies(context)
             if not companies:
                 raise ValueError("未返回可采集公司，停止导出。")
-            log(f"开始抓取 {run_date} 上网电量，共 {len(companies)} 家公司。")
-
-            for index, company in enumerate(companies, start=1):
-                tenant_id = company["tenantId"]
-                company_name = company["name"]
-                log(f"[{index}/{len(companies)}] 切换公司：{company_name}")
-                switch_company(context, tenant_id)
-                time.sleep(0.3)
-
-                units = sorted(get_units(context), key=lambda item: natural_key(unit_display_name(item)))
-                unit_names = {str(item.get("id")): unit_display_name(item) for item in units if item.get("id")}
-                unit_order = {str(item.get("id")): pos for pos, item in enumerate(units) if item.get("id")}
-
-                if company_name == "清远电厂":
-                    raw_rows = fetch_qingyuan_rows(context, run_date, tenant_id)
-                    plan_date = (datetime.strptime(run_date, "%Y-%m-%d") + timedelta(days=2)).date().isoformat()
-                    plan_rows = fetch_qingyuan_rows(context, plan_date, tenant_id, metric="planValue")
-                    if {row["unitId"] for row in plan_rows} != set(unit_names):
-                        raise ValueError(f"清远 {plan_date} 计划电量机组与机组列表不符，停止导出。")
-                    plans = {row["unitId"]: online_energy_hours(row["onlineEle"],
-                             label=f"{plan_date} 清远 / {unit_names[row['unitId']]} 计划值", allow_empty=True)
-                             for row in plan_rows}
-                    for unit_id, values in plans.items():
-                        missing_hours = sum(value is None for value in values)
-                        if missing_hours:
-                            log(f"  提示：{plan_date} 清远 / {unit_names[unit_id]} 有 {missing_hours} 个时段计划值未填报，导出为空白。")
-                elif is_renewable_company(units):
-                    raw_rows = fetch_energy_rows(context, run_date, tenant_id, units)
-                else:
-                    raw_rows = fetch_fire_rows(context, run_date, tenant_id)
-
-                power_items = [item for item in raw_rows if str(item.get("unitId") or "") != "-"]
-                if not unit_names or len(unit_names) != len(units):
-                    raise ValueError(f"{company_name} 机组列表为空、缺少ID或ID重复，停止导出。")
-                seen = set()
-                for item in power_items:
-                    unit_id = str(item.get("unitId") or "")
-                    if unit_id not in unit_names or unit_id in seen:
-                        raise ValueError(f"{company_name} 返回未知或重复机组 {unit_id}，停止导出。")
-                    if str(item.get("runDate") or "")[:10] != run_date:
-                        raise ValueError(f"{company_name} / {unit_id} 返回日期与 {run_date} 不符，停止导出。")
-                    seen.add(unit_id)
-                missing = set(unit_names) - seen
-                if missing:
-                    raise ValueError(f"{company_name} 缺少机组数据：{'、'.join(unit_names[key] for key in sorted(missing))}，停止导出。")
-                power_items.sort(
-                    key=lambda item: (
-                        unit_order.get(str(item.get("unitId") or ""), 999),
-                        natural_key(unit_names.get(str(item.get("unitId") or ""), str(item.get("unitId") or ""))),
-                    )
-                )
-
-                for item in power_items:
-                    unit_id = str(item.get("unitId") or "")
-                    unit_name = unit_names.get(unit_id, unit_id or "未知机组")
-                    values = online_energy_hours(item.get("onlineEle"),
-                        label=f"{run_date} {company_name} / {unit_name}",
-                        allow_empty=True)
-                    missing_hours = sum(value is None for value in values)
-                    if missing_hours:
-                        log(f"  提示：{company_name} / {unit_name} 有 {missing_hours} 个时段实际上网电量未填报，导出为空白。")
-                    for hour, value in enumerate(values):
-                        detail_rows.append(
-                            {
-                                "company": company_name,
-                                "unit": unit_name,
-                                "time": f"{hour:02d}:00",
-                                "onlineEle": value,
-                                **({"planEle": plans[unit_id][hour], "planDate": plan_date}
-                                   if company_name == "清远电厂" else {}),
-                            }
-                        )
-
-                log(f"  完成：{company_name}，记录 {len(power_items)} 条。")
-                time.sleep(config.request_delay_seconds)
+            for index, run_date in enumerate(dates, start=1):
+                log(f"[{index}/{len(dates)}] 抓取 {run_date} 上网电量，共 {len(companies)} 家公司。")
+                yield run_date, collect_date_rows(run_date, context, companies, config)
         finally:
             context.close()
 
-    return detail_rows
+
+def collect_detail_rows(run_date: str, config: Config) -> list[dict[str, Any]]:
+    """Collect one date; the report pipeline aggregates a single day at a time."""
+    rows = iter_detail_rows([run_date], config)
+    try:
+        return next(rows)[1]
+    finally:
+        rows.close()
 
 
 def display_unit_header(value: str) -> str:
@@ -664,11 +681,41 @@ def export_online_energy(run_date: str, config: Config) -> Path:
     return save_excel(run_date, detail_rows, config.output_dir)
 
 
+def range_dates(start_date: str, end_date: str) -> list[str]:
+    start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    if end < start:
+        raise ValueError("结束日期不能早于开始日期，停止导出。")
+    return [(start + timedelta(days=offset)).isoformat() for offset in range((end - start).days + 1)]
+
+
+def export_online_energy_range(start_date: str, end_date: str, config: Config) -> list[Path]:
+    """导出日期范围内每一天，逐日写一个汇总工作簿，已完成日期不受后续失败影响。"""
+    dates = range_dates(start_date, end_date)
+    paths: list[Path] = []
+    rows = iter_detail_rows(dates, config)
+    try:
+        for run_date, detail_rows in rows:
+            path = save_excel(run_date, detail_rows, config.output_dir)
+            paths.append(path)
+            log(f"已保存：{path}")
+    finally:
+        rows.close()
+    return paths
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="导出指定日期各公司各机组上网电量")
-    parser.add_argument("date", nargs="?", help="运行日，格式 YYYY-MM-DD")
+    parser = argparse.ArgumentParser(description="导出指定日期范围内各公司各机组上网电量")
+    parser.add_argument("date", nargs="?", help="单一运行日，格式 YYYY-MM-DD")
+    parser.add_argument("--start-date", help="开始日期，格式 YYYY-MM-DD")
+    parser.add_argument("--end-date", help="结束日期，格式 YYYY-MM-DD")
     parser.add_argument("--login", action="store_true", help="登录并保存会话")
     args = parser.parse_args()
+
+    if (args.start_date or args.end_date) and args.date:
+        parser.error("请只用 --start-date/--end-date 表达日期范围，或只给一个位置参数日期")
+    if bool(args.start_date) != bool(args.end_date):
+        parser.error("--start-date 与 --end-date 需要同时提供")
 
     config = load_config()
     try:
@@ -682,10 +729,23 @@ def main() -> int:
                         context.close()
             return 0
 
-        run_date = validate_date(args.date) if args.date else ask_date()
+        if args.start_date:
+            start_date = validate_date(args.start_date)
+            end_date = validate_date(args.end_date)
+        else:
+            start_date = validate_date(args.date) if args.date else ask_date()
+            end_date = start_date
         with AuthStateLock():
-            path = export_online_energy(run_date, config)
-        log(f"\n完成：{path}")
+            if start_date == end_date:
+                paths = [export_online_energy(start_date, config)]
+            else:
+                paths = export_online_energy_range(start_date, end_date, config)
+        if len(paths) == 1:
+            log(f"\n完成：{paths[0]}")
+        else:
+            log(f"\n完成：共 {len(paths)} 个文件")
+            for path in paths:
+                log(f"  {path}")
         return 0
     except KeyboardInterrupt:
         print("\n已取消。")

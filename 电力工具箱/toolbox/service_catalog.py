@@ -19,7 +19,8 @@ def desktop_catalog(paths):
     workbook = lambda key, label, name="": f(key, label, "file", str(work / name) if name else "", extensions=["xlsx"])
     backup = f("create_backup", "写入前生成时间戳备份", "boolean", False)
     forms = {
-        "online-energy": ([f("run_date", "导出日期", "date", yesterday)], [("run", "开始导出"), ("login", "登录")]),
+        "online-energy": ([f("start_date", "开始日期", "date", yesterday), f("end_date", "结束日期", "date", yesterday)],
+                          [("run", "开始导出"), ("login", "登录")]),
         "wind-forecast": ([f("run_date", "运行日期", "date", tomorrow)], [("run", "生成截图"), ("login", "登录")]),
         "section-analysis": ([f("files", "节点电价文件（支持批量）", "files", [], extensions=["xlsx"]),
                               f("topology_path", "拓扑名单", "file", str(paths.section_analysis_topology), extensions=["md"]),

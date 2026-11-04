@@ -9,7 +9,7 @@ from pathlib import Path
 from tkinter import ttk
 from unittest.mock import patch
 
-from toolbox.page_support import DateInput, normalize_date_input, parse_date_input
+from toolbox.page_support import DateInput, DateRangeInput, normalize_date_input, parse_date_input
 from toolbox.runtime import TaskRegistry, ToolPaths, load_module
 
 
@@ -209,30 +209,140 @@ class CalendarInputTests(unittest.TestCase):
         )
 
         for page_type, expected_count in (
-            (OnlineEnergyPage, 1), (ReportPage, 1), (MarketTableUpdatePage, 1),
+            (OnlineEnergyPage, 0), (ReportPage, 1), (MarketTableUpdatePage, 1),
             (GuangdongPricePage, 1), (MarketReportPage, 1), (SpotPriceUpdatePage, 2),
             (TransactionInfoUpdatePage, 2), (WindForecastPage, 1),
         ):
             with self.subTest(page=page_type.__name__):
                 page = page_type(self.root, ToolPaths(ROOT), TaskRegistry())
                 try:
-                    def count_calendars(widget):
-                        return sum(isinstance(child, DateInput) + count_calendars(child)
+                    def find_calendars(widget, kind):
+                        return sum(isinstance(child, kind) + find_calendars(child, kind)
                                    for child in widget.winfo_children())
-                    self.assertEqual(count_calendars(page), expected_count)
-                    if page_type in (OnlineEnergyPage, WindForecastPage):
-                        if page_type is OnlineEnergyPage:
-                            form = next(child for child in page.content.winfo_children()
-                                        if isinstance(child, ttk.LabelFrame))
-                            labels = [child.cget("text") for child in form.winfo_children()
-                                      if isinstance(child, ttk.Label)]
-                            self.assertIn("导出日期", labels)
+                    self.assertEqual(find_calendars(page, DateInput), expected_count)
+                    if page_type is OnlineEnergyPage:
+                        form = next(child for child in page.content.winfo_children()
+                                    if isinstance(child, ttk.LabelFrame))
+                        labels = [child.cget("text") for child in form.winfo_children()
+                                  if isinstance(child, ttk.Label)]
+                        self.assertIn("导出日期", labels)
+                        self.assertEqual(find_calendars(page, DateRangeInput), 1)
+                        page.start_date.set("2026-5-3")
+                        page.end_date.set("2026-5-6")
+                        with patch.object(page, "run_process") as run:
+                            page.start_export()
+                        command = run.call_args.args[0]
+                        self.assertEqual(command[-4:], ["--start-date", "2026-05-03",
+                                                        "--end-date", "2026-05-06"])
+                    elif page_type is WindForecastPage:
                         page.run_date.set("2026-5-3")
                         with patch.object(page, "run_process") as run:
-                            (page.start_export if page_type is OnlineEnergyPage else page.start_generate)()
+                            page.start_generate()
                         self.assertEqual(run.call_args.args[0][-1], "2026-05-03")
                 finally:
                     page.destroy()
+
+    def test_date_range_input_links_and_independent_month_paging(self):
+        start = tk.StringVar(master=self.root, value="2026-11-05")
+        end = tk.StringVar(master=self.root, value="2026-11-08")
+        widget = DateRangeInput(self.root, start_variable=start, end_variable=end)
+        widget.pack()
+        self.root.update()
+        self.addCleanup(widget.destroy)
+
+        widget.open_calendar()
+        self.assertEqual((widget.left_month, widget.right_month),
+                         (date(2026, 11, 1), date(2026, 12, 1)))
+        widget.change_month("left", 1)
+        self.assertEqual((widget.left_month, widget.right_month),
+                         (date(2026, 12, 1), date(2027, 1, 1)))
+        widget.change_month("right", -1)
+        self.assertEqual((widget.left_month, widget.right_month),
+                         (date(2026, 11, 1), date(2026, 12, 1)))
+
+        widget.set_linked(False)
+        widget.change_month("left", 2)
+        self.assertEqual(widget.left_month, date(2027, 1, 1))
+        self.assertEqual(widget.right_month, date(2026, 12, 1))
+        widget.change_month("right", 3)
+        self.assertEqual(widget.left_month, date(2027, 1, 1))
+        self.assertEqual(widget.right_month, date(2027, 3, 1))
+        self.assertIn("独立翻页", widget.hint_label.cget("text"))
+
+    def test_date_range_input_picks_start_then_end_and_keeps_range_valid(self):
+        start = tk.StringVar(master=self.root, value="2026-11-05")
+        end = tk.StringVar(master=self.root, value="2026-11-08")
+        widget = DateRangeInput(self.root, start_variable=start, end_variable=end)
+        widget.pack()
+        self.root.update()
+        self.addCleanup(widget.destroy)
+
+        widget.open_calendar()
+        widget.pick("left", date(2026, 11, 10))
+        self.assertEqual((start.get(), end.get()), ("2026-11-10", "2026-11-10"))
+        self.assertIsNotNone(widget.popup)
+        self.assertIn("共 1 天", widget.hint_label.cget("text"))
+
+        widget.pick("right", date(2026, 11, 12))
+        self.assertEqual((start.get(), end.get()), ("2026-11-10", "2026-11-12"))
+        self.assertIsNone(widget.popup)
+
+        widget.open_calendar()
+        widget.pick("right", date(2026, 11, 1))
+        self.assertEqual((start.get(), end.get()), ("2026-11-01", "2026-11-01"))
+        widget.open_calendar()
+        widget.select_today()
+        self.assertEqual(start.get(), date.today().isoformat())
+        self.assertEqual(end.get(), date.today().isoformat())
+        self.assertIsNone(widget.popup)
+        self.assertIsNone(self.root.grab_current())
+
+    def test_date_range_input_closes_on_escape_outside_click_and_destroy(self):
+        from types import SimpleNamespace
+
+        widget = DateRangeInput(
+            self.root,
+            start_variable=tk.StringVar(master=self.root, value="2026-5-3"),
+            end_variable=tk.StringVar(master=self.root, value="2026-5-9"),
+        )
+        widget.pack()
+        self.root.update()
+
+        widget.open_calendar()
+        widget._outside_click(SimpleNamespace(x_root=-1, y_root=-1))
+        self.assertIsNone(widget.popup)
+
+        widget.open_calendar()
+        widget.popup.focus_force()
+        self.root.update()
+        widget.popup.event_generate("<Escape>")
+        self.root.update()
+        self.assertIsNone(widget.popup)
+
+        widget.open_calendar()
+        widget.destroy()
+        self.assertIsNone(widget.popup)
+        self.assertIsNone(self.root.grab_current())
+
+    def test_date_range_input_manual_entry_normalizes_each_field(self):
+        start = tk.StringVar(master=self.root, value="")
+        end = tk.StringVar(master=self.root, value="")
+        widget = DateRangeInput(self.root, start_variable=start, end_variable=end)
+        widget.pack()
+        self.root.update()
+        self.addCleanup(widget.destroy)
+
+        start.set("2026年5月3日")
+        widget.start_entry.event_generate("<FocusOut>")
+        end.set("2026.5.9")
+        widget.end_entry.event_generate("<FocusOut>")
+        self.assertEqual((start.get(), end.get()), ("2026-05-03", "2026-05-09"))
+        start.set("2026-2-29")
+        widget.start_entry.event_generate("<FocusOut>")
+        self.assertEqual(start.get(), "2026-2-29")
+        widget.open_calendar()
+        self.assertEqual(widget.left_month, date(2026, 5, 1))
+        self.assertEqual(widget.right_month, date(2026, 6, 1))
 
     def test_standalone_report_gui_also_uses_calendar(self):
         module = load_module("test_date_standalone_gui", ROOT / "每日生产经营情况汇报自动生成工具/scripts/report_gui.py")

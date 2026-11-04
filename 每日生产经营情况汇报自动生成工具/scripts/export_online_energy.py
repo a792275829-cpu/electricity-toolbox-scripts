@@ -77,12 +77,16 @@ number_or_zero = _export.number_or_zero
 fetch_fire_rows = _export.fetch_fire_rows
 fetch_energy_rows = _export.fetch_energy_rows
 collect_detail_rows = _export.collect_detail_rows
+collect_date_rows = _export.collect_date_rows
+iter_detail_rows = _export.iter_detail_rows
+range_dates = _export.range_dates
 display_unit_header = _export.display_unit_header
 display_company_name = _export.display_company_name
 build_company_blocks = _export.build_company_blocks
 write_summary_sheet = _export.write_summary_sheet
 save_excel = _export.save_excel
 export_online_energy = _export.export_online_energy
+export_online_energy_range = _export.export_online_energy_range
 
 
 @dataclass

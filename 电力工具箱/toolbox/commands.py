@@ -24,6 +24,11 @@ def dated_script(script: Path, run_date: str) -> list[str]:
     return [python_executable(), str(script), run_date]
 
 
+def dated_range_script(script: Path, start_date: str, end_date: str) -> list[str]:
+    return [python_executable(), str(script),
+            "--start-date", start_date, "--end-date", end_date]
+
+
 def section_analysis(paths, files, output_root, topology_path, threshold):
     return [python_executable(), str(paths.section_analysis_runner),
             "--output-root", str(output_root), "--topology", str(topology_path),

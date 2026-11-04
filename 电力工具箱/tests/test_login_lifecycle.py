@@ -102,7 +102,7 @@ class CliPropagationTests(unittest.TestCase):
             self.fixture(root, True)
             service = ToolboxService(root)
             try:
-                task = service.call("start", dict(request_id="login-fixture", tool_id="online-energy", action="run", values={"run_date": "2026-10-28"}))
+                task = service.call("start", dict(request_id="login-fixture", tool_id="online-energy", action="run", values={"start_date": "2026-10-28", "end_date": "2026-10-28"}))
                 deadline = time.monotonic() + 10
                 while service.registry.has_running_tasks() and time.monotonic() < deadline:
                     time.sleep(0.02)

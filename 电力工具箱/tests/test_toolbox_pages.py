@@ -61,19 +61,38 @@ class PageAdapterTests(unittest.TestCase):
         trade = TradeAnalysisPage(self.root, self.paths, self.registry)
         summary = SummaryUploadPage(self.root, self.paths, self.registry)
 
-        export_command = online.build_export_command("2026-06-09")
-        self.assertEqual(export_command[-1], "2026-06-09")
-        self.assertEqual(Path(export_command[-2]), self.paths.online_energy)
+        export_command = online.build_export_command("2026-06-09", "2026-06-11")
+        self.assertEqual(export_command[-4:], ["--start-date", "2026-06-09", "--end-date", "2026-06-11"])
+        self.assertEqual(Path(export_command[1]), self.paths.online_energy)
         self.assertTrue(trade.output_dir.get())
         self.assertEqual(summary.default_output_for(Path("C:/data")).suffix, ".xlsx")
 
-    def test_online_energy_defaults_to_previous_day(self) -> None:
+    def test_online_energy_defaults_to_previous_day_range(self) -> None:
         from toolbox.pages import OnlineEnergyPage
 
         page = OnlineEnergyPage(self.root, self.paths, self.registry)
-        expected = date.today() - timedelta(days=1)
+        expected = (date.today() - timedelta(days=1)).isoformat()
 
-        self.assertEqual(page.run_date.get(), expected.isoformat())
+        self.assertEqual(page.start_date.get(), expected)
+        self.assertEqual(page.end_date.get(), expected)
+
+    def test_online_energy_rejects_reversed_or_invalid_range_before_running(self) -> None:
+        from toolbox.pages import OnlineEnergyPage
+
+        page = OnlineEnergyPage(self.root, self.paths, self.registry)
+        try:
+            for start, end, title in (("2026-5-9", "2026-5-3", "日期范围错误"),
+                                      ("2026-2-29", "2026-5-3", "日期格式错误")):
+                with self.subTest(start=start, end=end), \
+                        mock.patch("toolbox.pages.messagebox.showerror") as showerror, \
+                        mock.patch.object(page, "run_process") as run:
+                    page.start_date.set(start)
+                    page.end_date.set(end)
+                    page.start_export()
+                    self.assertEqual(showerror.call_args.args[0], title)
+                    run.assert_not_called()
+        finally:
+            page.destroy()
 
     def test_trade_auto_match_finds_latest_d_and_d_minus_two_files(self) -> None:
         from toolbox.pages import TradeAnalysisPage

@@ -37,7 +37,7 @@ from .transaction_info_page import TransactionInfoUpdatePage
 from .power_benefit_page import PowerBenefitUpdatePage
 from .market_report_page import MarketReportPage
 from .summary_upload_page import SummaryUploadPage
-from .page_support import DateInput, DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
+from .page_support import DateInput, DateRangeInput, DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
 from .page_support import (
     add_path_row as _add_path_row,
     clearing_file_date,
@@ -68,22 +68,24 @@ class OnlineEnergyPage(ToolPage):
             parent,
             registry=registry,
             title="导出上网电量",
-            description="按日期抓取各公司、各机组上网电量并生成 Excel 汇总。",
+            description="按日期范围抓取各公司、各机组上网电量，逐日生成 Excel 汇总。",
         )
         self.paths = paths
-        self.run_date = tk.StringVar(
-            master=self, value=(date.today() - timedelta(days=1)).isoformat()
-        )
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        self.start_date = tk.StringVar(master=self, value=yesterday)
+        self.end_date = tk.StringVar(master=self, value=yesterday)
 
         form = ttk.LabelFrame(self.content, text="导出设置", padding=14)
         form.grid(row=0, column=0, sticky="ew")
         ttk.Label(form, text="导出日期").grid(row=0, column=0, sticky="w")
-        DateInput(form, textvariable=self.run_date, width=18).grid(
-            row=0, column=1, sticky="w", padx=(8, 14)
-        )
-        ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
-            row=0, column=2, sticky="w"
-        )
+        DateRangeInput(
+            form, start_variable=self.start_date, end_variable=self.end_date
+        ).grid(row=0, column=1, sticky="w", padx=(8, 14))
+        ttk.Label(
+            form,
+            text="左侧月历选开始日期、右侧选结束日期；同一天即导出当天",
+            style="Muted.TLabel",
+        ).grid(row=0, column=2, sticky="w")
 
         actions = self.actions
         self.export_button = ttk.Button(
@@ -96,25 +98,35 @@ class OnlineEnergyPage(ToolPage):
             command=lambda: _open_directory(self.paths.online_energy_output_dir),
         ).pack(side="left", padx=(8, 0))
         self.register_busy_widgets(self.export_button)
-        self.append_log("请选择日期后开始导出。")
+        self.append_log("请选择日期范围后开始导出。")
 
-    def build_export_command(self, run_date: str) -> list[str]:
-        return commands.dated_script(self.paths.online_energy, run_date)
+    def build_export_command(self, start_date: str, end_date: str) -> list[str]:
+        return commands.dated_range_script(self.paths.online_energy, start_date, end_date)
 
     def start_export(self) -> None:
-        run_date = self.run_date.get().strip()
         try:
-            run_date = normalize_date_input(run_date)
+            start_date = normalize_date_input(self.start_date.get().strip())
+            end_date = normalize_date_input(self.end_date.get().strip())
         except ValueError:
             messagebox.showerror(
                 "日期格式错误", DATE_INPUT_ERROR, parent=self
             )
             return
+        if end_date < start_date:
+            messagebox.showerror(
+                "日期范围错误", "结束日期不能早于开始日期。", parent=self
+            )
+            return
         self.clear_log()
+        status = (
+            f"正在导出 {start_date} 上网电量..."
+            if start_date == end_date
+            else f"正在导出 {start_date} 至 {end_date} 上网电量..."
+        )
         self.run_process(
-            self.build_export_command(run_date),
+            self.build_export_command(start_date, end_date),
             action='run', cwd=self.paths.online_energy_dir,
-            status="正在导出上网电量...",
+            status=status,
             on_success=lambda _code: messagebox.showinfo(
                 "完成", "上网电量导出已完成。", parent=self
             ),

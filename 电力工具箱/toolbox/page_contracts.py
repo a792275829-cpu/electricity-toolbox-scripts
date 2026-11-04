@@ -24,7 +24,7 @@ class PageBinding:
 
 
 PAGE_BINDINGS = MappingProxyType({
-    'online-energy': PageBinding('online-energy', ('run_date',)),
+    'online-energy': PageBinding('online-energy', ('start_date', 'end_date')),
     'wind-forecast': PageBinding('wind-forecast', ('run_date',)),
     'section-analysis': PageBinding('section-analysis', ('output_root', 'topology_path', 'threshold')),
     'trade-analysis': PageBinding('trade-analysis', ('output_dir',)),

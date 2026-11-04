@@ -4,8 +4,11 @@ import json
 import os
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
+from unittest.mock import Mock, patch
 
 from toolbox.runtime import ToolPaths, load_module
 
@@ -151,3 +154,58 @@ class OnlineEnergyOutputTests(unittest.TestCase):
                 self.assertEqual(sheet["A3"].number_format, "General")
             finally:
                 workbook.close()
+
+    def range_module(self, fetch, *, units=({"id": "u", "name": "#1"},)):
+        module = self.module
+        context = SimpleNamespace(close=Mock())
+        overrides = dict(
+            sync_playwright=lambda: nullcontext(None), launch_context=lambda *a, **k: context,
+            ensure_login=lambda *a: None, log=lambda *a: None,
+            get_companies=lambda *a: [dict(tenantId="test", name="海门电厂")],
+            switch_company=lambda *a: None, get_units=lambda *a: list(units),
+            is_renewable_company=lambda *a: False, fetch_fire_rows=fetch,
+        )
+        return module, context, patch.multiple(module, **overrides), patch.object(module.time, "sleep")
+
+    def test_range_dates_reject_reversed_range_and_cover_both_ends(self):
+        self.assertEqual(self.module.range_dates("2026-10-26", "2026-10-28"),
+                         ["2026-10-26", "2026-10-27", "2026-10-28"])
+        self.assertEqual(self.module.range_dates("2026-10-26", "2026-10-26"), ["2026-10-26"])
+        with self.assertRaisesRegex(ValueError, "结束日期不能早于开始日期"):
+            self.module.range_dates("2026-10-28", "2026-10-26")
+
+    def test_range_export_writes_one_workbook_per_day_and_reuses_one_session(self):
+        fetched = []
+
+        def fetch(_context, run_date, _tenant_id):
+            fetched.append(run_date)
+            return [dict(unitId="u", runDate=run_date, onlineEle=[1.5] * 24)]
+
+        module, context, overrides, sleep = self.range_module(fetch)
+        with tempfile.TemporaryDirectory() as folder, overrides, sleep:
+            paths = module.export_online_energy_range(
+                "2026-10-26", "2026-10-28", module.Config(output_dir=Path(folder)))
+            self.assertEqual([path.name for path in paths], [
+                "上网电量汇总_2026-10-26.xlsx",
+                "上网电量汇总_2026-10-27.xlsx",
+                "上网电量汇总_2026-10-28.xlsx",
+            ])
+            self.assertTrue(all(path.is_file() for path in paths))
+            self.assertEqual(fetched, ["2026-10-26", "2026-10-27", "2026-10-28"])
+        context.close.assert_called_once()
+
+    def test_range_export_stops_on_bad_day_and_keeps_finished_workbooks(self):
+        def fetch(_context, run_date, _tenant_id):
+            return [dict(unitId="u", runDate=run_date,
+                         onlineEle=[1.0] * 24 if run_date != "2026-10-27" else ["无效"] * 24)]
+
+        module, context, overrides, sleep = self.range_module(fetch)
+        with tempfile.TemporaryDirectory() as folder, overrides, sleep:
+            folder = Path(folder)
+            with self.assertRaisesRegex(ValueError, "缺失或无效"):
+                module.export_online_energy_range(
+                    "2026-10-26", "2026-10-28", module.Config(output_dir=folder))
+            self.assertTrue((folder / "上网电量汇总_2026-10-26.xlsx").is_file())
+            self.assertFalse((folder / "上网电量汇总_2026-10-27.xlsx").exists())
+            self.assertFalse((folder / "上网电量汇总_2026-10-28.xlsx").exists())
+        context.close.assert_called_once()

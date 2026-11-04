@@ -11,7 +11,7 @@ from tkinter import ttk
 
 from .file_rules import clearing_file_date
 from toolbox_shared.dates import DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
-from toolbox_shared.date_input import DateInput
+from toolbox_shared.date_input import DateInput, DateRangeInput
 from toolbox_shared.file_button import FileSelectButton
 
 

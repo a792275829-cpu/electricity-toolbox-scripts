@@ -56,7 +56,8 @@ class NativeLayerTests(unittest.TestCase):
             app = ToolboxApp(workspace=root, registry=registry)
             try:
                 page = app.pages['导出上网电量']
-                page.run_date.set('2026-10-20')
+                page.start_date.set('2026-10-20')
+                page.end_date.set('2026-10-20')
                 page.start_export()
                 deadline = time.monotonic() + 12
                 while page.busy and time.monotonic() < deadline:
@@ -88,7 +89,7 @@ class NativeLayerTests(unittest.TestCase):
             window.withdraw()
             page = ToolPage(window, registry=registry, title='日志回归')
             def worker(token):
-                return registry.execute_remote('online-energy', 'run', {'run_date': '2026-10-20'}, token, page.append_log)
+                return registry.execute_remote('online-energy', 'run', {'start_date': '2026-10-20', 'end_date': '2026-10-20'}, token, page.append_log)
             worker._remote_business = True
             try:
                 page.run_in_thread(worker, status='运行中')
