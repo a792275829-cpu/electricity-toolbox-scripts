@@ -90,12 +90,10 @@ class RuntimePruningTests(unittest.TestCase):
                 self.assertEqual(len(sdk.chromium.launch_persistent_context.call_args_list), 2)
                 for call in sdk.chromium.launch_persistent_context.call_args_list:
                     self.assertNotIn("channel", call.kwargs)
-            sdk = Mock()
-            sdk.chromium.launch_persistent_context.side_effect = [Error("first launch failed"), Mock()]
-            with patch.object(wps_browser, "PROFILE_DIR", Path(directory) / "wps"):
-                wps_browser.open_browser_context(sdk, "temporary", "", lambda _: None, for_login_check=True)
-            for call in sdk.chromium.launch_persistent_context.call_args_list:
-                self.assertNotIn("channel", call.kwargs)
+            # WPS 写入只保留专用浏览器与已打开浏览器两种连接方式，
+            # 已移除的“临时浏览器”必须明确报错，不能悄悄回落到持久上下文。
+            with self.assertRaisesRegex(ValueError, "无法识别的浏览器连接方式"):
+                wps_browser.open_browser_context(Mock(), "temporary", "", lambda _: None)
 
     def test_reused_b_runtime_restores_missing_headless_shell(self):
         import prepare_payload
