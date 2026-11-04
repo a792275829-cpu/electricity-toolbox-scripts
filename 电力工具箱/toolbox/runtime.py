@@ -241,13 +241,18 @@ def _module_is_local(module: object, roots: tuple[Path, ...]) -> bool:
         resolved = Path(module_file).resolve()
     except (OSError, TypeError):
         return False
-    interpreter_roots = {Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve()}
+    interpreter_roots = {
+        Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve(),
+        (Path(__file__).resolve().parents[2] / ".venv").resolve(),
+    }
     if any(
         resolved == interpreter_root or interpreter_root in resolved.parents
         for interpreter_root in interpreter_roots
     ):
         # The project virtual environment lives below the workspace root. Its
         # packages must remain registered or class identities split on re-import.
+        # source_debug runs a copied interpreter with PYTHONHOME=base_prefix,
+        # so its .venv dependencies are not covered by sys.prefix alone.
         return False
     return any(resolved == root or root in resolved.parents for root in roots)
 

@@ -127,6 +127,52 @@ class RuntimeTests(unittest.TestCase):
             _module_is_local(dependency, (Path(sys.prefix).resolve().parent,))
         )
 
+    def test_source_debug_retains_venv_dependencies_with_base_prefix(self) -> None:
+        from toolbox.runtime import _module_is_local
+
+        root = Path(__file__).resolve().parents[2]
+        dependency = mock.Mock(__file__=str(
+            root / '.venv/lib/python3.11/site-packages/numpy/_globals.py'
+        ))
+        with mock.patch.object(sys, 'prefix', sys.base_prefix):
+            self.assertFalse(_module_is_local(dependency, (root,)))
+
+    def test_cold_source_debug_forecast_preserves_numpy_pandas_identity(self) -> None:
+        import sysconfig
+
+        root = Path(__file__).resolve().parents[2]
+        # Match source_debug.py: base interpreter identity, venv packages on
+        # PYTHONPATH. A fresh process is essential: pre-importing pandas masks it.
+        environment = {
+            **os.environ, 'PYTHONHOME': sys.base_prefix,
+            'PYTHONPATH': os.pathsep.join(dict.fromkeys([
+                str(root), str(root / '电力工具箱'),
+                sysconfig.get_path('purelib'), sysconfig.get_path('platlib'),
+            ])),
+        }
+        environment.pop('__PYVENV_LAUNCHER__', None)
+        result = subprocess.run(
+            [sys._base_executable, '-W', 'error', '-c', '''
+from pathlib import Path
+import sys
+from toolbox.runtime import load_module
+assert 'numpy' not in sys.modules
+m = load_module('cold_debug_forecast', Path('广东电价预测/update_gdfire_data.py'))
+import numpy as np
+import pandas as pd
+assert np is m.np and pd is m.pd
+assert np._NoValue is sys.modules['numpy._globals']._NoValue
+assert np.array([1, 2]).min() == 1
+frame = m.empty_time_frame('2026-11-01', '2026-11-02')
+frame['全省日前平均电价'] = 300.
+frame['日前统调负荷(MW)'] = 60000.
+assert m.missing_dates(frame, '2026-11-02') == []
+print('192 slots verified; dependency identity preserved')
+'''], cwd=root, env=environment, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('192 slots verified', result.stdout)
+
     def test_report_export_proxy_reads_environment(self) -> None:
         from toolbox.runtime import ToolPaths, load_module
 
