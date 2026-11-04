@@ -39,7 +39,7 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
         root.withdraw()
         try:
             with mock.patch("toolbox.ui.credentials_panel.verify_credentials",
-                            side_effect=lambda username, password: verify_credentials(username, password, base_url=self.url)):
+                            side_effect=lambda username, password, **kwargs: verify_credentials(username, password, base_url=self.url, **kwargs)):
                 panel = CredentialsPanel(root, self.folder)
                 deadline = time.monotonic() + 10
                 ticks = []
@@ -67,6 +67,9 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
         self.tenants = []
         self.captcha = False
         self.server_failure = False
+        self.block_key = False
+        self.key_requested = threading.Event()
+        self.release_key = threading.Event()
         self.key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         public = base64.b64encode(self.key.public_key().public_bytes(
             serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)).decode()
@@ -103,6 +106,9 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
                     else:
                         self.reply({"retCode": "T200", "data": [{"id": "fixture"}]})
                 elif self.path.endswith("/publicKey"):
+                    if owner.block_key:
+                        owner.key_requested.set()
+                        owner.release_key.wait(4)
                     self.reply({"retCode": "T200", "data": public})
                 elif self.path.endswith("/info"):
                     valid = "session=fixture" in self.headers.get("Cookie", "")
@@ -139,11 +145,39 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
         self.proxy_patch.start()
 
     def tearDown(self):
+        self.release_key.set()
         self.proxy_patch.stop()
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
         self.temp.cleanup()
+
+    def test_cancelled_real_verification_does_not_submit_password_after_key_request(self):
+        self.block_key = True
+        cancel = threading.Event()
+        errors = []
+
+        def verify():
+            try:
+                verify_credentials("fixture", "fixture-secret", base_url=self.url, cancel_event=cancel)
+            except Exception as exc:
+                errors.append(exc)
+
+        worker = threading.Thread(target=verify)
+        worker.start()
+        try:
+            self.assertTrue(self.key_requested.wait(3))
+            cancel.set()
+            self.release_key.set()
+            worker.join(3)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(self.posts, 0)
+            self.assertEqual(getattr(errors[0], "kind", None), "cancelled")
+            self.assertEqual(list(self.folder.rglob("auth_state.json")), [])
+        finally:
+            cancel.set()
+            self.release_key.set()
+            worker.join(3)
 
     def test_python_tools_and_account_verification_use_real_isolated_sessions(self):
         verify_credentials("fixture", "fixture-secret", base_url=self.url)

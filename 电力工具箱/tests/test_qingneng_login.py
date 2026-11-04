@@ -147,35 +147,34 @@ class LoginPolicyTests(unittest.TestCase):
 
 
 class AccountVerificationTests(unittest.TestCase):
-    def test_failed_verification_preserves_account_and_success_saves_the_draft(self):
+    def test_save_is_explicit_and_validation_never_rewrites_account(self):
         from toolbox.ui.credentials_panel import CredentialsPanel
         root = tk.Tk()
         root.withdraw()
         try:
             with tempfile.TemporaryDirectory() as folder:
                 store = CredentialStore(Path(folder))
-                before = store.save("original", "old-secret")
+                store.save("original", "old-secret")
                 panel = CredentialsPanel(root, Path(folder), auto_verify=False)
+                panel.RETRY_COOLDOWN_SECONDS = 0
                 panel.username_var.set("edited")
                 panel.password_var.set("new-secret")
+                panel.save()
+                saved = store.load()
                 with mock.patch("toolbox.ui.credentials_panel.verify_credentials",
                                 side_effect=[login.LoginError("credentials", "账号或密码被拒绝"), None]):
                     for success in (False, True):
-                        panel.verify()
+                        panel.retry_saved()
                         deadline = time.monotonic() + 3
                         while panel._verification_id is not None and time.monotonic() < deadline:
                             root.update()
                             time.sleep(0.01)
-                        if success:
-                            self.assertEqual(store.load()["username"], "edited")
-                            self.assertIn("verified_at", store.load())
-                            self.assertFalse(panel.dirty)
-                        else:
-                            self.assertEqual(store.load(), before)
-                            self.assertTrue(panel.dirty)
+                        self.assertEqual(store.load(), saved)
+                        self.assertEqual(panel.status_kind, "valid" if success else "error")
                 panel.destroy()
         finally:
             root.destroy()
+
 
     def test_task_start_commits_draft_and_incomplete_draft_blocks_process(self):
         from toolbox.ui.credentials_panel import CredentialsPanel
@@ -216,8 +215,12 @@ class AccountVerificationTests(unittest.TestCase):
                 panel.password_var.set("secret")
                 panel.save()
                 root._visible_page = SimpleNamespace(tool_id="online-energy", start_login=mock.Mock())
-                panel._verification_queue.put((("account", "secret"), panel.store.load()["revision"], ("需要人工验证", "verification"), True))
-                panel._poll_verification()
+                with mock.patch("toolbox.ui.credentials_panel.verify_credentials", side_effect=login.LoginError("verification", "captcha")):
+                    panel.retry_saved()
+                    deadline = time.monotonic() + 3
+                    while panel._verification_id is not None and time.monotonic() < deadline:
+                        root.update()
+                        time.sleep(0.01)
                 self.assertEqual(panel.manual_login_button.winfo_manager(), "pack")
                 panel.manual_login_button.invoke()
                 root._visible_page.start_login.assert_called_once()
@@ -236,17 +239,19 @@ class AccountVerificationTests(unittest.TestCase):
                 panel = CredentialsPanel(root, Path(folder), auto_verify=False)
                 panel.username_var.set("account")
                 panel.password_var.set("secret")
-                with mock.patch("toolbox.ui.credentials_panel.verify_credentials", side_effect=lambda *_: done.wait(3)):
-                    panel.verify()
+                with mock.patch("toolbox.ui.credentials_panel.verify_credentials", side_effect=lambda *_, **_kwargs: done.wait(3)):
+                    panel.save()
+                    saved = panel.store.load()
+                    panel.retry_saved()
                     panel.password_var.set("edited secret")
                     done.set()
                     deadline = time.monotonic() + 3
                     while panel._verification_id is not None and time.monotonic() < deadline:
                         root.update()
                         time.sleep(0.01)
-                self.assertIn("重新验证", panel.status_var.get())
+                self.assertIn("尚未保存", panel.status_var.get())
                 self.assertNotIn("verified_at", panel.store.load())
-                self.assertEqual(panel.store.load(), {})
+                self.assertEqual(panel.store.load(), saved)
                 panel.destroy()
         finally:
             done.set()

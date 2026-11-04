@@ -47,7 +47,7 @@ class StartupAccountTests(unittest.TestCase):
         threads = []
         before = self.store.path.read_bytes()
 
-        def verify(*_args):
+        def verify(*_args, **_kwargs):
             threads.append(threading.current_thread())
             entered.set()
             release.wait(3)
@@ -63,7 +63,8 @@ class StartupAccountTests(unittest.TestCase):
                 self.pump_until(lambda: bool(ui_tick))
                 self.assertIsNot(threads[0], threading.main_thread())
                 panel.retry_saved()
-                check.assert_called_once_with("fixture", "fixture-secret")
+                check.assert_called_once()
+                self.assertEqual(check.call_args.args, ("fixture", "fixture-secret"))
                 release.set()
                 self.pump_until(lambda: panel.status_kind == "valid")
                 self.assertEqual(panel.status_var.get(), "✓ 账号有效")
@@ -86,12 +87,156 @@ class StartupAccountTests(unittest.TestCase):
             self.assertEqual(panel.status_kind, "neutral")
             panel.destroy()
 
+    def test_save_checks_changed_account_once_and_repeated_save_does_not_check(self):
+        with mock.patch("toolbox.ui.credentials_panel.verify_credentials") as check:
+            panel = CredentialsPanel(self.root, self.workspace)
+            self.assertFalse(hasattr(panel, "verify_button"))
+            panel.password_var.set("updated-secret")
+            panel.save()
+            saved = self.store.path.read_bytes()
+            panel.save()
+            panel.save()
+            self.pump_until(lambda: panel.status_kind == "valid")
+            check.assert_called_once()
+            self.assertEqual(check.call_args.args, ("fixture", "updated-secret"))
+            panel.save()
+            self.root.update()
+            self.assertIsNone(panel._startup_id)
+            self.assertEqual(check.call_count, 1)
+            self.assertEqual(self.store.path.read_bytes(), saved)
+            panel.destroy()
+
+    def test_task_save_does_not_launch_a_parallel_account_check(self):
+        with mock.patch("toolbox.ui.credentials_panel.verify_credentials") as check:
+            panel = CredentialsPanel(self.root, self.workspace)
+            panel.password_var.set("task-secret")
+            self.assertTrue(panel.save_if_dirty())
+            self.root.update()
+            check.assert_not_called()
+            self.assertIsNone(panel._startup_id)
+            self.assertEqual(self.store.load()["password"], "task-secret")
+            panel.destroy()
+
+    def test_stop_sets_cancellation_and_retry_cooldown_blocks_duplicate_request(self):
+        entered = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        events = []
+
+        def verify(*_args, cancel_event, **_kwargs):
+            events.append(cancel_event)
+            entered.set()
+            release.wait(3)
+            finished.set()
+
+        with mock.patch("toolbox.ui.credentials_panel.verify_credentials", side_effect=verify) as check:
+            panel = CredentialsPanel(self.root, self.workspace, auto_verify=False)
+            try:
+                panel.retry_saved()
+                self.assertTrue(entered.wait(1))
+                self.assertEqual(panel.stop_button.winfo_manager(), "pack")
+                panel.stop_button.invoke()
+                self.assertTrue(events[0].is_set())
+                self.assertIsNone(panel._verification_id)
+                self.assertIn("已停止", panel.status_var.get())
+                release.set()
+                self.assertTrue(finished.wait(1))
+                self.pump_until(lambda: not panel._worker_thread.is_alive())
+                panel.retry_saved()
+                check.assert_called_once()
+                self.assertIn("10秒", panel.status_var.get())
+                self.assertNotEqual(panel.status_kind, "valid")
+            finally:
+                release.set()
+                finished.wait(1)
+                panel.destroy()
+
+    def test_watchdog_stops_waiting_and_ignores_late_success(self):
+        release = threading.Event()
+        finished = threading.Event()
+
+        def verify(*_args, **_kwargs):
+            release.wait(3)
+            finished.set()
+
+        with mock.patch("toolbox.ui.credentials_panel.verify_credentials", side_effect=verify):
+            panel = CredentialsPanel(self.root, self.workspace, auto_verify=False)
+            panel.VERIFICATION_TIMEOUT_SECONDS = 0.05
+            try:
+                panel.retry_saved()
+                self.pump_until(lambda: panel.status_kind == "error")
+                self.assertIn("超时", panel.status_var.get())
+                self.assertTrue(panel._cancel_event.is_set())
+                release.set()
+                self.assertTrue(finished.wait(1))
+                self.root.update()
+                self.assertEqual(panel.status_kind, "error")
+                self.assertIsNone(panel._verification_id)
+                self.assertEqual(self.store.load(), self.saved)
+            finally:
+                release.set()
+                finished.wait(1)
+                panel.destroy()
+
+    def test_update_pause_cancels_startup_and_resume_does_not_auto_retry(self):
+        with mock.patch("toolbox.ui.credentials_panel.verify_credentials") as check:
+            panel = CredentialsPanel(self.root, self.workspace)
+            panel.pause_verification()
+            panel.retry_saved()
+            self.root.update()
+            check.assert_not_called()
+            self.assertIsNone(panel._startup_id)
+            panel.resume_verification()
+            self.root.update()
+            check.assert_not_called()
+            panel.destroy()
+
+    def test_new_saved_account_waits_for_cancelled_worker_without_overlap(self):
+        release = threading.Event()
+        entered = threading.Event()
+        active = []
+        maximum = []
+        lock = threading.Lock()
+
+        def verify(_username, password, **_kwargs):
+            with lock:
+                active.append(password)
+                maximum.append(len(active))
+            try:
+                if password == "fixture-secret":
+                    entered.set()
+                    release.wait(3)
+            finally:
+                with lock:
+                    active.remove(password)
+
+        with mock.patch("toolbox.ui.credentials_panel.verify_credentials", side_effect=verify) as check:
+            panel = CredentialsPanel(self.root, self.workspace)
+            try:
+                panel.retry_saved()
+                self.assertTrue(entered.wait(1))
+                panel.password_var.set("new-saved-secret")
+                panel.save()
+                tick = []
+                self.root.after(650, lambda: tick.append(True))
+                self.pump_until(lambda: bool(tick))
+                check.assert_called_once()
+                release.set()
+                self.pump_until(lambda: panel.status_kind == "valid")
+                self.assertEqual(check.call_count, 2)
+                self.assertEqual(max(maximum), 1)
+                self.assertEqual(self.store.load()["password"], "new-saved-secret")
+            finally:
+                release.set()
+                panel.destroy()
+
     def test_failure_is_red_and_requires_explicit_retry(self):
         for kind, text in (("credentials", "账号或密码"), ("network", "连接失败"),
                            ("server", "服务暂不可用"), ("session", "暂未确认")):
             with self.subTest(kind=kind), mock.patch("toolbox.ui.credentials_panel.verify_credentials",
                     side_effect=[LoginError(kind, "fixture error"), None]) as check:
                 panel = CredentialsPanel(self.root, self.workspace, auto_verify=False)
+                panel.RETRY_COOLDOWN_SECONDS = 0
                 panel.retry_saved()
                 self.pump_until(lambda: panel._verification_id is None)
                 self.assertEqual(panel.status_kind, "error")
@@ -152,7 +297,7 @@ class StartupAccountTests(unittest.TestCase):
         release = threading.Event()
         finished = threading.Event()
 
-        def verify(*_args):
+        def verify(*_args, **_kwargs):
             release.wait(3)
             finished.set()
 
@@ -166,7 +311,7 @@ class StartupAccountTests(unittest.TestCase):
                 self.pump_until(lambda: panel._verification_id is None)
                 self.assertEqual(panel.status_kind, "neutral")
                 self.assertTrue(panel.dirty)
-                self.assertIn("重新验证", panel.status_var.get())
+                self.assertIn("尚未保存", panel.status_var.get())
                 self.assertEqual(self.store.load(), self.saved)
             finally:
                 release.set()
@@ -177,7 +322,7 @@ class StartupAccountTests(unittest.TestCase):
         release = threading.Event()
         finished = threading.Event()
 
-        def verify(*_args):
+        def verify(*_args, **_kwargs):
             release.wait(3)
             finished.set()
 
@@ -206,7 +351,7 @@ class StartupAccountTests(unittest.TestCase):
         release = threading.Event()
         finished = threading.Event()
 
-        def verify(*_args):
+        def verify(*_args, **_kwargs):
             release.wait(3)
             finished.set()
 

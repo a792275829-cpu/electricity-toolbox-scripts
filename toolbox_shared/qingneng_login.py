@@ -184,19 +184,55 @@ def auto_login(auth, context, username: str, password: str) -> bool:
     raise LoginError("session", "登录接口已返回，但未确认有效登录态，请使用登录窗口检查账号权限。")
 
 
-def verify_credentials(username: str, password: str, *, base_url: str = BASE_URL) -> None:
+class _VerificationRequest:
+    """Check cancellation between stages; let an in-flight request finish in <=5s."""
+    def __init__(self, request, cancel_event, deadline):
+        self.request = request
+        self.cancel_event = cancel_event
+        self.deadline = deadline
+
+    def check(self):
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise LoginError("cancelled", "账号验证已停止。")
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise LoginError("timeout", "账号验证超时。")
+        return remaining
+
+    def __getattr__(self, method):
+        request_method = getattr(self.request, method)
+
+        def call(url, **kwargs):
+            remaining = self.check()
+            kwargs["timeout"] = max(1, min(kwargs.get("timeout", 5000), 5000, remaining * 1000))
+            try:
+                response = request_method(url, **kwargs)
+            except Exception:
+                self.check()
+                raise
+            self.check()
+            return response
+        return call
+
+
+def verify_credentials(username: str, password: str, *, base_url: str = BASE_URL,
+                       cancel_event=None, timeout_seconds: float = 20) -> None:
     """Verify a draft in an ephemeral request context, without modifying any tool state."""
     from playwright.sync_api import sync_playwright
 
     if not username.strip() or not password:
         raise LoginError("credentials", "账号和密码需填写完整。")
+    deadline = time.monotonic() + timeout_seconds
+    if cancel_event is not None and cancel_event.is_set():
+        raise LoginError("cancelled", "账号验证已停止。")
     with sync_playwright() as playwright:
         proxy = next((os.environ[name] for name in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY",
                       "https_proxy", "http_proxy", "all_proxy") if os.environ.get(name)), None)
         request = playwright.request.new_context(**({"proxy": {"server": proxy}} if proxy else {}))
         try:
-            submit_api_login(request, username.strip(), password, base_url=base_url)
-            if not check_session(request, base_url=base_url):
+            guarded = _VerificationRequest(request, cancel_event, deadline)
+            submit_api_login(guarded, username.strip(), password, base_url=base_url)
+            if not check_session(guarded, base_url=base_url):
                 raise LoginError("session", "登录接口已返回，但未确认账号权限，请使用登录窗口检查。")
         finally:
             request.dispose()

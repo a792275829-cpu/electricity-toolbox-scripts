@@ -132,8 +132,7 @@ class DraftLifecycleTests(unittest.TestCase):
             page.run_in_thread(lambda: None, status="local")
             page.registry.start_callable.assert_called_once()
             panel.password_var.set("bad-secret")
-            panel._verification_queue.put((("rejected", "bad-secret"), before["revision"], ("rejected", "credentials"), True))
-            panel._poll_verification()
+            self.assertTrue(panel.dirty)
             app._on_close()
             self.assertEqual(store.load(), before)
 

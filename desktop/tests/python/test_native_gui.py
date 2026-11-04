@@ -71,6 +71,21 @@ class NativeLifecycleTests(unittest.TestCase):
             self.service.call("abort_update", {})
         self.assertNotEqual(self.app.state(), "withdrawn")
 
+    def test_update_stops_pending_account_check_and_abort_does_not_restart_it(self):
+        panel = self.app.credentials_panel
+        callback = SimpleNamespace(called=False)
+        panel._startup_id = scheduled = panel.after(5000, lambda: setattr(callback, "called", True))
+        self.service.call("prepare_update", {})
+        try:
+            self.assertTrue(panel._paused)
+            self.assertIsNone(panel._startup_id)
+            self.assertNotIn(scheduled, self.app.tk.call("after", "info"))
+        finally:
+            self.service.call("abort_update", {})
+        self.assertFalse(panel._paused)
+        self.assertIsNone(panel._startup_id)
+        self.assertFalse(callback.called)
+
     def test_download_failure_restores_original_window_and_form_values(self):
         previous_page = self.app.current_page
         self.service.call("prepare_update", {})

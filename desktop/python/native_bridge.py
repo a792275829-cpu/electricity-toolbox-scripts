@@ -95,8 +95,7 @@ class NativeService:
         if method == "prepare_update":
             if app.registry.has_running_tasks():
                 raise ValueError("请等待正在运行的任务完成后更新")
-            if app.credentials_panel._verification_id is not None:
-                raise ValueError("请等待账号验证完成后更新")
+            app.credentials_panel.pause_verification()
             self.maintenance = True
             app.suspend_page_loading()
             # Keep the footer visible while blocking business input.
@@ -105,6 +104,7 @@ class NativeService:
         if method == "abort_update":
             if self.maintenance:
                 self.maintenance = False
+                app.credentials_panel.resume_verification()
                 self._lock_inputs(False)
                 app.resume_page_loading()
                 app.deiconify()
