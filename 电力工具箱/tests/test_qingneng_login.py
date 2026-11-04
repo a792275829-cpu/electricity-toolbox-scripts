@@ -249,7 +249,7 @@ class AccountVerificationTests(unittest.TestCase):
                     while panel._verification_id is not None and time.monotonic() < deadline:
                         root.update()
                         time.sleep(0.01)
-                self.assertIn("尚未保存", panel.status_var.get())
+                self.assertIn("等待自动保存", panel.status_var.get())
                 self.assertNotIn("verified_at", panel.store.load())
                 self.assertEqual(panel.store.load(), saved)
                 panel.destroy()

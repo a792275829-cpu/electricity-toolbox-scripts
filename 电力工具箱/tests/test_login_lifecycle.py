@@ -116,7 +116,7 @@ class CliPropagationTests(unittest.TestCase):
 
 
 class DraftLifecycleTests(unittest.TestCase):
-    def test_failed_draft_is_not_saved_on_close_and_offline_task_is_not_blocked(self):
+    def test_incomplete_input_is_not_saved_on_close_and_offline_task_is_not_blocked(self):
         from toolbox.app import ToolboxApp, PAGE_NAMES
         from toolbox.widgets import ToolPage
         with tempfile.TemporaryDirectory() as folder:
@@ -131,10 +131,27 @@ class DraftLifecycleTests(unittest.TestCase):
             page.tool_id = "trade-analysis"
             page.run_in_thread(lambda: None, status="local")
             page.registry.start_callable.assert_called_once()
-            panel.password_var.set("bad-secret")
             self.assertTrue(panel.dirty)
             app._on_close()
             self.assertEqual(store.load(), before)
+
+    def test_close_is_blocked_when_complete_input_cannot_be_saved(self):
+        from toolbox.app import ToolboxApp, PAGE_NAMES
+        with tempfile.TemporaryDirectory() as folder:
+            app = ToolboxApp(workspace=Path(folder), page_factories={name: lambda parent, *_: tk.Frame(parent) for name in PAGE_NAMES})
+            app.withdraw()
+            try:
+                panel = app.credentials_panel
+                panel.username_var.set("fixture")
+                panel.password_var.set("fixture-secret")
+                with mock.patch.object(panel.store, "save", side_effect=OSError), mock.patch("toolbox.app.messagebox.showwarning") as warning:
+                    self.assertFalse(app._on_close())
+                warning.assert_called_once()
+                self.assertTrue(app.winfo_exists())
+                self.assertTrue(panel.dirty)
+                self.assertEqual(CredentialStore(Path(folder)).load(), {})
+            finally:
+                app.destroy()
 
     def test_offline_modes_and_wps_do_not_require_qingneng(self):
         from toolbox.page_contracts import requires_qingneng

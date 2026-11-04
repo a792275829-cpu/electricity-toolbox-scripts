@@ -61,7 +61,7 @@ class NativeLifecycleTests(unittest.TestCase):
         self.assertEqual(self.app.current_page, "导出上网电量")
         self.assertEqual(list(self.app.pages), ["导出上网电量"])
 
-    def test_update_does_not_save_unverified_account_draft(self):
+    def test_update_preserves_incomplete_account_input(self):
         with (
             patch.object(self.app.credentials_panel, "dirty", True),
             patch.object(self.app.credentials_panel, "save", return_value=False),
@@ -70,6 +70,33 @@ class NativeLifecycleTests(unittest.TestCase):
             self.app.credentials_panel.save.assert_not_called()
             self.service.call("abort_update", {})
         self.assertNotEqual(self.app.state(), "withdrawn")
+
+    def test_update_flushes_complete_pending_input_before_pausing(self):
+        from toolbox.ui.credentials_panel import CredentialsPanel
+        with tempfile.TemporaryDirectory() as folder:
+            panel = CredentialsPanel(self.app, Path(folder))
+            try:
+                panel.username_var.set("fixture")
+                panel.password_var.set("fixture-secret")
+                self.assertTrue(panel.dirty)
+                with patch.object(self.app, "credentials_panel", panel):
+                    self.service.call("prepare_update", {})
+                    self.assertFalse(panel.dirty)
+                    self.assertEqual(panel.store.load()["password"], "fixture-secret")
+                    self.assertTrue(panel._paused)
+                    self.assertIsNone(panel._autosave_id)
+                    self.assertIsNone(panel._startup_id)
+                    self.service.call("abort_update", {})
+            finally:
+                panel.destroy()
+
+    def test_save_failure_blocks_update_and_installer_exit(self):
+        with patch.object(self.app.credentials_panel, "flush_autosave", return_value=False):
+            for method in ("prepare_update", "installer_close", "finish_update"):
+                with self.subTest(method=method), self.assertRaisesRegex(ValueError, "自动保存失败"):
+                    self.service.call(method, {})
+            self.assertFalse(self.service.maintenance)
+            self.assertTrue(self.app.winfo_exists())
 
     def test_update_stops_pending_account_check_and_abort_does_not_restart_it(self):
         panel = self.app.credentials_panel

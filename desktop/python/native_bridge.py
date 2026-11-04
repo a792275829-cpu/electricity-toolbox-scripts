@@ -95,6 +95,8 @@ class NativeService:
         if method == "prepare_update":
             if app.registry.has_running_tasks():
                 raise ValueError("请等待正在运行的任务完成后更新")
+            if not app.credentials_panel.flush_autosave():
+                raise ValueError("账号自动保存失败，请检查账号区提示后重试")
             app.credentials_panel.pause_verification()
             self.maintenance = True
             app.suspend_page_loading()
@@ -113,6 +115,8 @@ class NativeService:
         if method in ("installer_close", "finish_update"):
             if app.registry.has_running_tasks():
                 raise ValueError("请等待正在运行的任务完成后安装")
+            if not app.credentials_panel.flush_autosave():
+                raise ValueError("账号自动保存失败，请检查账号区提示后重试")
             app.after_idle(app.destroy)
             return True
         if method in ("request_close", "shutdown"):

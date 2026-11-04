@@ -39,6 +39,79 @@ class StartupAccountTests(unittest.TestCase):
             time.sleep(0.005)
         self.assertTrue(condition(), "账号状态未在预期时间内更新")
 
+    def test_autosave_debounces_and_status_occupies_action_row(self):
+        panel = CredentialsPanel(self.root, self.workspace, auto_verify=False)
+        panel.AUTOSAVE_DELAY_MS = 60
+        with mock.patch.object(panel.store, "save", wraps=panel.store.save) as save:
+            panel.username_var.set("edited")
+            first = panel._autosave_id
+            panel.password_var.set("edited-secret")
+            self.assertNotEqual(first, panel._autosave_id)
+            self.assertEqual(self.store.load(), self.saved)
+            self.pump_until(lambda: not panel.dirty)
+            save.assert_called_once_with("edited", "edited-secret")
+            self.assertEqual(self.store.load()["password"], "edited-secret")
+        actions = panel.status_label.master
+        self.assertEqual(panel.status_label.pack_info()["side"], "right")
+        self.assertNotIn("保存", [child.cget("text") for child in actions.winfo_children()
+                                if "text" in child.keys()])
+        panel.destroy()
+
+    def test_focused_autosave_defers_network_until_leaving_both_fields(self):
+        with mock.patch("toolbox.ui.credentials_panel.verify_credentials") as check:
+            panel = CredentialsPanel(self.root, self.workspace)
+            panel.AUTOSAVE_DELAY_MS = 20
+            with mock.patch.object(panel, "focus_get", return_value=panel.password_entry) as focus:
+                panel.password_var.set("edited-secret")
+                self.pump_until(lambda: panel._deferred_check)
+                self.assertFalse(panel.dirty)
+                check.assert_not_called()
+                # Moving between account fields must not submit a partial password.
+                focus.return_value = panel.username_entry
+                panel._focus_out()
+                self.root.update()
+                check.assert_not_called()
+                focus.return_value = panel
+                panel._focus_out()
+                self.pump_until(lambda: panel.status_kind == "valid")
+            check.assert_called_once()
+            self.assertEqual(check.call_args.args, ("fixture", "edited-secret"))
+            panel.destroy()
+
+    def test_return_during_pending_autosave_check_verifies_even_with_focus(self):
+        with mock.patch("toolbox.ui.credentials_panel.verify_credentials") as check:
+            panel = CredentialsPanel(self.root, self.workspace)
+            panel.AUTOSAVE_DELAY_MS = 20
+            with mock.patch.object(panel, "focus_get", return_value=panel.password_entry):
+                panel.password_var.set("edited-secret")
+                self.pump_until(lambda: not panel.dirty)
+                self.assertIsNotNone(panel._startup_id)
+                self.assertFalse(panel._deferred_check)
+                # Use the Return binding callback in the withdrawn test window.
+                panel.save()
+                self.pump_until(lambda: panel.status_kind == "valid")
+            check.assert_called_once()
+            panel.destroy()
+
+    def test_incomplete_input_and_write_failure_preserve_disk_and_destroy_cancels_save(self):
+        panel = CredentialsPanel(self.root, self.workspace, auto_verify=False)
+        panel.password_var.set("")
+        self.assertIsNone(panel._autosave_id)
+        self.assertTrue(panel.flush_autosave())
+        self.assertEqual(self.store.load(), self.saved)
+        panel.password_var.set("edited-secret")
+        with mock.patch.object(panel.store, "save", side_effect=OSError("private detail")):
+            self.assertFalse(panel.flush_autosave())
+        self.assertEqual(panel.status_kind, "error")
+        self.assertNotIn("private detail", panel.status_var.get())
+        self.assertTrue(panel.dirty)
+        self.assertEqual(self.store.load(), self.saved)
+        panel.password_var.set("another-secret")
+        pending = panel._autosave_id
+        panel.destroy()
+        self.assertNotIn(pending, self.root.tk.call("after", "info"))
+        self.assertEqual(self.store.load(), self.saved)
+
     def test_startup_is_async_checks_saved_pair_once_and_does_not_write_config(self):
         entered = threading.Event()
         release = threading.Event()
@@ -311,7 +384,7 @@ class StartupAccountTests(unittest.TestCase):
                 self.pump_until(lambda: panel._verification_id is None)
                 self.assertEqual(panel.status_kind, "neutral")
                 self.assertTrue(panel.dirty)
-                self.assertIn("尚未保存", panel.status_var.get())
+                self.assertIn("等待自动保存", panel.status_var.get())
                 self.assertEqual(self.store.load(), self.saved)
             finally:
                 release.set()

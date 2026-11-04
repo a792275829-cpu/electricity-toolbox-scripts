@@ -59,6 +59,32 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_account_panel_autosaves_then_verifies_without_session_or_locks(self):
+        import tkinter as tk
+        import time
+        from toolbox.ui.credentials_panel import CredentialsPanel
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with mock.patch("toolbox.ui.credentials_panel.verify_credentials",
+                            side_effect=lambda username, password, **kwargs: verify_credentials(username, password, base_url=self.url, **kwargs)):
+                panel = CredentialsPanel(root, self.folder)
+                panel.username_var.set("fixture")
+                panel.password_var.set("fixture-secret")
+                deadline = time.monotonic() + 10
+                while panel.status_kind != "valid" and time.monotonic() < deadline:
+                    root.update()
+                    time.sleep(0.01)
+                self.assertEqual(panel.status_kind, "valid", panel.status_var.get())
+                self.assertEqual(credentials.CredentialStore(self.folder).load()["username"], "fixture")
+                self.assertEqual(self.posts, 1)
+                self.assertEqual(self.pages, 0)
+                self.assertEqual(list(self.folder.rglob("auth_state.json")), [])
+                self.assertEqual(list(self.folder.rglob("*.lock")), [])
+                panel.destroy()
+        finally:
+            root.destroy()
+
     def setUp(self):
         self.posts = 0
         self.pages = 0

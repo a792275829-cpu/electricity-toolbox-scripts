@@ -465,6 +465,9 @@ class ToolboxApp(tk.Tk):
         if remaining:
             messagebox.showwarning("无法立即关闭", "仍有不可安全中断的写入任务。请等待任务结束后再关闭。", parent=self)
             return False
+        if not self.credentials_panel.flush_autosave():
+            messagebox.showwarning("账号未保存", "账号自动保存失败，请检查账号区提示后重试。", parent=self)
+            return False
         self.destroy()
         return True
 

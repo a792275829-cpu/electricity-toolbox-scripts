@@ -14,7 +14,7 @@ from toolbox_shared.qingneng_login import LoginError, verify_credentials
 
 
 class CredentialsPanel(ttk.Frame):
-    """Keep edits as a draft until save, verification, or task launch."""
+    """Debounce local saving and check accounts independently of text entry."""
 
     def __init__(self, parent: tk.Misc, workspace: Path, *, auto_verify: bool = True) -> None:
         super().__init__(parent, padding=(12, 10))
@@ -22,6 +22,9 @@ class CredentialsPanel(ttk.Frame):
         self.dirty = False
         self._closed = False
         self._startup_id = None
+        self._autosave_id = None
+        self._focus_id = None
+        self._deferred_check = False
         self._edit_generation = 0
         self._verification_generation = None
         self._auto_verify = auto_verify
@@ -53,12 +56,14 @@ class CredentialsPanel(ttk.Frame):
         self.password_entry.grid(row=1, column=1, sticky="ew")
         actions = ttk.Frame(self)
         actions.pack(fill="x", pady=(2, 0))
-        SettingCheckbutton(actions, text="显示密码", variable=self.show_password_var, command=self._toggle_password).pack(side="left")
-        ttk.Button(actions, text="保存", command=self.save).pack(side="right")
+        show_password = SettingCheckbutton(actions, text="显示密码", variable=self.show_password_var, command=self._toggle_password)
+        show_password.pack(side="left")
         self.stop_button = ttk.Button(self, text="停止验证", command=self.stop_verification)
         self.retry_button = ttk.Button(self, text="重试验证", command=self.retry_saved)
         self.manual_login_button = ttk.Button(self, text="打开登录窗口")
-        self.status_label = ttk.Label(self, textvariable=self.status_var, style="Muted.TLabel", wraplength=250)
+        self.status_label = ttk.Label(actions, textvariable=self.status_var, style="Muted.TLabel", wraplength=180, anchor="e", justify="right")
+        actions.bind("<Configure>", lambda event: self.status_label.configure(
+            wraplength=max(60, event.width - show_password.winfo_reqwidth() - 12)))
         self._status_trace = self.status_var.trace_add("write", self._update_status_visibility)
         saved = {}
         try:
@@ -66,7 +71,7 @@ class CredentialsPanel(ttk.Frame):
             self._known_revision = saved.get("revision", "")
             self.username_var.set(saved.get("username", ""))
             self.password_var.set(saved.get("password", ""))
-            self.status_var.set(self._saved_status(saved) if saved else "填写账号密码后保存")
+            self.status_var.set(self._saved_status(saved) if saved else "填写账号密码后自动保存")
         except (ValueError, OSError):
             self._set_status("读取失败，请检查本机账号配置文件", "error")
         self._traces = [
@@ -75,9 +80,11 @@ class CredentialsPanel(ttk.Frame):
         ]
         for entry in (self.username_entry, self.password_entry):
             entry.bind("<Return>", lambda _event: self.save())
+            entry.bind("<FocusOut>", self._focus_out)
         if auto_verify and saved.get("username") and saved.get("password"):
             self._schedule_verification(300)
 
+    AUTOSAVE_DELAY_MS = 1000
     RETRY_COOLDOWN_SECONDS = 10
     VERIFICATION_TIMEOUT_SECONDS = 20
 
@@ -95,7 +102,7 @@ class CredentialsPanel(ttk.Frame):
     def _update_status_visibility(self, *_args) -> None:
         self.status_label.configure(foreground=self.STATUS_COLORS[self.status_kind])
         if self.status_var.get():
-            self.status_label.pack(fill="x", pady=(4, 0))
+            self.status_label.pack(side="right", fill="x", expand=True, padx=(12, 0))
         else:
             self.status_label.pack_forget()
 
@@ -109,7 +116,48 @@ class CredentialsPanel(ttk.Frame):
         self._verified_pair = None
         self._verified_revision = None
         self.manual_login_button.pack_forget()
-        self._set_status("尚未保存；保存或启动任务时提交")
+        self._cancel_save_timers()
+        if self._complete():
+            self._set_status("等待自动保存…")
+            self._autosave_id = self.after(self.AUTOSAVE_DELAY_MS, self._autosave)
+        else:
+            self._set_status("账号或密码未填完整")
+
+    def _complete(self) -> bool:
+        return bool(self.username_var.get().strip() and self.password_var.get())
+
+    def _cancel_save_timers(self) -> None:
+        for name in ("_autosave_id", "_focus_id"):
+            timer = getattr(self, name)
+            if timer is not None:
+                self.after_cancel(timer)
+                setattr(self, name, None)
+
+    def _autosave(self) -> None:
+        self._autosave_id = None
+        self.save(defer_while_editing=True)
+
+    def _focus_out(self, _event=None) -> None:
+        if self._focus_id is not None:
+            self.after_cancel(self._focus_id)
+        self._focus_id = self.after_idle(self._finish_editing)
+
+    def _editing(self) -> bool:
+        return self.focus_get() in (self.username_entry, self.password_entry)
+
+    def _finish_editing(self) -> None:
+        self._focus_id = None
+        if self._closed or self._paused or self._editing():
+            return
+        if self.dirty and self._complete():
+            self.save()
+        elif self._deferred_check:
+            self._schedule_verification(500)
+
+    def flush_autosave(self) -> bool:
+        """Persist complete input before closing; incomplete input preserves disk state."""
+        self._cancel_save_timers()
+        return self.save(verify=False) if self.dirty and self._complete() else True
 
     def _is_verified(self, saved) -> bool:
         return self._verified_pair == (saved.get("username"), saved.get("password")) and self._verified_revision == saved.get("revision", "")
@@ -124,15 +172,26 @@ class CredentialsPanel(ttk.Frame):
             self.after_cancel(self._startup_id)
             self._startup_id = None
 
-    def _schedule_verification(self, delay_ms: int) -> None:
+    def _schedule_verification(self, delay_ms: int, *, wait_for_focus: bool = False) -> None:
         self._cancel_startup_check()
         if self._closed or self._paused:
             return
+        self._deferred_check = False
         self._set_status("等待验证账号…")
-        self._startup_id = self.after(delay_ms, self.retry_saved)
+
+        def check():
+            self._startup_id = None
+            if wait_for_focus and self._editing():
+                self._deferred_check = True
+                self._set_status("已自动保存 · 待验证")
+                return
+            self.retry_saved()
+
+        self._startup_id = self.after(delay_ms, check)
 
     def stop_verification(self, *, notify: bool = True) -> None:
-        pending = self._startup_id is not None or self._verification_id is not None
+        pending = self._startup_id is not None or self._verification_id is not None or self._deferred_check
+        self._deferred_check = False
         self._cancel_startup_check()
         if self._cancel_event is not None:
             self._cancel_event.set()
@@ -147,6 +206,7 @@ class CredentialsPanel(ttk.Frame):
 
     def pause_verification(self) -> None:
         self._paused = True
+        self._cancel_save_timers()
         self.stop_verification()
 
     def resume_verification(self) -> None:
@@ -154,10 +214,18 @@ class CredentialsPanel(ttk.Frame):
 
     def save_if_dirty(self) -> bool:
         # The business task performs its own login; do not launch a duplicate check.
-        return self.save(verify=False) if self.dirty else True
+        waiting = self._startup_id is not None or self._deferred_check
+        self._cancel_startup_check()
+        self._deferred_check = False
+        if self.dirty:
+            return self.save(verify=False)
+        if waiting and self._verification_id is None:
+            self._set_status("已保存到本机 · 未验证", retry=True)
+        return True
 
-    def save(self, *, verify: bool = True) -> bool:
-        if not self.username_var.get().strip() or not self.password_var.get():
+    def save(self, *, verify: bool = True, defer_while_editing: bool = False) -> bool:
+        self._cancel_save_timers()
+        if not self._complete():
             self._set_status("账号和密码需填写完整，尚未保存", "error")
             return False
         try:
@@ -176,8 +244,8 @@ class CredentialsPanel(ttk.Frame):
         valid = self._is_verified(saved)
         if self._verification_id is None:
             self._set_status(self._saved_status(saved), "valid" if valid else "neutral", retry=not valid)
-        if changed and verify and self._auto_verify:
-            self._schedule_verification(500)
+        if (changed or self._deferred_check or self._startup_id is not None) and verify and self._auto_verify:
+            self._schedule_verification(500, wait_for_focus=defer_while_editing)
         return True
 
     def retry_saved(self) -> None:
@@ -186,7 +254,7 @@ class CredentialsPanel(ttk.Frame):
         if self._closed or self._paused or self._verification_id is not None:
             return
         if self.dirty:
-            self._set_status("草稿尚未保存，请先保存账号")
+            self._set_status("账号尚未保存，请完成输入后重试")
             return
         try:
             saved = self.store.load()
@@ -196,7 +264,7 @@ class CredentialsPanel(ttk.Frame):
         candidate = (saved.get("username", ""), saved.get("password", ""))
         revision = saved.get("revision", "")
         if not all(candidate):
-            self._set_status("填写账号密码后保存")
+            self._set_status("填写账号密码后自动保存")
             return
         # A cancelled worker may still be finishing its bounded HTTP request.
         if self._worker_thread is not None and self._worker_thread.is_alive():
@@ -261,7 +329,7 @@ class CredentialsPanel(ttk.Frame):
             changed = saved.get("revision", "") != revision or (saved.get("username"), saved.get("password")) != candidate
             edited = self._edit_generation != self._verification_generation
             if edited or changed or self.dirty:
-                self._set_status("账号已修改，请保存后重新验证")
+                self._set_status("账号已修改，等待自动保存")
             elif error:
                 kind = error[1]
                 messages = {"credentials": "✗ 账号或密码错误", "network": "✗ 连接失败，请重试",
@@ -296,6 +364,7 @@ class CredentialsPanel(ttk.Frame):
 
     def destroy(self) -> None:
         self._closed = True
+        self._cancel_save_timers()
         self.stop_verification(notify=False)
         self.status_var.trace_remove("write", self._status_trace)
         for variable, trace in self._traces:

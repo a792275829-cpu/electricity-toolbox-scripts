@@ -193,7 +193,7 @@ class CredentialsPanelTests(unittest.TestCase):
         self.root.destroy()
         gc.collect()
 
-    def test_prefill_draft_save_visibility_and_reopen(self):
+    def test_prefill_autosave_visibility_and_reopen(self):
         from toolbox.ui.credentials_panel import CredentialsPanel
 
         with tempfile.TemporaryDirectory() as directory:
@@ -210,12 +210,8 @@ class CredentialsPanelTests(unittest.TestCase):
             self.assertEqual(panel.password_entry.cget("show"), "")
             panel.username_var.set("edited")
             panel.password_var.set("new-secret")
-            self.root.after(750, self.root.quit)
+            self.root.after(1200, self.root.quit)
             self.root.mainloop()
-            self.assertEqual(store.load()["username"], "original")
-            self.assertEqual(store.load()["password"], "old-secret")
-            self.assertTrue(panel.dirty)
-            self.assertTrue(panel.save_if_dirty())
             self.assertEqual(store.load()["username"], "edited")
             self.assertEqual(store.load()["password"], "new-secret")
             self.assertEqual(panel.status_var.get(), "已保存到本机 · 未验证")
@@ -242,9 +238,9 @@ class CredentialsPanelTests(unittest.TestCase):
             self.assertLessEqual(app.diagnostic_center.winfo_rooty() + app.diagnostic_center.winfo_height(), app.status_bar.winfo_rooty())
             panel.username_var.set("last-edit")
             panel.password_var.set("secret")
-            # Closing never commits an unverified draft.
+            # Closing flushes complete pending input without a network check.
             app._on_close()
-            self.assertEqual(accounts.CredentialStore(Path(directory)).load(), {})
+            self.assertEqual(accounts.CredentialStore(Path(directory)).load()["username"], "last-edit")
             self.root = tk.Tk()
             self.root.withdraw()
 
