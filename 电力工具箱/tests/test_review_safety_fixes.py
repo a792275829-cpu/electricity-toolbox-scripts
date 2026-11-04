@@ -182,6 +182,59 @@ class ForecastCompletionTests(unittest.TestCase):
             self.assertEqual(master.read_bytes(), b'old master')
             self.assertFalse(list(folder.glob('.*.tmp.xlsx')))
 
+    def test_blank_boundary_cells_keep_default_and_custom_formats(self):
+        from toolbox_shared.native_excel import native_binary
+        modes = ('python', 'rust') if native_binary() else ('python',)
+        for mode in modes:
+            with self.subTest(backend=mode), tempfile.TemporaryDirectory() as folder:
+                master = Path(folder) / 'master.xlsx'
+                frame = self.sample()
+                frame['日前发电总出力(MW)'] = np.nan
+                frame['自定义空列'] = np.nan
+                frame.to_excel(master, sheet_name='整合数据', index=False)
+                book = load_workbook(master)
+                book.active['F2'].number_format = '0.00%'
+                book.save(master); book.close()
+                with patch.dict(os.environ, TOOLBOX_XLSX_BACKEND=mode):
+                    self.module.write_large_xlsx(frame, master, '整合数据', format_source=master)
+                book = load_workbook(master, read_only=True)
+                try:
+                    for row in book.active.iter_rows(min_row=2, max_row=97, max_col=6):
+                        self.assertIsNone(row[4].value)
+                        self.assertIn(row[4].number_format, (None, 'General'))
+                        self.assertIsNone(row[5].value)
+                        self.assertEqual(row[5].number_format, '0.00%')
+                    self.assertEqual(book.active['C2'].value, 0)
+                    self.assertEqual(book.active['D97'].value, 10095)
+                finally:
+                    book.close()
+
+    def test_readback_still_rejects_changed_values_and_lost_blank_formats(self):
+        for corruption in ('value', 'format'):
+            with self.subTest(corruption=corruption), tempfile.TemporaryDirectory() as folder:
+                master = Path(folder) / 'master.xlsx'
+                frame = self.sample()
+                frame['日前发电总出力(MW)'] = np.nan
+                frame.to_excel(master, sheet_name='整合数据', index=False)
+                book = load_workbook(master)
+                book.active['E2'].number_format = '0.00%'
+                book.save(master); book.close()
+                original = master.read_bytes()
+                writer = self.module._write_large_xlsx
+                def corrupt(frame, path, *args, **kwargs):
+                    writer(frame, path, *args, **kwargs)
+                    book = load_workbook(path)
+                    if corruption == 'value':
+                        book.active['C2'] = 999
+                    else:
+                        book.active['E2'].number_format = 'General'
+                    book.save(path); book.close()
+                with (patch.object(self.module, '_write_large_xlsx', side_effect=corrupt),
+                      self.assertRaisesRegex(RuntimeError, '数值或格式回读不一致')):
+                    self.module.write_large_xlsx(frame, master, '整合数据', format_source=master)
+                self.assertEqual(master.read_bytes(), original)
+                self.assertFalse(list(Path(folder).glob('.*.tmp.xlsx')))
+
 
 class AuthLockTests(unittest.TestCase):
     def test_contender_timeout_stale_empty_recovery_and_release_identity(self):

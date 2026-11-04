@@ -398,6 +398,11 @@ def write_large_xlsx(frame, path, sheet_name, *, format_source=None):
                 for column, name in enumerate(frame.columns):
                     expected = frame.iloc[index, column]
                     actual, number_format = snapshots[(sheet_name, f"{get_column_letter(column + 1)}{index + 2}")]
+                    # Streaming writers omit unstyled blank cells. openpyxl
+                    # returns EmptyCell.number_format=None for these; Excel's
+                    # effective format is still General, not a lost custom style.
+                    if actual is None and number_format is None:
+                        number_format = "General"
                     expected, actual = excel_value(expected), excel_value(actual)
                     if pd.isna(expected):
                         matches = actual is None
