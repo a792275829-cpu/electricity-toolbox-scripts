@@ -40,6 +40,7 @@
 
 - 页面不直接执行业务，统一走 `run_process`／任务引擎；取消只能作用于本次启动的进程组。
 - 页面不得跨工具共用登录态或浏览器 profile；账号读写统一走 `toolbox_shared.credentials`。
+- 账号面板启动后异步核验已保存账号，主线程只负责状态和颜色更新；启动核验不写配置，编辑或关闭后的迟到结果作废。账号状态含义和操作见根 README 的[账号与登录](../README.md#广东现货系统账号)。
 - 主线程不导入 openpyxl、NumPy、pandas、Playwright；这些只能在后台任务或子进程里加载。
 - 日期输入统一用 `DateInput`，解析用 `toolbox_shared.dates`。
 

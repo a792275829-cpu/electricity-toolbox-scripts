@@ -155,7 +155,7 @@ class AccountVerificationTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as folder:
                 store = CredentialStore(Path(folder))
                 before = store.save("original", "old-secret")
-                panel = CredentialsPanel(root, Path(folder))
+                panel = CredentialsPanel(root, Path(folder), auto_verify=False)
                 panel.username_var.set("edited")
                 panel.password_var.set("new-secret")
                 with mock.patch("toolbox.ui.credentials_panel.verify_credentials",
@@ -184,7 +184,7 @@ class AccountVerificationTests(unittest.TestCase):
         root.withdraw()
         try:
             with tempfile.TemporaryDirectory() as folder:
-                root.credentials_panel = panel = CredentialsPanel(root, Path(folder))
+                root.credentials_panel = panel = CredentialsPanel(root, Path(folder), auto_verify=False)
                 registry = mock.Mock()
                 page = ToolPage(root, registry=registry)
                 page.tool_id = "online-energy"
@@ -211,12 +211,12 @@ class AccountVerificationTests(unittest.TestCase):
         root.withdraw()
         try:
             with tempfile.TemporaryDirectory() as folder:
-                panel = CredentialsPanel(root, Path(folder))
+                panel = CredentialsPanel(root, Path(folder), auto_verify=False)
                 panel.username_var.set("account")
                 panel.password_var.set("secret")
                 panel.save()
                 root._visible_page = SimpleNamespace(tool_id="online-energy", start_login=mock.Mock())
-                panel._verification_queue.put((("account", "secret"), panel.store.load()["revision"], ("需要人工验证", "verification")))
+                panel._verification_queue.put((("account", "secret"), panel.store.load()["revision"], ("需要人工验证", "verification"), True))
                 panel._poll_verification()
                 self.assertEqual(panel.manual_login_button.winfo_manager(), "pack")
                 panel.manual_login_button.invoke()
@@ -233,7 +233,7 @@ class AccountVerificationTests(unittest.TestCase):
         done = threading.Event()
         try:
             with tempfile.TemporaryDirectory() as folder:
-                panel = CredentialsPanel(root, Path(folder))
+                panel = CredentialsPanel(root, Path(folder), auto_verify=False)
                 panel.username_var.set("account")
                 panel.password_var.set("secret")
                 with mock.patch("toolbox.ui.credentials_panel.verify_credentials", side_effect=lambda *_: done.wait(3)):

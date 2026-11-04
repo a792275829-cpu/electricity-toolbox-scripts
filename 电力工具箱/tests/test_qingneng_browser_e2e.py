@@ -28,6 +28,37 @@ from toolbox.runtime import load_module
 
 
 class BrowserLoginIntegrationTests(unittest.TestCase):
+    def test_account_panel_startup_verifies_via_real_requests_without_saving_session(self):
+        import tkinter as tk
+        import time
+        from toolbox.ui.credentials_panel import CredentialsPanel
+        store = credentials.CredentialStore(self.folder)
+        store.save("fixture", "fixture-secret")
+        before = store.path.read_bytes()
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with mock.patch("toolbox.ui.credentials_panel.verify_credentials",
+                            side_effect=lambda username, password: verify_credentials(username, password, base_url=self.url)):
+                panel = CredentialsPanel(root, self.folder)
+                deadline = time.monotonic() + 10
+                ticks = []
+                root.after(100, lambda: ticks.append(True))
+                while panel.status_kind != "valid" and time.monotonic() < deadline:
+                    root.update()
+                    time.sleep(0.01)
+                self.assertTrue(ticks)
+                self.assertEqual(panel.status_kind, "valid", panel.status_var.get())
+                self.assertEqual(str(panel.status_label.cget("foreground")), panel.STATUS_COLORS["valid"])
+                self.assertEqual(store.path.read_bytes(), before)
+                self.assertEqual(list(self.folder.rglob("auth_state.json")), [])
+                self.assertEqual(list(self.folder.rglob("*.lock")), [])
+                self.assertEqual(self.posts, 1)
+                self.assertEqual(self.pages, 0)
+                panel.destroy()
+        finally:
+            root.destroy()
+
     def setUp(self):
         self.posts = 0
         self.pages = 0

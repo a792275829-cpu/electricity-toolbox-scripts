@@ -200,7 +200,7 @@ class CredentialsPanelTests(unittest.TestCase):
             root = Path(directory)
             store = accounts.CredentialStore(root)
             store.save("original", "old-secret")
-            panel = CredentialsPanel(self.root, root)
+            panel = CredentialsPanel(self.root, root, auto_verify=False)
             panel.pack()
             self.assertEqual(panel.username_var.get(), "original")
             self.assertEqual(panel.password_var.get(), "old-secret")
@@ -221,7 +221,7 @@ class CredentialsPanelTests(unittest.TestCase):
             self.assertEqual(panel.status_var.get(), "已保存到本机 · 未验证")
             self.assertFalse(panel.dirty)
             panel.destroy()
-            reopened = CredentialsPanel(self.root, root)
+            reopened = CredentialsPanel(self.root, root, auto_verify=False)
             self.assertEqual(reopened.password_var.get(), "new-secret")
             reopened.destroy()
 
