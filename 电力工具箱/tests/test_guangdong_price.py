@@ -93,8 +93,8 @@ class GuangdongDataUpdateTests(unittest.TestCase):
             initial = root / "输入" / "初始.xlsx"
             initial.parent.mkdir()
             frame = pd.DataFrame({
-                "日期": pd.Timestamp("2026-07-11"),
-                "时刻": pd.date_range("2026-07-11", periods=96, freq="15min").strftime("%H:%M"),
+                "日期": pd.date_range("2025-07-12", "2026-07-11").repeat(96),
+                "时刻": list(pd.date_range("2026-07-11", periods=96, freq="15min").strftime("%H:%M")) * 365,
                 "全省日前平均电价": 300.0,
             })
             frame.to_excel(initial, index=False, sheet_name="整合数据")
@@ -116,7 +116,7 @@ class GuangdongDataUpdateTests(unittest.TestCase):
                 self.assertEqual(["整合数据"], book.sheet_names)
                 readback = pd.read_excel(book)
             self.assertEqual(list(frame.columns), list(readback.columns))
-            self.assertEqual(96, len(readback))
+            self.assertEqual(365 * 96, len(readback))
             self.assertEqual(300, readback.iloc[-1]["全省日前平均电价"])
 
 

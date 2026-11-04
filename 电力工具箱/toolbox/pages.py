@@ -903,7 +903,7 @@ class GuangdongPricePage(ToolPage):
         )
         ttk.Label(
             form,
-            text="自动检查并补齐截至 D 日缺少 96 个时点的日期；账号密码读取本地配置。",
+            text="仅保留并补齐截至 D 日的近一年数据，范围外日期截断；每天 96 个时点。",
             style="Muted.TLabel",
         ).grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 

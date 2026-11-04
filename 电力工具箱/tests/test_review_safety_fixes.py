@@ -124,7 +124,8 @@ class ForecastCompletionTests(unittest.TestCase):
                 self.assertEqual(book.active['C2'].number_format, 'General')
             finally:
                 book.close()
-            self.assertEqual(result['remaining_missing_dates'], [])
+            self.assertEqual(len(result['remaining_missing_dates']), 364)
+            self.assertNotIn(str(DAY), result['remaining_missing_dates'])
             self.assertFalse(list(Path(folder).glob('.*.tmp.xlsx')))
 
     def test_second_run_fills_unpublished_price_and_preserves_old_nonempty_values(self):
@@ -135,7 +136,8 @@ class ForecastCompletionTests(unittest.TestCase):
             published = self.sample(); published.loc[0,'日前统调负荷(MW)'] = np.nan
             _, result, client = self.update(folder, published)
             client.get.assert_called()
-            self.assertEqual(result['requested_dates'], [str(DAY)])
+            self.assertEqual(len(result['requested_dates']), 365)
+            self.assertEqual(result['requested_dates'][-1], str(DAY))
             book = load_workbook(master)
             try:
                 self.assertEqual(book.active['C2'].value, 0)
@@ -153,7 +155,8 @@ class ForecastCompletionTests(unittest.TestCase):
             revised['日前光伏出力(MW)'] = np.arange(96.) + 200
             _, result, client = self.update(folder, revised)
             client.get.assert_called()
-            self.assertEqual(result['requested_dates'], [str(DAY)])
+            self.assertEqual(len(result['requested_dates']), 365)
+            self.assertEqual(result['requested_dates'][-1], str(DAY))
             book = load_workbook(master)
             try:
                 self.assertEqual(book.active['C2'].value, -25)

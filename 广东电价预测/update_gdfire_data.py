@@ -491,13 +491,24 @@ def build_modeling_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return result.drop(columns=empty)
 
 
+def master_date_window(run_date: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Keep the last calendar year, with D included and its anniversary excluded."""
+    end = pd.Timestamp(normalize_date_input(run_date))
+    return end - pd.DateOffset(years=1) + pd.Timedelta(days=1), end
+
+
+def trim_master_frame(frame: pd.DataFrame, start, end) -> pd.DataFrame:
+    dates = pd.to_datetime(frame["日期"], errors="raise").dt.normalize()
+    return frame.loc[dates.between(start, end)].copy()
+
+
 def update_master_workbook(
     *,
     run_date: str | None = None,
     config_path: Path = CONFIG_PATH,
     master_workbook: Path | None = None,
 ) -> dict[str, object]:
-    """Fill missing dates through D into one persistent master workbook."""
+    """Fill gaps within the last calendar year and atomically discard other dates."""
     config = load_config(config_path)
     paths = resolve_paths(SCRIPT_DIR, config_path)
     master_path = (
@@ -506,32 +517,38 @@ def update_master_workbook(
     )
     base_path = paths["initialWorkbook"]
     end_date = normalize_date_input(run_date) if run_date is not None else date.today().isoformat()
+    window_start, window_end = master_date_window(end_date)
 
     if master_path.is_file():
         current = read_data_workbook(master_path)
     elif base_path.is_file():
         current = read_data_workbook(base_path)
     else:
-        initial_date = str(config.get("initialDate") or end_date)
-        current = empty_time_frame(initial_date, initial_date).drop(columns=["时点序号"])
+        current = empty_time_frame(str(window_start.date()), str(window_start.date())).drop(columns=["时点序号"]).iloc[:0]
 
+    original_rows = len(current)
+    current = trim_master_frame(current, window_start, window_end)
+    truncated = len(current) != original_rows
     gaps = missing_dates(current, end_date)
+    present_dates = set(pd.to_datetime(current["日期"]).dt.date)
+    gaps = sorted(set(gaps) | {
+        day.date() for day in pd.date_range(window_start, window_end, freq="D")
+        if day.date() not in present_dates
+    })
     refresh_days = config.get("refreshDays", 7)
     if type(refresh_days) is not int or refresh_days < 0:
         raise ValueError("refreshDays 必须是大于或等于0的整数")
     if master_path.is_file() and refresh_days and not current.empty:
         end = pd.Timestamp(end_date)
-        start = max(pd.to_datetime(current["日期"]).min().normalize(), end - pd.Timedelta(days=refresh_days - 1))
+        start = max(window_start, end - pd.Timedelta(days=refresh_days - 1))
         gaps = sorted(set(gaps) | {day.date() for day in pd.date_range(start, end, freq="D")})
-    if not master_path.is_file() and not base_path.is_file():
-        gaps = [value.date() for value in pd.date_range(initial_date, end_date, freq="D")]
     if not gaps:
-        if not master_path.is_file():
-            write_large_xlsx(current, master_path, "整合数据")
+        if not master_path.is_file() or truncated:
+            write_large_xlsx(current, master_path, "整合数据", format_source=master_path if master_path.is_file() else base_path)
         return {
             "master": master_path.resolve(),
             "requested_dates": [],
-            "updated": False,
+            "updated": truncated,
         }
 
     # One API interval keeps the update path simple. Existing values survive because
@@ -548,9 +565,13 @@ def update_master_workbook(
         )
     increment = build_increment(start, end, load_payload, price_payload)
 
-    merged = merge_data_frames(current, increment)
+    merged = trim_master_frame(merge_data_frames(current, increment), window_start, window_end)
     write_large_xlsx(merged, master_path, "整合数据", format_source=master_path)
-    remaining = missing_dates(merged, end_date)
+    present_dates = set(pd.to_datetime(merged["日期"]).dt.date)
+    remaining = sorted(set(missing_dates(merged, end_date)) | {
+        day.date() for day in pd.date_range(window_start, window_end, freq="D")
+        if day.date() not in present_dates
+    })
     return {
         "master": master_path.resolve(),
         "requested_dates": [value.isoformat() for value in gaps],
