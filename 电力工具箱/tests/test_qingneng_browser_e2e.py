@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import gc
 import json
 import os
 import shutil
@@ -28,6 +29,19 @@ from toolbox.runtime import load_module
 
 
 class BrowserLoginIntegrationTests(unittest.TestCase):
+    def _close_panel(self, root, panel):
+        """拆掉面板时先等后台校验线程结束再回收 Tk 变量。
+
+        线程还活着就销毁解释器，`Variable.__del__` 会在该线程里触发
+        `Tcl_AsyncDelete: async handler deleted by the wrong thread`，整个
+        测试进程直接中止。
+        """
+        worker = getattr(panel, "_worker_thread", None)
+        panel.destroy()
+        if worker is not None:
+            worker.join(timeout=5)
+        gc.collect()
+
     def test_account_panel_startup_verifies_via_real_requests_without_saving_session(self):
         import tkinter as tk
         import time
@@ -55,9 +69,10 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
                 self.assertEqual(list(self.folder.rglob("*.lock")), [])
                 self.assertEqual(self.posts, 1)
                 self.assertEqual(self.pages, 0)
-                panel.destroy()
+                self._close_panel(root, panel)
         finally:
             root.destroy()
+            gc.collect()
 
     def test_account_panel_autosaves_then_verifies_without_session_or_locks(self):
         import tkinter as tk
@@ -81,9 +96,10 @@ class BrowserLoginIntegrationTests(unittest.TestCase):
                 self.assertEqual(self.pages, 0)
                 self.assertEqual(list(self.folder.rglob("auth_state.json")), [])
                 self.assertEqual(list(self.folder.rglob("*.lock")), [])
-                panel.destroy()
+                self._close_panel(root, panel)
         finally:
             root.destroy()
+            gc.collect()
 
     def setUp(self):
         self.posts = 0
