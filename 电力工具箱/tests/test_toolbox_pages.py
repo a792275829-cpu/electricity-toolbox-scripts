@@ -94,6 +94,50 @@ class PageAdapterTests(unittest.TestCase):
         finally:
             page.destroy()
 
+    def test_table_update_pages_default_to_overwrite_without_backup(self) -> None:
+        from toolbox.pages import MarketTableUpdatePage
+        from toolbox.transaction_info_page import TransactionInfoUpdatePage
+        from toolbox.service_catalog import desktop_catalog
+
+        for page_type in (MarketTableUpdatePage, TransactionInfoUpdatePage):
+            with self.subTest(page=page_type.__name__):
+                page = page_type(self.root, self.paths, self.registry)
+                try:
+                    self.assertTrue(page.overwrite.get())
+                    self.assertFalse(page.create_backup.get())
+                finally:
+                    page.destroy()
+
+        forms = {item["id"]: item for item in desktop_catalog(self.paths)}
+        for tool_id in ("market-table", "spot-price", "transaction-info", "power-benefit"):
+            fields = {field["key"]: field for field in forms[tool_id]["fields"]}
+            with self.subTest(tool=tool_id):
+                self.assertEqual(fields["overwrite"]["label"], "覆盖非空单元格")
+                self.assertIs(fields["overwrite"]["default"], True)
+                self.assertIs(fields["create_backup"]["default"], False)
+
+    def test_table_update_commands_follow_overwrite_and_backup_switches(self) -> None:
+        from toolbox import commands
+
+        market = commands.market_table(self.paths, date(2026, 10, 8), Path("market.xlsx"),
+                                       overwrite=False, create_backup=True)
+        self.assertIn("--skip-existing", market)
+        self.assertNotIn("--no-backup", market)
+        market = commands.market_table(self.paths, date(2026, 10, 8), Path("market.xlsx"))
+        self.assertNotIn("--skip-existing", market)
+        self.assertIn("--no-backup", market)
+
+        transaction = commands.transaction_info(self.paths, Path("book.xlsx"), date(2026, 10, 8),
+                                                start_date=None, create_backup=False,
+                                                overwrite=True)
+        self.assertNotIn("--skip-existing", transaction)
+        self.assertIn("--no-backup", transaction)
+
+        benefit = commands.power_benefit(self.paths, [Path("归湖.xlsx")], date(2026, 10, 8),
+                                         start_date=None, create_backup=True, overwrite=False)
+        self.assertIn("--skip-existing", benefit)
+        self.assertNotIn("--no-backup", benefit)
+
     def test_trade_auto_match_finds_latest_d_and_d_minus_two_files(self) -> None:
         from toolbox.pages import TradeAnalysisPage
 

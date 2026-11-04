@@ -745,6 +745,8 @@ class MarketTableUpdatePage(ToolPage):
                 / "现货统调市场出清、结算数据2026.xlsx"
             ),
         )
+        self.overwrite = tk.BooleanVar(master=self, value=True)
+        self.create_backup = tk.BooleanVar(master=self, value=False)
 
         form = ttk.LabelFrame(self.content, text="更新设置", padding=12)
         form.grid(row=0, column=0, sticky="ew")
@@ -764,6 +766,11 @@ class MarketTableUpdatePage(ToolPage):
             command=self.choose_workbook,
             button_text="选择文件",
         )
+        options = ttk.Frame(form)
+        options.grid(row=2, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        SettingCheckbutton(options, text="覆盖非空单元格", variable=self.overwrite).pack(side="left")
+        SettingCheckbutton(options, text="写入前生成时间戳备份",
+                           variable=self.create_backup).pack(side="left", padx=(16, 0))
 
         self.content.rowconfigure(1, weight=1)
         mapping = ttk.LabelFrame(self.content, text="当前已实现映射", padding=8)
@@ -800,7 +807,10 @@ class MarketTableUpdatePage(ToolPage):
         self.append_log("请选择日期和市场 Excel 后开始更新。")
 
     def build_update_command(self, run_date: date, workbook: Path) -> list[str]:
-        return commands.market_table(self.paths, run_date, workbook)
+        return commands.market_table(
+            self.paths, run_date, workbook,
+            overwrite=self.overwrite.get(), create_backup=self.create_backup.get(),
+        )
 
     def choose_workbook(self) -> None:
         selected = filedialog.askopenfilename(

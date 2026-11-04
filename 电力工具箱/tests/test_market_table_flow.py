@@ -1035,12 +1035,14 @@ class MarketTableFlowTests(unittest.TestCase):
             Path("market.xlsx"),
             date(2026, 7, 6),
             [473, 2985.6],
+            overwrite=True,
         )
         fetch_spot_clearing.assert_called_once_with(context, date(2026, 7, 6))
         write_spot_clearing.assert_called_once_with(
             Path("market.xlsx"),
             date(2026, 7, 6),
             [121, 46],
+            overwrite=True,
         )
         write_day_ahead_load.assert_not_called()
         ensure_login.assert_called_once()
@@ -1122,7 +1124,8 @@ class MarketTableFlowTests(unittest.TestCase):
 
         self.assertEqual(result["realtimeMarket"]["range"], "BB5:BE5")
         fetch_realtime_market.assert_called_once_with(context, date(2026, 7, 4))
-        write_realtime_market.assert_called_once_with(Path("market.xlsx"), date(2026, 7, 4), [3] * 4)
+        write_realtime_market.assert_called_once_with(
+            Path("market.xlsx"), date(2026, 7, 4), [3] * 4, overwrite=True)
 
     def test_market_table_update_uses_base_date_minus_six_for_generation_settlement(self) -> None:
         from types import SimpleNamespace
@@ -1175,7 +1178,8 @@ class MarketTableFlowTests(unittest.TestCase):
 
         self.assertEqual(result["generationSettlement"]["range"], "BF1:BQ1")
         fetch_generation_settlement.assert_called_once_with(context, date(2026, 6, 30))
-        write_generation_settlement.assert_called_once_with(Path("market.xlsx"), date(2026, 6, 30), [4] * 12)
+        write_generation_settlement.assert_called_once_with(
+            Path("market.xlsx"), date(2026, 6, 30), [4] * 12, overwrite=True)
 
     def test_market_table_update_uses_base_date_minus_six_for_user_settlement(self) -> None:
         from types import SimpleNamespace
@@ -1228,7 +1232,8 @@ class MarketTableFlowTests(unittest.TestCase):
 
         self.assertEqual(result["userSettlement"]["range"], "BR1:BX1")
         fetch_user_settlement.assert_called_once_with(context, date(2026, 6, 30))
-        write_user_settlement.assert_called_once_with(Path("market.xlsx"), date(2026, 6, 30), [5] * 7)
+        write_user_settlement.assert_called_once_with(
+            Path("market.xlsx"), date(2026, 6, 30), [5] * 7, overwrite=True)
 
     def test_market_table_update_uses_base_date_minus_two_for_actual_load(self) -> None:
         from toolbox.runtime import load_module

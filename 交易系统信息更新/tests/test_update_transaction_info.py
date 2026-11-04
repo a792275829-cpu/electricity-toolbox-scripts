@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import openpyxl
@@ -198,6 +199,25 @@ class TailWorkbookMixin:
         path = self.folder / "交易系统信息.xlsx"
         workbook.save(path)
         return path
+
+
+class OverwriteTests(unittest.TestCase):
+    def test_overwrite_keeps_formulas_and_releases_plain_values(self):
+        group = date(2026, 10, 10)
+        pairs = (SimpleNamespace(day_ahead_date=group),)
+        groups = {group: (None, {
+            "E2": (12, "0.00"), "F2": ("=1+1", "0.00"), "L2": (0, "0.00"),
+        })}
+        self.assertEqual(set(MODULE.preserved_cell_snapshot(groups, pairs, overwrite=False)),
+                         {"E2", "F2", "L2"})
+        overwrite = MODULE.preserved_cell_snapshot(groups, pairs, overwrite=True)
+        self.assertEqual(set(overwrite), {"F2"})
+        self.assertEqual(overwrite["F2"], ("=1+1", "0.00"))
+
+    def test_overwrite_defaults_on_for_both_entry_points(self):
+        import inspect
+        self.assertTrue(inspect.signature(MODULE.update_workbook).parameters["overwrite"].default)
+        self.assertFalse(inspect.signature(MODULE.prepare_workbook).parameters["overwrite"].default)
 
 
 class WorkbookTailTests(TempFolderTest, TailWorkbookMixin):

@@ -69,6 +69,15 @@ class PowerBenefitTests(unittest.TestCase):
             plan = self.module.inspect_workbook(path, start_date=date(2026,10,2), end_date=date(2026,10,2))
             self.assertEqual(len(plan.cells), 144)
 
+    def test_overwrite_switch_includes_nonempty_values_but_keeps_formulas(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.make_template(folder)
+            plan = self.module.inspect_workbook(path, end_date=date(2026, 10, 2), overwrite=True)
+            coordinates = {cell.coordinate for cell in plan.cells}
+            self.assertEqual(len(plan.cells), 24 * 6 * 2 - 1)
+            self.assertTrue({"C4", "K6"} <= coordinates)
+            self.assertNotIn("J5", coordinates)
+
     def test_missing_requested_dates_fail_before_fetch_or_write(self):
         for mode in ("stream", "full"):
             for start in (None, date(2026, 10, 2)):
@@ -278,6 +287,29 @@ class PowerBenefitPageTests(unittest.TestCase):
             self.assertEqual([variable.get() for variable in page.selected],[False,False,False])
             page.destroy()
         finally: root.destroy()
+
+    def test_page_defaults_to_overwrite_without_backup(self):
+        from toolbox.runtime import TaskRegistry
+        from toolbox.power_benefit_page import PowerBenefitUpdatePage
+        root = tk.Tk(); root.withdraw()
+        try:
+            paths = ToolPaths(Path(__file__).resolve().parents[2])
+            page = PowerBenefitUpdatePage(root, paths, TaskRegistry())
+            self.assertTrue(page.overwrite.get())
+            self.assertFalse(page.create_backup.get())
+            books = [Path("/tmp/归湖.xlsx")]
+            command = page.build_update_command(books, date(2026, 10, 12),
+                                                start_date=None, create_backup=False)
+            self.assertIn("--no-backup", command)
+            self.assertNotIn("--skip-existing", command)
+            page.overwrite.set(False)
+            command = page.build_update_command(books, date(2026, 10, 12),
+                                                start_date=None, create_backup=True)
+            self.assertIn("--skip-existing", command)
+            self.assertNotIn("--no-backup", command)
+            page.destroy()
+        finally:
+            root.destroy()
 
     def test_page_fits_the_viewport_so_switching_stays_off_the_clipped_canvas_path(self):
         from unittest.mock import patch

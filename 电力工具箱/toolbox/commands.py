@@ -35,28 +35,37 @@ def section_analysis(paths, files, output_root, topology_path, threshold):
             "--threshold", str(threshold), *(str(p) for p in files)]
 
 
-def market_table(paths, run_date, workbook):
-    return [python_executable(), str(paths.market_table_update), "--date",
-            run_date.isoformat(), "--workbook", str(workbook)]
-
-
-def transaction_info(paths, workbook, end_date, *, start_date, create_backup):
-    command = [python_executable(), str(paths.transaction_info_update),
-               "--workbook", str(workbook), "--end-date", end_date.isoformat()]
-    if start_date is not None:
-        command.extend(("--start-date", start_date.isoformat()))
+def market_table(paths, run_date, workbook, *, overwrite=True, create_backup=False):
+    command = [python_executable(), str(paths.market_table_update), "--date",
+               run_date.isoformat(), "--workbook", str(workbook)]
+    if not overwrite:
+        command.append("--skip-existing")
     if not create_backup:
         command.append("--no-backup")
     return command
 
 
-def power_benefit(paths, workbooks, end_date, *, start_date, create_backup):
+def transaction_info(paths, workbook, end_date, *, start_date, create_backup, overwrite=True):
+    command = [python_executable(), str(paths.transaction_info_update),
+               "--workbook", str(workbook), "--end-date", end_date.isoformat()]
+    if start_date is not None:
+        command.extend(("--start-date", start_date.isoformat()))
+    if not overwrite:
+        command.append("--skip-existing")
+    if not create_backup:
+        command.append("--no-backup")
+    return command
+
+
+def power_benefit(paths, workbooks, end_date, *, start_date, create_backup, overwrite=True):
     command = [python_executable(), str(paths.power_benefit_update),
                "--end-date", end_date.isoformat()]
     for path in workbooks:
         command.extend(("--workbook", str(path)))
     if start_date is not None:
         command.extend(("--start-date", start_date.isoformat()))
+    if not overwrite:
+        command.append("--skip-existing")
     if not create_backup:
         command.append("--no-backup")
     return command

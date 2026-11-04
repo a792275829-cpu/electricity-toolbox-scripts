@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import stat
 import sys
 import tempfile
@@ -436,6 +437,12 @@ def copy_numeric_cell_style(source, target) -> None:
 
 def cell_is_non_empty(cell) -> bool:
     return cell.value not in (None, "")
+
+
+def cell_holds_formula(cell) -> bool:
+    """覆盖非空也不改写公式：只换 <v> 会让公式结果与公式体不一致。"""
+    value = cell.value
+    return isinstance(value, str) and value.startswith("=")
 
 
 def write_count_text(summary: dict[str, Any]) -> str:
@@ -901,6 +908,8 @@ def write_actual_load_values(
     workbook_path: Path | str,
     run_date: date,
     values: list[int | float],
+    *,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     return write_market_load_values(
         workbook_path,
@@ -908,6 +917,7 @@ def write_actual_load_values(
         values,
         start_column=ACTUAL_LOAD_START_COLUMN,
         label="市场负荷",
+        overwrite=overwrite,
     )
 
 
@@ -915,6 +925,8 @@ def write_day_ahead_load_values(
     workbook_path: Path | str,
     run_date: date,
     values: list[int | float],
+    *,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     return write_market_load_values(
         workbook_path,
@@ -922,6 +934,7 @@ def write_day_ahead_load_values(
         values,
         start_column=DAY_AHEAD_LOAD_START_COLUMN,
         label="日前市场负荷",
+        overwrite=overwrite,
     )
 
 
@@ -929,6 +942,8 @@ def write_day_ahead_market_values(
     workbook_path: Path | str,
     run_date: date,
     values: list[int | float],
+    *,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     return write_market_row_values(
         workbook_path,
@@ -937,6 +952,7 @@ def write_day_ahead_market_values(
         start_column=DAY_AHEAD_MARKET_START_COLUMN,
         expected_count=12,
         label="日前市场",
+        overwrite=overwrite,
     )
 
 
@@ -944,6 +960,8 @@ def write_realtime_market_values(
     workbook_path: Path | str,
     run_date: date,
     values: list[int | float],
+    *,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     return write_market_row_values(
         workbook_path,
@@ -952,6 +970,7 @@ def write_realtime_market_values(
         start_column=REALTIME_MARKET_START_COLUMN,
         expected_count=4,
         label="实时市场",
+        overwrite=overwrite,
     )
 
 
@@ -959,6 +978,8 @@ def write_generation_settlement_values(
     workbook_path: Path | str,
     run_date: date,
     values: list[int | float],
+    *,
+    overwrite: bool = True,
 ) -> dict[str, Any]:
     return write_market_row_values(
         workbook_path,
@@ -967,7 +988,7 @@ def write_generation_settlement_values(
         start_column=GENERATION_SETTLEMENT_START_COLUMN,
         expected_count=12,
         label="发电侧结算",
-        overwrite=True,
+        overwrite=overwrite,
     )
 
 
@@ -975,6 +996,8 @@ def write_user_settlement_values(
     workbook_path: Path | str,
     run_date: date,
     values: list[int | float],
+    *,
+    overwrite: bool = True,
 ) -> dict[str, Any]:
     return write_market_row_values(
         workbook_path,
@@ -983,7 +1006,7 @@ def write_user_settlement_values(
         start_column=USER_SETTLEMENT_START_COLUMN,
         expected_count=7,
         label="用电侧结算",
-        overwrite=True,
+        overwrite=overwrite,
     )
 
 
@@ -994,6 +1017,7 @@ def write_market_load_values(
     *,
     start_column: str,
     label: str,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     return write_market_row_values(
         workbook_path,
@@ -1002,6 +1026,7 @@ def write_market_load_values(
         start_column=start_column,
         expected_count=20,
         label=label,
+        overwrite=overwrite,
     )
 
 
@@ -1042,7 +1067,7 @@ def write_market_row_values(
     skipped_count = 0
     for offset, value in enumerate(values):
         cell = sheet.cell(row=row, column=start_column_index + offset)
-        if cell_is_non_empty(cell) and not overwrite:
+        if cell_holds_formula(cell) or (cell_is_non_empty(cell) and not overwrite):
             skipped_count += 1
             continue
         if style_row is not None:
@@ -1068,6 +1093,8 @@ def write_unit_cost_price_values(
     workbook_path: Path | str,
     run_date: date,
     values: list[int | float],
+    *,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     if len(values) != 11:
         raise ValueError(f"需要写入 11 个单位变动成本对应电价，实际收到 {len(values)} 个")
@@ -1085,7 +1112,7 @@ def write_unit_cost_price_values(
     skipped_count = 0
     for offset, value in enumerate(values):
         cell = sheet.cell(row=row, column=start_column + offset)
-        if cell_is_non_empty(cell):
+        if cell_holds_formula(cell) or (cell_is_non_empty(cell) and not overwrite):
             skipped_count += 1
             continue
         if style_row is not None:
@@ -1111,6 +1138,8 @@ def write_market_board_online_unit_values(
     workbook_path: Path | str,
     run_date: date,
     values: list[int | float],
+    *,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     if len(values) != 2:
         raise ValueError(f"需要写入 2 个在线机组数与检修容量数值，实际收到 {len(values)} 个")
@@ -1130,7 +1159,7 @@ def write_market_board_online_unit_values(
         column = openpyxl.utils.column_index_from_string(column_name)
         cell = sheet.cell(row=row, column=column)
         cells.append(cell.coordinate)
-        if cell_is_non_empty(cell):
+        if cell_holds_formula(cell) or (cell_is_non_empty(cell) and not overwrite):
             skipped_count += 1
             continue
         if style_row is not None:
@@ -1155,6 +1184,8 @@ def write_spot_clearing_unit_count_values(
     workbook_path: Path | str,
     run_date: date,
     values: list[int | float],
+    *,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     if len(values) != 2:
         raise ValueError(f"需要写入 2 个燃煤和燃气开机台数，实际收到 {len(values)} 个")
@@ -1174,7 +1205,7 @@ def write_spot_clearing_unit_count_values(
     skipped_count = 0
     for offset, value in enumerate(values):
         cell = sheet.cell(row=row, column=start_column + offset)
-        if cell_is_non_empty(cell):
+        if cell_holds_formula(cell) or (cell_is_non_empty(cell) and not overwrite):
             skipped_count += 1
             continue
         if style_row is not None:
@@ -1201,6 +1232,8 @@ def write_spot_clearing_unit_count_values(
 def copy_previous_day_unit_operation_mode(
     workbook_path: Path | str,
     run_date: date,
+    *,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     path = Path(workbook_path).expanduser()
     source_date = run_date - timedelta(days=1)
@@ -1219,7 +1252,7 @@ def copy_previous_day_unit_operation_mode(
     for column in range(start_column, end_column + 1):
         source = sheet.cell(row=source_row, column=column)
         target = sheet.cell(row=target_row, column=column)
-        if cell_is_non_empty(target):
+        if cell_holds_formula(target) or (cell_is_non_empty(target) and not overwrite):
             skipped_count += 1
             continue
         copy_cell_style(source, target)
@@ -1255,15 +1288,33 @@ def fetch_values_or_skip(label: str, fetcher, *, attempts: int = 3):
             return None
 
 
+def backup_workbook(workbook_path: Path) -> Path:
+    """Copy the workbook before writing; never reuse an existing backup name."""
+    path = Path(workbook_path).expanduser()
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = path.with_name(f"{path.stem}.备份-{timestamp}{path.suffix}")
+    index = 1
+    while backup.exists():
+        backup = path.with_name(f"{path.stem}.备份-{timestamp}-{index}{path.suffix}")
+        index += 1
+    shutil.copy2(path, backup)
+    return backup
+
+
 def run_update(
     workbook_path: Path,
     run_date: date,
     *,
     headless: bool,
+    overwrite: bool = True,
+    create_backup: bool = False,
 ) -> dict[str, Any]:
     ensure_workbook_accessible(workbook_path)
+    if create_backup:
+        log(f"备份：{backup_workbook(workbook_path)}")
     with workbook_write_session(workbook_path):
-        return _run_update_with_session(workbook_path, run_date, headless=headless)
+        return _run_update_with_session(workbook_path, run_date, headless=headless,
+                                        overwrite=overwrite)
 
 
 def _run_update_with_session(
@@ -1271,6 +1322,7 @@ def _run_update_with_session(
     run_date: date,
     *,
     headless: bool,
+    overwrite: bool,
 ) -> dict[str, Any]:
     config = load_config()
     config.headless = headless
@@ -1298,6 +1350,7 @@ def _run_update_with_session(
                         workbook_path,
                         run_date,
                         day_ahead_values,
+                        overwrite=overwrite,
                     )
                     log(
                         f"已写入：{day_ahead_summary['sheet']}!{day_ahead_summary['range']} "
@@ -1322,6 +1375,7 @@ def _run_update_with_session(
                         workbook_path,
                         market_date,
                         day_ahead_market_values,
+                        overwrite=overwrite,
                     )
                     log(
                         f"已写入：{day_ahead_market_summary['sheet']}!{day_ahead_market_summary['range']} "
@@ -1346,6 +1400,7 @@ def _run_update_with_session(
                         workbook_path,
                         realtime_market_date,
                         realtime_market_values,
+                        overwrite=overwrite,
                     )
                     log(
                         f"已写入：{realtime_market_summary['sheet']}!{realtime_market_summary['range']} "
@@ -1370,6 +1425,7 @@ def _run_update_with_session(
                         workbook_path,
                         generation_settlement_date,
                         generation_settlement_values,
+                        overwrite=overwrite,
                     )
                     log(
                         f"已写入：{generation_settlement_summary['sheet']}!{generation_settlement_summary['range']} "
@@ -1394,6 +1450,7 @@ def _run_update_with_session(
                         workbook_path,
                         user_settlement_date,
                         user_settlement_values,
+                        overwrite=overwrite,
                     )
                     log(
                         f"已写入：{user_settlement_summary['sheet']}!{user_settlement_summary['range']} "
@@ -1414,7 +1471,8 @@ def _run_update_with_session(
                 summary = None
                 if values is not None:
                     log("已读取 20 个市场负荷数值。")
-                    summary = write_actual_load_values(workbook_path, load_date, values)
+                    summary = write_actual_load_values(
+                        workbook_path, load_date, values, overwrite=overwrite)
                     log(
                         f"已写入：{summary['sheet']}!{summary['range']} "
                         f"（{write_count_text(summary)}）"
@@ -1434,6 +1492,7 @@ def _run_update_with_session(
                         workbook_path,
                         run_date,
                         cost_values,
+                        overwrite=overwrite,
                     )
                     log(
                         f"已写入：{cost_summary['sheet']}!{cost_summary['range']} "
@@ -1454,6 +1513,7 @@ def _run_update_with_session(
                         workbook_path,
                         run_date,
                         market_board_values,
+                        overwrite=overwrite,
                     )
                     log(
                         f"已写入：{market_board_summary['sheet']}!{market_board_summary['range']} "
@@ -1474,6 +1534,7 @@ def _run_update_with_session(
                         workbook_path,
                         run_date,
                         spot_clearing_values,
+                        overwrite=overwrite,
                     )
                     log(
                         f"已写入：{spot_clearing_summary['sheet']}!{spot_clearing_summary['range']} "
@@ -1486,6 +1547,7 @@ def _run_update_with_session(
                 operation_summary = copy_previous_day_unit_operation_mode(
                     workbook_path,
                     run_date,
+                    overwrite=overwrite,
                 )
                 log(
                     f"已写入：{operation_summary['sheet']}!{operation_summary['range']} "
@@ -1525,6 +1587,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workbook", type=Path, help="要写入的 Excel 文件")
     parser.add_argument("--login", action="store_true", help="打开登录窗口并保存登录态")
     parser.add_argument("--headed", action="store_true", help="使用可见浏览器窗口")
+    parser.add_argument("--skip-existing", action="store_true", help="已有非空单元格时跳过，不覆盖")
+    parser.add_argument("--no-backup", action="store_true", help="写入前不生成时间戳备份")
     return parser.parse_args()
 
 
@@ -1542,6 +1606,8 @@ def main() -> int:
         args.workbook,
         parse_date(args.date),
         headless=headless,
+        overwrite=not args.skip_existing,
+        create_backup=not args.no_backup,
     )
     return 0
 

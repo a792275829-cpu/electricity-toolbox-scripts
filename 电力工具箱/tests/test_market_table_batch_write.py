@@ -38,6 +38,43 @@ class MarketTableBatchWriteTests(unittest.TestCase):
                 self.assertEqual(sheet["A5"].number_format, "yyyy/m/d")
             finally: book.close()
 
+    def test_overwrite_switch_replaces_existing_cells_and_backup_copies_original(self):
+        module = load_module("market_overwrite_test",
+                             Path(__file__).resolve().parents[2] / "市场表更新/update_market_table.py")
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "market.xlsx"
+            book = Workbook(); sheet = book.active; sheet.title = module.MARKET_SHEET_NAME
+            sheet["A2"] = date(2026, 10, 8); sheet["V2"] = 99
+            book.save(path); book.close()
+
+            skipped = module.write_day_ahead_market_values(path, date(2026, 10, 8), list(range(12)))
+            self.assertEqual((skipped["count"], skipped["skipped"]), (11, 1))
+            book = load_workbook(path)
+            try:
+                sheet = book[module.MARKET_SHEET_NAME]
+                self.assertEqual(sheet["V2"].value, 99)
+                self.assertEqual(sheet["W2"].value, 1)
+            finally:
+                book.close()
+
+            written = module.write_day_ahead_market_values(
+                path, date(2026, 10, 8), list(range(12)), overwrite=True)
+            self.assertEqual((written["count"], written["skipped"]), (12, 0))
+            book = load_workbook(path)
+            try:
+                sheet = book[module.MARKET_SHEET_NAME]
+                self.assertEqual(tuple(sheet.cell(2, column).value for column in range(22, 34)),
+                                 tuple(range(12)))
+            finally:
+                book.close()
+
+            backup = module.backup_workbook(path)
+            self.assertTrue(backup.is_file())
+            self.assertIn("备份-", backup.name)
+            self.assertEqual(backup.read_bytes(), path.read_bytes())
+            second = module.backup_workbook(path)
+            self.assertNotEqual(second, backup)
+
     def test_unsafe_extension_preserves_original(self):
         module = load_module("market_unsafe_extension", Path(__file__).resolve().parents[2] / "市场表更新/update_market_table.py")
         for problem in ("footer", "merge", "history", "year", "duplicate", "month"):

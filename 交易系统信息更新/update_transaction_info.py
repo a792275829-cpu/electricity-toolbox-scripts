@@ -737,7 +737,28 @@ def verify_workbook(path: Path, prepared: PreparedWorkbook) -> None:
             raw.close()
 
 
-def prepare_workbook(path: Path, pairs: Iterable[DailyLoadPair]) -> PreparedWorkbook:
+def preserved_cell_snapshot(groups, pairs, *, overwrite: bool) -> dict[str, tuple[Any, str]]:
+    """Cells left untouched in existing date groups.
+
+    覆盖非空时普通数值会被网站数据替换，公式仍留在保留集内：只替换 <v> 会让公式
+    结果与公式体不一致。
+    """
+    preserved: dict[str, tuple[Any, str]] = {}
+    for pair in pairs:
+        for coordinate, snapshot in groups.get(pair.day_ahead_date, (None, {}))[1].items():
+            value = snapshot[0]
+            if overwrite and not (isinstance(value, str) and value.startswith("=")):
+                continue
+            preserved[coordinate] = snapshot
+    return preserved
+
+
+def prepare_workbook(
+    path: Path,
+    pairs: Iterable[DailyLoadPair],
+    *,
+    overwrite: bool = False,
+) -> PreparedWorkbook:
     original = Path(path).expanduser().resolve()
     pair_tuple = tuple(pairs)
     if not pair_tuple:
@@ -762,8 +783,7 @@ def prepare_workbook(path: Path, pairs: Iterable[DailyLoadPair]) -> PreparedWork
     group_rows = tuple(groups[pair.day_ahead_date][0].start_row if pair.day_ahead_date in groups
                        else tail.start_row + (pair.day_ahead_date - tail.day_ahead_date).days * GROUP_HEIGHT
                        for pair in pair_tuple)
-    preserved_cells = {coordinate: snapshot for pair in pair_tuple
-                       for coordinate, snapshot in groups.get(pair.day_ahead_date, (None, {}))[1].items()}
+    preserved_cells = preserved_cell_snapshot(groups, pair_tuple, overwrite=overwrite)
     try:
         first_row, last_row = _write_patched_workbook(
             original,
@@ -809,6 +829,7 @@ def update_workbook(
     *,
     config: Config | None = None,
     create_backup: bool = True,
+    overwrite: bool = True,
 ) -> PreparedWorkbook:
     start = resolve_start_date(workbook_path, start_date)
     if end_date < start:
@@ -817,7 +838,7 @@ def update_workbook(
             f"{start.isoformat()}，无需更新。"
         )
     pairs = collect_pairs(start, end_date, config=config)
-    prepared = prepare_workbook(workbook_path, pairs)
+    prepared = prepare_workbook(workbook_path, pairs, overwrite=overwrite)
     backup = commit_prepared_workbook(prepared, create_backup=create_backup)
     log(
         f"已更新 {prepared.original}：日前 {start.isoformat()} 至 "
@@ -851,6 +872,7 @@ def main() -> int:
         help="日前结束日期 YYYY-MM-DD，默认昨日",
     )
     parser.add_argument("--no-backup", action="store_true", help="不保留时间戳备份")
+    parser.add_argument("--skip-existing", action="store_true", help="已有非空单元格时跳过，不覆盖")
     parser.add_argument("--headed", action="store_true", help="显示抓取浏览器")
     parser.add_argument("--dry-run", action="store_true", help="只抓取并校验，不写入 Excel")
     parser.add_argument("--login", action="store_true", help="登录并保存本模块独立会话")
@@ -883,6 +905,7 @@ def main() -> int:
             end_date,
             config=config,
             create_backup=not args.no_backup,
+            overwrite=not args.skip_existing,
         )
         return 0
     except KeyboardInterrupt:

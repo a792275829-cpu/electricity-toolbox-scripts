@@ -183,7 +183,8 @@ def hour_of(value: Any) -> int | None:
     return None
 
 
-def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = None) -> WorkbookPlan:
+def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = None,
+                     overwrite: bool = False) -> WorkbookPlan:
     path = path.expanduser().resolve(strict=True)
     if path.suffix.lower() != ".xlsx":
         raise ValueError(f"只支持 .xlsx：{path}")
@@ -247,7 +248,9 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
                 for hour, row in sorted(hours.items()):
                     for column, field in layout.items():
                         cell = sheet[f"{column}{row}"]
-                        if station == "海风" or cell.value in (None, ""):
+                        holds_formula = isinstance(cell.value, str) and cell.value.startswith("=")
+                        if (station == "海风" or cell.value in (None, "")
+                                or (overwrite and not holds_formula)):
                             cells.append(CellTarget(sheet.title, cell.coordinate, day, hour,
                                                     field, cell.number_format, cell.style_id))
         if not seen_days:
@@ -565,10 +568,12 @@ def prepare_workbook(plan: WorkbookPlan, series: dict[date, dict[str, tuple[floa
 
 
 def run_update(paths: tuple[Path, ...], *, end_date: date, start_date: date | None = None,
-               create_backup: bool = True, headed: bool = False) -> tuple[PreparedWorkbook, ...]:
+               create_backup: bool = True, headed: bool = False,
+               overwrite: bool = True) -> tuple[PreparedWorkbook, ...]:
     if start_date and end_date < start_date:
         raise ValueError("截止日期不能早于开始日期。")
-    plans = tuple(inspect_workbook(path, end_date=end_date, start_date=start_date) for path in paths)
+    plans = tuple(inspect_workbook(path, end_date=end_date, start_date=start_date,
+                                   overwrite=overwrite) for path in paths)
     if len({plan.station for plan in plans}) != len(plans):
         raise ValueError("每个场站一次只能选择一个工作簿。")
     for plan in plans:
@@ -608,6 +613,7 @@ def main() -> int:
     parser.add_argument("--start-date", type=parse_date_input, help="海风覆盖必填；其他场站留空检查历史空白")
     parser.add_argument("--end-date", type=parse_date_input, default=date.today(), help="截止日期 D（含），默认今天")
     parser.add_argument("--no-backup", action="store_true")
+    parser.add_argument("--skip-existing", action="store_true", help="已有非空单元格时跳过，不覆盖")
     parser.add_argument("--headed", action="store_true")
     parser.add_argument("--login", action="store_true")
     args = parser.parse_args()
@@ -616,7 +622,8 @@ def main() -> int:
             collect_data((), login_only=True)
         else:
             run_update(tuple(args.workbook or DEFAULT_WORKBOOKS), end_date=args.end_date,
-                       start_date=args.start_date, create_backup=not args.no_backup, headed=args.headed)
+                       start_date=args.start_date, create_backup=not args.no_backup,
+                       headed=args.headed, overwrite=not args.skip_existing)
         return 0
     except Exception as exc:
         from toolbox_shared.cli_login import emit_login_error

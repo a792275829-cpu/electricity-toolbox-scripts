@@ -104,10 +104,13 @@ def plan(paths, tool_id, action, p):
         from toolbox_shared.trade_batch import plan_batch_outputs
         plan_batch_outputs(sources, output)
     elif tool_id == "market-table":
-        return [(commands.market_table(paths, day("run_date"), required_path(p, "workbook")), paths.market_table_update_dir)]
+        return [(commands.market_table(paths, day("run_date"), required_path(p, "workbook"),
+                overwrite=p["overwrite"], create_backup=p["create_backup"]),
+                paths.market_table_update_dir)]
     elif tool_id == "transaction-info":
         return [(commands.transaction_info(paths, required_path(p, "workbook"), day("end_date"),
-                start_date=optional_start, create_backup=p["create_backup"]), paths.transaction_info_update_dir)]
+                start_date=optional_start, create_backup=p["create_backup"],
+                overwrite=p["overwrite"]), paths.transaction_info_update_dir)]
     elif tool_id == "power-benefit":
         workbooks = [required_path(p, key + "_workbook") for key in ("guihu", "tuolian", "haifeng") if p[key + "_selected"]]
         if not workbooks:
@@ -118,7 +121,8 @@ def plan(paths, tool_id, action, p):
         if any("海风" in path.name for path in workbooks) and optional_start is None:
             raise ValueError("海风覆盖更新必须填写开始日期")
         return [(commands.power_benefit(paths, workbooks, day("end_date"), start_date=optional_start,
-                create_backup=p["create_backup"]), paths.power_benefit_update_dir)]
+                create_backup=p["create_backup"], overwrite=p["overwrite"]),
+                paths.power_benefit_update_dir)]
     elif tool_id == "spot-price":
         selected = [(k, v) for k, v in [("guihu", "归湖"), ("tuolian", "鮀莲"), ("haifeng", "海风")] if p[k + "_selected"]]
         workbooks = {label: required_path(p, key + "_workbook") for key, label in selected}

@@ -106,7 +106,7 @@ class SpotPriceUpdatePage(ToolPage):
         options = ttk.Frame(form)
         options.grid(row=5, column=0, columnspan=5, sticky="w", pady=(5, 0))
         # 并排显示，避免多占一行把页面顶出视口（超出后每次切换都要整幅重绘）
-        SettingCheckbutton(options, text="覆盖已有非空价格", variable=self.overwrite).pack(side="left")
+        SettingCheckbutton(options, text="覆盖非空单元格", variable=self.overwrite).pack(side="left")
         SettingCheckbutton(options, text="写入前生成时间戳备份", variable=self.create_backup).pack(
             side="left", padx=(16, 0)
         )
