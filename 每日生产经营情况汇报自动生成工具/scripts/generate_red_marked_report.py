@@ -1101,6 +1101,12 @@ def _unit_label(plant: str, key: str) -> str:
     return f"#{key}"
 
 
+def _suite_order(key: str) -> int:
+    """套号排序键：#1,2 → 1；无法解析时排到最后。"""
+    head = key.split(",")[0].strip()
+    return int(head) if head.isdigit() else 999
+
+
 def build_unit_status_text(plant: str, units: list[tuple[str, str]]) -> str | None:
     """按厂内既有写法拼机组启停句子，返回不带「某某厂：」前缀的正文。"""
     units = [(key, status) for key, status in units if status]
@@ -1114,21 +1120,26 @@ def build_unit_status_text(plant: str, units: list[tuple[str, str]]) -> str | No
         ]
         return "；".join(clauses) + "。"
 
-    words = DONGGUAN_STATUS_WORDS if plant == "东莞" else UNIT_STATUS_WORDS
-    unit_suffix = "套机组" if plant == "东莞" else "机组"
-    separator = "，" if plant == "东莞" else "；"
+    if plant == "东莞":
+        # 东莞按套号顺序逐套列出（一套→四套），不按状态聚合，
+        # 否则会出现「二套调峰，一、四套备用，三套检修」这种跳序写法。
+        clauses = [
+            f"{_unit_label(plant, key)}套机组{DONGGUAN_STATUS_WORDS.get(status, status)}"
+            for key, status in sorted(units, key=lambda item: _suite_order(item[0]))
+        ]
+        return "，".join(clauses) + "。"
 
     # 按「输出用词」聚合：备用/停备/停机都写「备用」，不能因为输入不同就拆成两句。
     grouped: dict[str, list[str]] = {}
     ranks: dict[str, int] = {}
     for key, status in units:
-        word = words.get(status, status)
+        word = UNIT_STATUS_WORDS.get(status, status)
         grouped.setdefault(word, []).append(_unit_label(plant, key))
         ranks[word] = min(ranks.get(word, _status_rank(status)), _status_rank(status))
 
     ordered = sorted(grouped.items(), key=lambda item: ranks[item[0]])
-    clauses = [f"{'、'.join(labels)}{unit_suffix}{word}" for word, labels in ordered]
-    return separator.join(clauses) + "。"
+    clauses = [f"{'、'.join(labels)}机组{word}" for word, labels in ordered]
+    return "；".join(clauses) + "。"
 
 
 def load_unit_status_texts(date_text: str,

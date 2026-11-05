@@ -61,9 +61,20 @@ class UnitStatusTextTests(unittest.TestCase):
     def test_dongguan_uses_suites_and_comma_separators(self) -> None:
         parsed = _parse_unit_status(BASE_ROWS)
         # #1,2=一套 … #7,8=四套；运行→调峰，备用保持备用，分隔用「，」
+        # 按套号顺序逐套列出，不按状态聚合（否则会出现「二套…一、四套…三套」跳序）。
         self.assertEqual(
             build_unit_status_text("东莞", parsed["东莞"]),
-            "二套机组调峰，一、四套机组备用，三套机组检修。",
+            "一套机组备用，二套机组调峰，三套机组检修，四套机组备用。",
+        )
+
+    def test_dongguan_orders_suites_regardless_of_input_order(self) -> None:
+        # 输入顺序打乱时仍按一套→四套输出。
+        text = build_unit_status_text(
+            "东莞",
+            [("7,8", "备用"), ("3,4", "检修"), ("1,2", "运行"), ("5,6", "运行")],
+        )
+        self.assertEqual(
+            text, "一套机组调峰，二套机组检修，三套机组调峰，四套机组备用。"
         )
 
     def test_qingyuan_keeps_unit_order_and_semicolons(self) -> None:
