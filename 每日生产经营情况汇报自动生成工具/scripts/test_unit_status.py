@@ -23,9 +23,9 @@ BASE_ROWS: list[tuple] = [
     (None, "约束情况", "停机序列：2、1，启机序列：3。", None, None, None, None),
     ("海门", "合计", "/", 4072, "/", "/", "/"),
     (None, "#1", "运行", 1036, 400, 1036, None),
-    (None, "#2", "备用", 1036, 350, 1036, None),
+    (None, "#2", "停备", 1036, 350, 1036, None),  # 停备也写作「备用」
     (None, "#3", "供热", 1000, 560, 920, "主供热机组"),
-    (None, "#4", "备用", 1000, 350, 1000, None),
+    (None, "#4", "停机", 1000, 350, 1000, None),  # 停机也写作「备用」
     ("东莞", "合计", "/", 1941.96, "/", "/", "/"),
     (None, "#1,2", "备用", 472.5, 270, 472.5, None),
     (None, "#3,4", "运行", 472.5, 270, 472.5, None),
@@ -51,11 +51,11 @@ class UnitStatusTextTests(unittest.TestCase):
         parsed = _parse_unit_status(BASE_ROWS)
         self.assertEqual(
             build_unit_status_text("汕头", parsed["汕头"]),
-            "#1、#2机组运行；#3机组停备。",
+            "#1、#2机组运行；#3机组备用。",
         )
         self.assertEqual(
             build_unit_status_text("海门", parsed["海门"]),
-            "#1机组运行；#2、#4机组停备；#3机组供热。",
+            "#1机组运行；#2、#4机组备用；#3机组供热。",
         )
 
     def test_dongguan_uses_suites_and_comma_separators(self) -> None:
@@ -70,7 +70,7 @@ class UnitStatusTextTests(unittest.TestCase):
         parsed = _parse_unit_status(BASE_ROWS)
         self.assertEqual(
             build_unit_status_text("清远", parsed["清远"]),
-            "一套机组停备；二套机组运行。",
+            "一套机组备用；二套机组运行。",
         )
 
     def test_missing_status_is_skipped(self) -> None:
@@ -101,10 +101,10 @@ class StartupFillTests(unittest.TestCase):
 
     def test_identical_day_is_replaced_by_previous_day_wording(self) -> None:
         previous = {
-            "汕头": "#1、#2机组运行；#3机组停备。",
-            "海门": "#1机组运行；#2、#4机组停备；#3机组供热。",
+            "汕头": "#1、#2机组运行；#3机组备用。",
+            "海门": "#1机组运行；#2、#4机组备用；#3机组供热。",
             "东莞": "二套机组调峰，一、四套机组备用，三套机组检修。",
-            "清远": "一套机组停备；二套机组运行。",
+            "清远": "一套机组备用；二套机组运行。",
         }
         current = dict(previous)
         current["汕头"] = "#1、#2、#3机组运行。"
@@ -116,16 +116,16 @@ class StartupFillTests(unittest.TestCase):
 
     def test_first_block_never_uses_previous_day_wording(self) -> None:
         previous = {
-            "汕头": "#1、#2机组运行；#3机组停备。",
-            "海门": "#1机组运行；#2、#4机组停备；#3机组供热。",
+            "汕头": "#1、#2机组运行；#3机组备用。",
+            "海门": "#1机组运行；#2、#4机组备用；#3机组供热。",
             "东莞": "二套机组调峰，一、四套机组备用，三套机组检修。",
-            "清远": "一套机组停备；二套机组运行。",
+            "清远": "一套机组备用；二套机组运行。",
         }
         blocks = self._filled_blocks(previous, dict(previous))
         first_date = blocks.index("11月3日：")
         second_date = blocks.index("11月4日：")
         first_block = blocks[first_date:second_date]
-        self.assertIn("汕头厂：#1、#2机组运行；#3机组停备。", first_block)
+        self.assertIn("汕头厂：#1、#2机组运行；#3机组备用。", first_block)
         self.assertNotIn("汕头厂：与前一日运行方式一致。", first_block)
 
 

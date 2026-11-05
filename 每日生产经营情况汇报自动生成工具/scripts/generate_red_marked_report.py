@@ -718,8 +718,8 @@ def load_daily_clearing_inputs(date_text: str,
 
 UNIT_STATUS_PLANTS = ("汕头", "海门", "东莞", "清远")
 UNIT_STATUS_RANK = ("运行", "备用", "供热", "检修")
-UNIT_STATUS_WORDS = {"运行": "运行", "备用": "停备", "停备": "停备", "停机": "停备", "供热": "供热", "检修": "检修"}
-DONGGUAN_STATUS_WORDS = {"运行": "调峰", "备用": "备用", "停备": "停备", "供热": "供热", "检修": "检修"}
+UNIT_STATUS_WORDS = {"运行": "运行", "备用": "备用", "停备": "备用", "停机": "备用", "供热": "供热", "检修": "检修"}
+DONGGUAN_STATUS_WORDS = {"运行": "调峰", "备用": "备用", "停备": "备用", "供热": "供热", "检修": "检修"}
 CHINESE_DIGITS = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "七", "8": "八"}
 SECTION_HEADING = re.compile(r"^[一二三四五六七八九十]+、")
 
@@ -784,22 +784,21 @@ def build_unit_status_text(plant: str, units: list[tuple[str, str]]) -> str | No
         ]
         return "；".join(clauses) + "。"
 
-    grouped: dict[str, list[str]] = {}
-    for key, status in units:
-        grouped.setdefault(status, []).append(_unit_label(plant, key))
+    words = DONGGUAN_STATUS_WORDS if plant == "东莞" else UNIT_STATUS_WORDS
+    unit_suffix = "套机组" if plant == "东莞" else "机组"
+    separator = "，" if plant == "东莞" else "；"
 
-    ordered = sorted(grouped.items(), key=lambda item: _status_rank(item[0]))
-    if plant == "东莞":
-        clauses = [
-            f"{'、'.join(labels)}套机组{DONGGUAN_STATUS_WORDS.get(status, status)}"
-            for status, labels in ordered
-        ]
-        return "，".join(clauses) + "。"
-    clauses = [
-        f"{'、'.join(labels)}机组{UNIT_STATUS_WORDS.get(status, status)}"
-        for status, labels in ordered
-    ]
-    return "；".join(clauses) + "。"
+    # 按「输出用词」聚合：备用/停备/停机都写「备用」，不能因为输入不同就拆成两句。
+    grouped: dict[str, list[str]] = {}
+    ranks: dict[str, int] = {}
+    for key, status in units:
+        word = words.get(status, status)
+        grouped.setdefault(word, []).append(_unit_label(plant, key))
+        ranks[word] = min(ranks.get(word, _status_rank(status)), _status_rank(status))
+
+    ordered = sorted(grouped.items(), key=lambda item: ranks[item[0]])
+    clauses = [f"{'、'.join(labels)}{unit_suffix}{word}" for word, labels in ordered]
+    return separator.join(clauses) + "。"
 
 
 def load_unit_status_texts(date_text: str,
