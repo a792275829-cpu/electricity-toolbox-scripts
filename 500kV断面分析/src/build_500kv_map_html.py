@@ -727,6 +727,7 @@ def main() -> None:
     parser.add_argument("--analysis", required=True, type=Path, help="断面分析 Excel 文件路径")
     parser.add_argument("--output", required=True, type=Path, help="输出 HTML 文件路径")
     parser.add_argument("--node-positions", type=Path, help="已确认的接线图节点锚点 JSON；默认从拓扑文件旁的 data 目录自动发现")
+    parser.add_argument("--threshold", default=80.0, type=float, help="生成分析时使用的价差阈值；作为网页阈值输入的初始值")
     args = parser.parse_args()
 
     build_map_html(
@@ -736,6 +737,7 @@ def main() -> None:
         analysis_path=args.analysis,
         output_path=args.output,
         node_positions_path=args.node_positions,
+        threshold=args.threshold,
     )
     print(f"HTML地图已生成: {args.output}")
 
