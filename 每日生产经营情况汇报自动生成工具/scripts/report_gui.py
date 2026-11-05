@@ -63,7 +63,7 @@ class ReportTool(tk.Tk):
         ttk.Label(root, text="只选择报告日期和三个 Excel 数据源", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor=tk.W)
         ttk.Label(
             root,
-            text="日期口径：报告日用于现货策略和日前出清段落；前一日预留给上网电量段落；前两日预留给日清分表。",
+            text="日期口径：报告日用于现货策略和日前出清段落；前一日预留给上网电量段落；前两日用于日清分表和现货偏差分析。",
             wraplength=860,
         ).pack(anchor=tk.W, pady=(6, 12))
 
@@ -78,7 +78,7 @@ class ReportTool(tk.Tk):
         workbook_box.pack(fill=tk.X, pady=(14, 8))
         self._add_file_row(workbook_box, "前一日 Excel（上网电量预留）：", self.online_workbook, 0)
         self._add_file_row(workbook_box, "报告日 Excel（日前电量/日前价格）：", self.day_ahead_workbook, 1)
-        self._add_file_row(workbook_box, "前两日 Excel（日清分预留）：", self.daily_clearing_workbook, 2)
+        self._add_file_row(workbook_box, "前两日 Excel（日清分表/现货偏差分析）：", self.daily_clearing_workbook, 2)
 
         template_box = ttk.LabelFrame(root, text="Word 模板")
         template_box.pack(fill=tk.X, pady=(4, 8))

@@ -71,8 +71,8 @@ class PerformanceBoundaryTests(unittest.TestCase):
             ), module.clearing_input_cache():
                 ahead = module.load_day_ahead_clearing_summary("2026-10-24", path)
                 prices = module.load_online_price_summary("2026-10-23", path)
-                self.assertEqual(ahead["totalEnergy"], 19.5)
-                self.assertEqual(ahead["companies"]["清远"]["energy"], 12.5)
+                self.assertEqual(ahead["totalEnergy"], 8.25)  # 日前 7 + 清远 (12.5)/10
+                self.assertEqual(ahead["companies"]["清远"]["energy"], 1.25)
                 self.assertEqual(prices["companies"]["归湖"], -30)
                 self.assertEqual(loader.call_count, 1)
                 self.assertIsNone(opened[0]._archive.fp)

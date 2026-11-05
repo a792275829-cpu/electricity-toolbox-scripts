@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 import time
@@ -46,29 +47,87 @@ GUANGDONG_WEATHER_LONGITUDE = 113.2644
 QINGYUAN_DAILY_CLEARING_VALUES = [
     "清  远",
     "清  远",
+    "223",
+    "697",
+    "/",
+    "/",
+    "/",
+    "/",
+    "/",
+    "/",
+    "/",
+    "/",
+    "/",
+    "/",
+    "/",
+    "/",
+    "/",
+    "/",
+    "4",
+    "/",
+    "4",
+    "182",
     "0",
-    "669",
-    "/",
-    "/",
-    "/",
-    "/",
-    "0",
-    "/",
-    "/",
-    "/",
-    "/",
-    "0",
-    "/",
-    "0",
-    "#DIV/0!",
-    "#DIV/0!",
+    "790",
 ]
+
+DAILY_CLEARING_COLUMNS = 24
 
 DAILY_CLEARING_REQUIRED_HEADERS = (
     "实时偏差（较日前）",
     "实际上网偏差（较实时）",
-    "中长期+现货偏差浮盈",
+    "中长期+现货偏差收益",
 )
+
+# 快报（日清分）表列号，与 每日生产经营（分列） 的「复制粘贴页」一致。
+FIRE_COLUMNS = {
+    "中长期电量": 4,
+    "中长期电价": 5,
+    "日前电量": 6,
+    "日前电价": 7,
+    "实时电量": 8,
+    "实时电价": 9,
+    "上网电量": 10,
+    "综合电价": 12,
+    "总电费": 13,
+    "中长期收益": 15,
+    "日前偏差电量": 16,
+    "日前偏差电价": 17,
+    "日前偏差收益": 18,
+    "实时偏差电量": 19,
+    "实时偏差电价": 20,
+    "实时偏差收益": 21,
+    "实际电量": 22,
+    "实际电价": 23,
+    "实际收益": 24,
+    "现货电量": 25,
+    "现货电价": 26,
+    "现货收益": 27,
+    "容量电费": 31,
+}
+
+RENEWABLE_COLUMNS = {
+    "机制电量": 3,
+    "中长期电量": 5,
+    "中长期电价": 6,
+    "日前电量": 7,
+    "日前电价": 8,
+    "实时电量": 9,
+    "实时电价": 10,
+    "上网电量": 11,
+    "综合电价": 13,
+    "总电费": 14,
+    "机制收益": 15,
+    "中长期收益": 16,
+    "日前收益": 19,
+    "实时偏差电量": 20,
+    "实时偏差电价": 21,
+    "实时偏差收益": 22,
+    "实际电量": 23,
+    "实际电价": 24,
+    "实际收益": 25,
+    "现货收益": 28,
+}
 
 
 def log(message: str) -> None:
@@ -201,6 +260,9 @@ def replace_weather_prefix(paragraph, report_date: str) -> None:
     prefix = fetch_guangdong_weather_text(report_date)
     text = paragraph.text
     updated = re.sub(r"^\u672a\u6765\u4e09\u5929.*?\uff0c\u6c14\u6e29\s*.*?\u2103\s*-\s*.*?\u2103\uff0c", prefix, text, count=1)
+    if updated == text:
+        # 新模板写作「…，气温于23-30℃之间波动；」，只有一处 ℃，按分句截断。
+        updated = re.sub(r"^\u672a\u6765\u4e09\u5929.*?\uff0c\u6c14\u6e29[^\uff1b;\u3002]*[\uff1b;\u3002]", prefix, text, count=1)
     if updated == text:
         updated = prefix + text
     replace_paragraph(paragraph, updated)
@@ -386,6 +448,403 @@ def load_online_price_summary(date_text: str, workbook_path: Path | None = None)
     }
 
 
+def _cell_number(sheet, row: int, column: int) -> float | None:
+    value = sheet.cell(row, column).value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _pick_sheet(workbook, keyword: str, *, exclude: tuple[str, ...] = ()):
+    for name in workbook.sheetnames:
+        if keyword in name and not any(token in name for token in exclude):
+            return workbook[name]
+    raise KeyError(f"{workbook} 中未找到包含「{keyword}」的工作表")
+
+
+def _locate_row(sheet, *, label: str | None = None, sublabel: str | None = None,
+                start: int = 1, end: int | None = None) -> int:
+    last = end if end is not None else sheet.max_row
+    for row in range(start, last + 1):
+        first = sheet.cell(row, 1).value
+        second = sheet.cell(row, 2).value
+        first = first.strip() if isinstance(first, str) else None
+        second = second.strip() if isinstance(second, str) else None
+        if label is not None and first != label:
+            continue
+        if sublabel is not None:
+            if second != sublabel:
+                continue
+            if first not in (None, label or first):
+                continue
+        if label is not None or sublabel is not None:
+            return row
+    target = label or sublabel or ""
+    raise KeyError(f"{sheet.title} 中未找到行：{target}")
+
+
+def _clear_int(value: float | None) -> str:
+    """按 0 位小数格式化；负值四舍五入到 0 时保留 -0，与 Excel 显示一致。"""
+    if value is None:
+        return "/"
+    negative = value < 0
+    rounded = int(abs(value) + 0.5)
+    if rounded == 0:
+        return "-0" if negative else "0"
+    return f"-{rounded}" if negative else str(rounded)
+
+
+def _add(*values: float | None) -> float | None:
+    if any(value is None for value in values):
+        return None
+    return sum(values)  # type: ignore[arg-type]
+
+
+def _weighted_price(pairs: list[tuple[float | None, float | None]]) -> float | None:
+    usable = [(weight, price) for weight, price in pairs if weight and price is not None]
+    total = sum(weight for weight, _ in usable)
+    if not total:
+        return None
+    return sum(weight * price for weight, price in usable) / total
+
+
+def _energy_price(total_fee: float | None, capacity_fee: float | None,
+                  online_energy: float | None) -> float | None:
+    if not online_energy:
+        return 0.0
+    if total_fee is None:
+        return None
+    return (total_fee - (capacity_fee or 0.0)) / online_energy * 1000
+
+
+def _fire_row(sheet, row: int) -> dict[str, float | None]:
+    return {name: _cell_number(sheet, row, column) for name, column in FIRE_COLUMNS.items()}
+
+
+def _renewable_row(sheet, row: int) -> dict[str, float | None]:
+    return {name: _cell_number(sheet, row, column) for name, column in RENEWABLE_COLUMNS.items()}
+
+
+def _fire_table_values(source: dict[str, float | None], *, spot_income: float | None,
+                       total_fee: float | None, energy_price: float | None,
+                       composite_price: float | None, blank_online: bool = False,
+                       spot_blank: bool = False) -> dict[int, str]:
+    long_term_income = source.get("中长期收益")
+    returns = None if spot_income is None else spot_income + (long_term_income or 0.0)
+    return {
+        3: _clear_int(source.get("中长期电量")),
+        4: _clear_int(source.get("中长期电价")),
+        5: _clear_int(source.get("日前电量")),
+        6: _clear_int(source.get("日前电价")),
+        7: _clear_int(source.get("实时电量")),
+        8: _clear_int(source.get("实时电价")),
+        9: "/" if blank_online else _clear_int(source.get("上网电量")),
+        10: _clear_int(source.get("日前偏差电量")),
+        11: _clear_int(source.get("日前偏差电价")),
+        12: _clear_int(source.get("日前偏差收益")),
+        13: _clear_int(source.get("实时偏差电量")),
+        14: _clear_int(source.get("实时偏差电价")),
+        15: _clear_int(source.get("实时偏差收益")),
+        16: _clear_int(source.get("实际电量")),
+        17: _clear_int(source.get("实际电价")),
+        18: _clear_int(source.get("实际收益")),
+        19: _clear_int(long_term_income),
+        20: "/" if (spot_blank or spot_income is None) else _clear_int(spot_income),
+        21: _clear_int(returns if not spot_blank else long_term_income),
+        22: _clear_int(total_fee),
+        23: _clear_int(energy_price),
+        24: _clear_int(composite_price),
+    }
+
+
+def _renewable_table_values(source: dict[str, float | None]) -> dict[int, str]:
+    long_term_income = source.get("中长期收益")
+    spot_income = source.get("现货收益")
+    returns = None if spot_income is None else spot_income + (long_term_income or 0.0)
+    return {
+        3: _clear_int(source.get("中长期电量")),
+        4: _clear_int(source.get("中长期电价")),
+        5: _clear_int(source.get("日前电量")),
+        6: _clear_int(source.get("日前电价")),
+        7: _clear_int(source.get("实时电量")),
+        8: _clear_int(source.get("实时电价")),
+        9: _clear_int(source.get("上网电量")),
+        10: _clear_int(source.get("机制电量")),
+        11: _clear_int(source.get("机制收益")),
+        12: _clear_int(source.get("日前收益")),
+        13: _clear_int(source.get("实时偏差电量")),
+        14: _clear_int(source.get("实时偏差电价")),
+        15: _clear_int(source.get("实时偏差收益")),
+        16: _clear_int(source.get("实际电量")),
+        17: _clear_int(source.get("实际电价")),
+        18: _clear_int(source.get("实际收益")),
+        19: _clear_int(long_term_income),
+        20: _clear_int(spot_income),
+        21: "/" if returns is None else _clear_int(returns),
+        22: _clear_int(source.get("总电费")),
+        23: _clear_int(_energy_price(source.get("总电费"), source.get("机制收益"),
+                                    source.get("上网电量"))),
+        24: _clear_int(source.get("综合电价")),
+    }
+
+
+def load_daily_clearing_inputs(date_text: str,
+                               workbook_path: Path | None = None) -> dict[str, Any]:
+    """读取 D-2 日出清情况工作簿，生成日清分表各行的取值与现货偏差分析用数。"""
+    if workbook_path is None:
+        workbook_path = find_clearing_workbook(date_text)
+    workbook = load_workbook(workbook_path, data_only=True)
+    try:
+        brief = _pick_sheet(workbook, "快报", exclude=("日前",))
+        qingyuan_row = _locate_row(brief, label="清远", sublabel="合计")
+        haimen_row = _locate_row(brief, label="海门", sublabel="合计")
+        shantou_row = _locate_row(brief, label="汕头", sublabel="合计")
+        company_row = _locate_row(brief, label="分公司")
+        dongguan_row = _locate_row(brief, label="东莞", sublabel="合计")
+
+        shantou_1 = _fire_row(brief, _locate_row(brief, sublabel="#1机组", start=shantou_row,
+                                                 end=haimen_row))
+        shantou_2 = _fire_row(brief, _locate_row(brief, sublabel="#2机组", start=shantou_row,
+                                                 end=haimen_row))
+        shantou_3 = _fire_row(brief, _locate_row(brief, sublabel="#3机组", start=shantou_row,
+                                                 end=haimen_row))
+        combined = {
+            name: _add(shantou_2.get(name), shantou_3.get(name))
+            for name in ("中长期电量", "日前电量", "实时电量", "上网电量", "中长期收益",
+                         "日前偏差电量", "实时偏差电量", "实际电量",
+                         "日前偏差收益", "实时偏差收益", "实际收益", "总电费", "容量电费")
+        }
+        for name, weight_name in (("中长期电价", "中长期电量"), ("日前电价", "日前电量"),
+                                  ("实时电价", "实时电量"), ("日前偏差电价", "日前偏差电量"),
+                                  ("实时偏差电价", "实时偏差电量"), ("实际电价", "实际电量")):
+            combined[name] = _weighted_price([
+                (shantou_2.get(weight_name), shantou_2.get(name)),
+                (shantou_3.get(weight_name), shantou_3.get(name)),
+            ])
+        denominator = _add(shantou_3.get("中长期电量"), shantou_3.get("现货电量"),
+                           shantou_2.get("中长期电量"), shantou_2.get("现货电量"))
+        if denominator and shantou_2.get("总电费") is not None and shantou_3.get("总电费") is not None:
+            combined["综合电价"] = (shantou_2["总电费"] + shantou_3["总电费"]) / denominator * 1000
+        else:
+            combined["综合电价"] = None
+
+        company = _fire_row(brief, company_row)
+        shantou = _fire_row(brief, shantou_row)
+        haimen = _fire_row(brief, haimen_row)
+        dongguan = _fire_row(brief, dongguan_row)
+        qingyuan = _fire_row(brief, qingyuan_row)
+
+        # 「现货偏差收益」口径：汕头/东莞取现货偏差合计边际贡献，海门取三项偏差边际贡献之和，
+        # 分公司 = 三厂之和（不含清远），与「每日生产经营（分列）」表一致。
+        shantou_spot = shantou.get("现货收益")
+        dongguan_spot = dongguan.get("现货收益")
+        haimen_spot = _add(haimen.get("日前偏差收益"), haimen.get("实时偏差收益"),
+                           haimen.get("实际收益"))
+        company_spot = _add(shantou_spot, haimen_spot, dongguan_spot)
+        company_fee = _add(shantou.get("总电费"), haimen.get("总电费"),
+                           dongguan.get("总电费"), qingyuan.get("总电费"))
+
+        rows: list[tuple[str, str | None, dict[int, str]]] = [
+            ("分公司火电", None, _fire_table_values(
+                company, spot_income=company_spot, total_fee=company_fee,
+                energy_price=_energy_price(company.get("总电费"), company.get("容量电费"),
+                                           company.get("上网电量")),
+                composite_price=company.get("综合电价"))),
+            ("汕头", None, _fire_table_values(
+                shantou, spot_income=shantou_spot, total_fee=shantou.get("总电费"),
+                energy_price=_energy_price(shantou.get("总电费"), shantou.get("容量电费"),
+                                           shantou.get("上网电量")),
+                composite_price=shantou.get("综合电价"))),
+            ("汕头", "#1", _fire_table_values(
+                shantou_1, spot_income=shantou_1.get("现货收益"),
+                total_fee=shantou_1.get("总电费"),
+                energy_price=_energy_price(shantou_1.get("总电费"), shantou_1.get("容量电费"),
+                                           shantou_1.get("上网电量")),
+                composite_price=shantou_1.get("综合电价"))),
+            ("汕头", "#2#3", _fire_table_values(
+                combined, spot_income=_add(shantou_2.get("现货收益"), shantou_3.get("现货收益")),
+                total_fee=combined.get("总电费"),
+                energy_price=_energy_price(combined.get("总电费"), combined.get("容量电费"),
+                                           combined.get("上网电量")),
+                composite_price=combined.get("综合电价"))),
+            ("海门", None, _fire_table_values(
+                haimen, spot_income=haimen_spot, total_fee=haimen.get("总电费"),
+                energy_price=_energy_price(haimen.get("总电费"), haimen.get("容量电费"),
+                                           haimen.get("上网电量")),
+                composite_price=haimen.get("综合电价"))),
+            ("东莞", None, _fire_table_values(
+                dongguan, spot_income=dongguan_spot, total_fee=dongguan.get("总电费"),
+                energy_price=_energy_price(dongguan.get("总电费"), dongguan.get("容量电费"),
+                                           dongguan.get("上网电量")),
+                composite_price=dongguan.get("综合电价"))),
+            ("清远", None, _fire_table_values(
+                qingyuan, spot_income=None, total_fee=qingyuan.get("总电费"),
+                energy_price=0.0,
+                composite_price=qingyuan.get("综合电价") or 0.0,
+                blank_online=True, spot_blank=True)),
+        ]
+
+        heading = next((row for row in range(company_row, brief.max_row + 1)
+                        if isinstance(brief.cell(row, 1).value, str)
+                        and brief.cell(row, 1).value.strip() == "新能源"), None)
+        if heading is not None:
+            renewable_rows = {
+                "分公司新能源": _locate_row(brief, label="分公司", start=heading),
+                "海风": _locate_row(brief, label="汕头海风", start=heading),
+                "鮀莲": _locate_row(brief, label="鮀莲光伏", start=heading),
+                "归湖": _locate_row(brief, label="归湖光伏", start=heading),
+            }
+            for label, row in renewable_rows.items():
+                rows.append((label, None, _renewable_table_values(_renewable_row(brief, row))))
+        else:
+            log("快报中未找到新能源区，新能源各行保留模板原值")
+
+        spot = _load_spot_deviation(workbook)
+    finally:
+        workbook.close()
+    return {
+        "workbook": str(workbook_path),
+        "rows": rows,
+        "spot": spot,
+    }
+
+
+def _node_price_range(workbook, sheet_names: tuple[str, ...]) -> tuple[float | None, float | None]:
+    """按「实时最低价／实时最高价」标签跨厂取极值，避免写死 AF/AL 列号。"""
+    lows: list[float] = []
+    highs: list[float] = []
+    for name in sheet_names:
+        if name not in workbook.sheetnames:
+            continue
+        sheet = workbook[name]
+        for row in range(1, min(sheet.max_row, 40) + 1):
+            for column in range(1, sheet.max_column + 1):
+                value = sheet.cell(row, column).value
+                if not isinstance(value, str):
+                    continue
+                label = value.strip()
+                if label not in ("实时最低价", "实时最高价"):
+                    continue
+                values = [
+                    _cell_number(sheet, row, column + offset)
+                    for offset in range(1, 5)
+                ]
+                numbers = [item for item in values if item is not None]
+                if not numbers:
+                    continue
+                (lows if label == "实时最低价" else highs).extend(numbers)
+    return (min(lows) if lows else None, max(highs) if highs else None)
+
+
+def _load_spot_deviation(workbook) -> dict[str, Any] | None:
+    if "分公司" not in workbook.sheetnames:
+        return None
+    sheet = workbook["分公司"]
+    row = _locate_row(sheet, label="分公司火电")
+    capacity = _cell_number(sheet, row, 2)
+    realtime_energy = _cell_number(sheet, row, 7)
+    deviation = _cell_number(sheet, row, 11)
+    low, high = _node_price_range(workbook, ("汕头", "海门", "东莞"))
+    rate = None
+    if capacity and realtime_energy is not None:
+        rate = round(realtime_energy / (capacity * 24), 3) * 100
+    return {
+        "realtimeEnergy": realtime_energy,
+        "deviation": deviation,
+        "loadRate": rate,
+        "minPrice": low,
+        "maxPrice": high,
+        "realtimePrice": _cell_number(sheet, row, 8),
+        "dayAheadPrice": _cell_number(sheet, row, 6),
+        "actualDeviation": _cell_number(sheet, row, 13),
+        "income": _cell_number(sheet, row, 14),
+    }
+
+
+def _round_half_up(value: float, digits: int = 0) -> float:
+    factor = 10 ** digits
+    return math.floor(abs(value) * factor + 0.5) / factor * (1 if value >= 0 else -1)
+
+
+def _fmt_price(value: float | None) -> str:
+    if value is None:
+        return "—"
+    text = f"{_round_half_up(value, 2):.2f}".rstrip("0").rstrip(".")
+    return text if text not in ("", "-0") else "0"
+
+
+def _fmt_amount(value: float | None) -> str:
+    if value is None:
+        return "—"
+    return str(int(_round_half_up(value, 0)))
+
+
+def build_spot_deviation_texts(spot: dict[str, Any]) -> tuple[str, str]:
+    rate = spot.get("loadRate")
+    rate_text = "—" if rate is None else f"{rate:.1f}"
+    realtime = (
+        f"南方分公司实时出清电量{_fmt_amount(spot.get('realtimeEnergy'))}万千瓦时，"
+        f"偏差电量（较日前）{_fmt_price(spot.get('deviation'))}万千瓦时，"
+        f"平均运行负荷率{rate_text}%，"
+        f"最低节点电价{_fmt_price(spot.get('minPrice'))}元/MWh，"
+        f"最高节点电价{_fmt_price(spot.get('maxPrice'))}元/MWh，"
+        f"加权均价为{_fmt_price(spot.get('realtimePrice'))}元/MWh"
+        f"（日前：{_fmt_price(spot.get('dayAheadPrice'))}元/MWh）。"
+    )
+    actual = (
+        f"南方分公司火电机组实际上网偏差电量为{_fmt_amount(spot.get('actualDeviation'))}万千瓦时，"
+        f"实现{_fmt_amount(spot.get('income'))}万元增收。"
+    )
+    return realtime, actual
+
+
+def _label_key(cell) -> str:
+    return re.sub(r"\s+", "", cell.text) if cell is not None else ""
+
+
+def _document_row_index(table, label: str, sublabel: str | None = None) -> int | None:
+    for index, row in enumerate(table.rows):
+        cells = row.cells
+        first = _label_key(cells[0]) if cells else ""
+        second = _label_key(cells[1]) if len(cells) > 1 else ""
+        if sublabel is None:
+            if first == label:
+                return index
+        elif second == sublabel and (first in ("", label)):
+            return index
+    return None
+
+
+def fill_daily_clearing_table(table, rows: list[tuple[str, str | None, dict[int, str]]]) -> int:
+    if len(table.columns) != DAILY_CLEARING_COLUMNS:
+        log("日清分表不是 24 列新版结构，跳过自动填数")
+        return 0
+    filled = 0
+    for label, sublabel, values in rows:
+        row_index = _document_row_index(table, label, sublabel)
+        if row_index is None:
+            log(f"日清分表未找到 {label}{sublabel or ''} 行，跳过")
+            continue
+        cells = table.rows[row_index].cells
+        for column, text in values.items():
+            if column <= len(cells):
+                replace_cell_text(cells[column - 1], text)
+        filled += 1
+    return filled
+
+
+def fill_spot_deviation_analysis(document, texts: tuple[str, str]) -> bool:
+    targets = (("日前-实时：", texts[0]), ("实际-实时：", texts[1]))
+    if not all(any(paragraph.text.strip() == label for paragraph in document.paragraphs)
+               for label, _ in targets):
+        log("模板不是「日前-实时／实际-实时」两段式，跳过现货偏差分析填数")
+        return False
+    for label, text in targets:
+        label_paragraph = find_exact_paragraph(document, label)
+        replace_paragraph(next_nonempty_paragraph(document, label_paragraph), text)
+    return True
+
+
 def copy_run_format(source, target) -> None:
     source_rpr = source._element.rPr
     if source_rpr is not None:
@@ -502,14 +961,14 @@ def ensure_qingyuan_daily_clearing_row(table) -> None:
     new_element = deepcopy(dongguan._tr)
     dongguan._tr.addnext(new_element)
     new_row = next(row for row in table.rows if row._tr is new_element)
-    if len(new_row.cells) != len(QINGYUAN_DAILY_CLEARING_VALUES):
+    if len(new_row.cells) != DAILY_CLEARING_COLUMNS:
         raise ValueError("日清分表列数与清远数据不匹配")
     for cell, value in zip(new_row.cells, QINGYUAN_DAILY_CLEARING_VALUES):
         replace_cell_text(cell, value)
 
 
 def is_current_daily_clearing_table(table) -> bool:
-    if len(table.columns) != len(QINGYUAN_DAILY_CLEARING_VALUES):
+    if len(table.columns) != DAILY_CLEARING_COLUMNS:
         return False
     header_text = "".join(cell.text.replace("\n", "") for row in table.rows[:2] for cell in row.cells)
     labels = {re.sub(r"\s+", "", row.cells[0].text) for row in table.rows}
@@ -861,6 +1320,15 @@ def generate(
     with clearing_input_cache():
         day_ahead_clearing = load_day_ahead_clearing_summary(plan["dayAheadDate"], day_ahead_workbook)
         online_prices = load_online_price_summary(plan["actualOnlineEnergyDate"], online_workbook)
+    daily_clearing_error = None
+    daily_filled_rows = 0
+    spot_filled = False
+    try:
+        daily_clearing = load_daily_clearing_inputs(plan["dailyClearingDate"], daily_clearing_workbook)
+    except Exception as exc:
+        daily_clearing = None
+        daily_clearing_error = str(exc)
+        log(f"日清分表自动取数失败，已保留模板原值：{daily_clearing_error}")
     doc = Document(actual_template_path)
     ensure_qingyuan_template_content(doc)
     startup_dates = startup_date_paragraphs(doc)
@@ -881,6 +1349,12 @@ def generate(
     replace_paragraph(next_nonempty_paragraph(doc, strategy_heading), build_strategy_text(payload))
     table_title = find_paragraph(doc, lambda text: text.startswith("表1"))
     replace_paragraph(table_title, f"表1  {date_label(plan['dailyClearingDate'])}分公司日清分情况")
+    if daily_clearing is not None:
+        daily_filled_rows = fill_daily_clearing_table(doc.tables[0], daily_clearing["rows"])
+        if daily_clearing.get("spot"):
+            spot_filled = fill_spot_deviation_analysis(
+                doc, build_spot_deviation_texts(daily_clearing["spot"])
+            )
     day_ahead_heading = find_exact_paragraph(doc, "1.日前市场")
     replace_paragraph(next_nonempty_paragraph(doc, day_ahead_heading), build_day_ahead_market_text(payload))
     actual_heading = find_exact_paragraph(doc, "2.实时市场")
@@ -927,12 +1401,17 @@ def generate(
         "dayAheadBaseTotalEnergy": day_ahead_clearing["baseTotalEnergy"],
         "dayAheadTotalEnergy": day_ahead_clearing["totalEnergy"],
         "dailyClearingWorkbook": str(daily_clearing_workbook) if daily_clearing_workbook else None,
+        "dailyClearingSource": daily_clearing["workbook"] if daily_clearing else None,
+        "dailyClearingRows": daily_filled_rows,
+        "spotDeviationFilled": spot_filled,
+        "dailyClearingError": daily_clearing_error,
         "weatherError": weather_error,
         "knownGaps": [
             "P13 上网电量来源尚未确认，电量暂保留模板原文；日前均价来自报告日出清情况 Excel 的快报（日前）工作表。",
             "P14 日前出清电量和日前价格来自报告日出清情况 Excel；火电取快报（日前）F/G，新能源按表头取 G/H，清远计划电量取基础信息!AA64+AC64 后除以10，并计入分公司总电量。",
             "P29 未来三天最高负荷来源尚未确认，暂不替换。",
-            "日清分表和现货偏差分析已按新版模板保留，自动填充数据源尚未接入。",
+            "日清分表取 D-2 日出清情况工作簿「快报」表；分公司现货偏差收益按各厂合计（汕头/东莞取现货偏差合计边际贡献，海门取三项偏差边际贡献之和）。",
+            "现货偏差分析取 D-2 日出清情况工作簿「分公司」表，节点电价按各厂「实时最低价/实时最高价」跨厂取极值。",
         ],
     }
     audit_path.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")

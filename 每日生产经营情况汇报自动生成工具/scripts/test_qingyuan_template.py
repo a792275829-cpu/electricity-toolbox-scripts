@@ -65,7 +65,7 @@ class QingyuanTemplateTests(unittest.TestCase):
         )
         table = document.tables[0]
         self.assertTrue(is_current_daily_clearing_table(table))
-        self.assertEqual(len(table.columns), 18)
+        self.assertEqual(len(table.columns), 24)
         header_text = "".join(cell.text.replace("\n", "") for row in table.rows[:2] for cell in row.cells)
         for header in DAILY_CLEARING_REQUIRED_HEADERS:
             self.assertIn(header, header_text)
@@ -74,8 +74,8 @@ class QingyuanTemplateTests(unittest.TestCase):
         bias_index = paragraphs.index("3.现货偏差分析")
         forecast_index = paragraphs.index("五、短期市场预测")
         self.assertLess(bias_index, forecast_index)
-        self.assertTrue(paragraphs[bias_index + 1].startswith("分公司日前实时偏差"))
-        self.assertTrue(paragraphs[bias_index + 2].startswith("实际上网偏差"))
+        self.assertEqual(paragraphs[bias_index + 1], "日前-实时：")
+        self.assertEqual(paragraphs[bias_index + 3], "实际-实时：")
 
     def test_legacy_structure_is_upgraded_from_canonical_template(self) -> None:
         document = Document()
@@ -98,10 +98,13 @@ class QingyuanTemplateTests(unittest.TestCase):
         )
         online_text = document.paragraphs[heading_index + 1].text
         day_ahead_text = document.paragraphs[heading_index + 2].text
-        self.assertIn("、清远0万千瓦时；", online_text)
-        self.assertIn("、清远（计划）0万千瓦时；", day_ahead_text)
+        self.assertIn("清远", online_text)
+        self.assertIn("清远（计划）", day_ahead_text)
 
-        legacy_online = online_text.replace("、清远0万千瓦时", "")
+        legacy_online = (
+            "11月3日分公司上网电量6228万千瓦时，其中，汕头1279万、海门3449万、"
+            "东莞970万、海上风电207万、光伏95万千瓦时；分公司日前均价160厘/千瓦时。"
+        )
         upgraded_online = ensure_qingyuan_online_energy_text(legacy_online)
         self.assertEqual(upgraded_online.count("清远0万千瓦时"), 1)
         self.assertEqual(ensure_qingyuan_online_energy_text(upgraded_online), upgraded_online)
