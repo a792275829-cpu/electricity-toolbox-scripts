@@ -84,6 +84,13 @@ class BatchPlanNodeTests(unittest.TestCase):
         )
         self.assertEqual(body, {"files": 2, "map": True, "cn": True})
 
+    def test_source_codes_map_to_human_readable_names(self) -> None:
+        result = self.run_node(
+            "console.log(JSON.stringify({a:m.sourceName('1'), b:m.sourceName(101),"
+            " c:m.sourceName('GUO_HN_RI_XIN'), d:m.sourceName('')}));"
+        )
+        self.assertEqual(result, {"a": "电力交易平台", "b": "国能日新", "c": "国能日新", "d": ""})
+
     def test_new_energy_source_map_covers_declare_and_raw(self) -> None:
         result = self.run_node(
             "console.log(JSON.stringify({\n"

@@ -69,6 +69,30 @@ export const POWER_SOURCES = {
   调度OPS平台: 'DISPATCH_OPS_PLATFORM',
 };
 
+// 列表接口里 personalDataSource 是数字 id，日志按中文名显示。
+export const SOURCE_NAMES = {
+  0: '其他',
+  1: '电力交易平台',
+  2: '调度OPS平台',
+  100: '北京东润环能',
+  101: '国能日新',
+  102: '南瑞',
+  103: '北京华软恒信',
+  BEIJING_DR_HN: '北京东润环能',
+  GUO_HN_RI_XIN: '国能日新',
+  NAN_RUI: '南瑞',
+  BEIJING_HR_HX: '北京华软恒信',
+  ELECTRIC_TRADE_PLATFORM: '电力交易平台',
+  DISPATCH_OPS_PLATFORM: '调度OPS平台',
+  OTHER: '其他',
+};
+
+export function sourceName(value) {
+  const key = String(value ?? '').trim();
+  if (!key) return '';
+  return SOURCE_NAMES[key] ?? key;
+}
+
 /**
  * personalDataTypeSourceMap：新能源单元的功率预测数据必须带来源，否则该行无法定位。
  * 申报功率预测数据只有“调度OPS平台”一个选项，直接固定；原始功率预测数据由用户选。

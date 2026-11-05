@@ -36,7 +36,7 @@ node scripts/upload-private-data.mjs --batch --unit 汕头 \
 node scripts/upload-private-data.mjs --status --unit 汕头 --date 2026-11-05
 ```
 
-只读，不写入。走页面同款 `GET /gdfire/api/data/personal?startTime=&endTime=&currentTime=&dataTypes=TRADE`，逐条打印数据项、包含机组、`已上传／未上传` 与更新时间；日期默认取北京时间当天。
+只读，不写入。走页面同款 `GET /gdfire/api/data/personal?startTime=&endTime=&currentTime=&dataTypes=TRADE&dataTypes=POWER_GENERATE&dataTypes=MONTH`（三类要重复传，用逗号串会被接口拒绝），逐条打印数据项、包含机组、数据来源、`已上传／未上传` 与更新时间；日期默认取北京时间当天。
 
 账号由工具箱统一配置。两条上传路径各自保留独立的 `auth_state.json`、锁文件和浏览器目录，可以并行运行：
 

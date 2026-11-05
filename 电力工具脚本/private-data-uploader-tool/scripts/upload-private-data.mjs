@@ -15,6 +15,7 @@ import {
   isAllowedFile,
   planBatches,
   resolveTarget,
+  sourceName,
   summarizeImport,
 } from './batch-plan.mjs';
 
@@ -577,9 +578,16 @@ async function postBatch(context, config, batch, fields) {
 async function fetchImportStatus(context, config, dates) {
   const start = dates[0];
   const end = dates[dates.length - 1];
-  // 与页面一致：dataTypes 传分类标记 TRADE，返回体在 data.data 里。
-  const response = await context.request.get(`${config.baseUrl}/gdfire/api/data/personal`, {
-    params: { startTime: start, endTime: end, currentTime: start, dataTypes: 'TRADE' },
+  // 与页面同款：dataTypes 需重复传（数组参数），固定覆盖现货、功率预测、月度三类。
+  const query = [
+    `startTime=${start}`,
+    `endTime=${end}`,
+    `currentTime=${start}`,
+    'dataTypes=TRADE',
+    'dataTypes=POWER_GENERATE',
+    'dataTypes=MONTH',
+  ].join('&');
+  const response = await context.request.get(`${config.baseUrl}/gdfire/api/data/personal?${query}`, {
     timeout: 30_000,
   }).catch(() => undefined);
   if (!response || response.status() >= 400) return undefined;
@@ -587,6 +595,19 @@ async function fetchImportStatus(context, config, dates) {
   if (body?.retCode !== 'T200') return undefined;
   const rows = body?.data?.data ?? body?.data?.records ?? body?.data;
   return Array.isArray(rows) ? rows : [];
+}
+
+function formatStatusRow(row) {
+  const units = Array.isArray(row.units) ? row.units.join('、') : row.units;
+  const source = sourceName(row.personalDataSource);
+  return [
+    String(row.date ?? '').slice(0, 10),
+    row.dataType,
+    units,
+    source ? `来源:${source}` : '',
+    String(row.importStatus) === '1' ? '已上传' : '未上传',
+    row.updateTime,
+  ].filter(Boolean).join(' | ');
 }
 
 async function logImportStatus(context, config, items) {
@@ -601,9 +622,10 @@ async function logImportStatus(context, config, items) {
     return;
   }
   const pending = rows.filter((row) => String(row.importStatus) !== '1');
-  log(`回读 ${dates.map((value) => String(value).slice(0, 10)).join('、')}：共 ${rows.length} 条记录，已上传 ${rows.length - pending.length} 条，未上传 ${pending.length} 条。`);
+  const monthly = rows.some((row) => String(row.dataType ?? '').includes('月度'));
+  log(`回读 ${dates.map((value) => String(value).slice(0, 10)).join('、')}：共 ${rows.length} 条记录${monthly ? '（含月度账单）' : ''}，已上传 ${rows.length - pending.length} 条，未上传 ${pending.length} 条。`);
   for (const row of pending.slice(0, 20)) {
-    log(`   未上传：${String(row.date ?? '').slice(0, 10)} ${row.dataType ?? ''} ${row.updateTime ?? ''}`.trim());
+    log(`   未上传：${formatStatusRow(row)}`);
   }
 }
 
@@ -629,10 +651,7 @@ async function runStatus(config, args) {
     const rows = await fetchImportStatus(context, config, [day]);
     if (rows === undefined) throw new Error('数据状态查询失败，请检查登录态或接口是否变更。');
     log(`共 ${rows.length} 条记录：`);
-    for (const row of rows) {
-      const status = String(row.importStatus) === '1' ? '已上传' : '未上传';
-      log(`   ${[row.date, row.dataType, row.units, status, row.updateTime].filter(Boolean).join(' | ')}`);
-    }
+    for (const row of rows) log(`   ${formatStatusRow(row)}`);
     await saveAuthState(context, config);
   } finally {
     await context?.close().catch(() => {});
