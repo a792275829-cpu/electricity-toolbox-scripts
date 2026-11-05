@@ -92,8 +92,9 @@ class ManualKernelTests(unittest.TestCase):
                 for separator in ("：", ":", "\n"):
                     with self.subTest(title=title, prefix=prefix, separator=separator):
                         rows = _strategy_lines(f"{prefix}{title}{separator}策略总述。\n东莞厂也需要调整报价。\n3.东莞厂独立策略。")
-                        self.assertEqual([r["plant"] for r in rows], [title, "东莞厂"])
-                        self.assertEqual(_split_strategy_profit(rows[0])["plant"], "粤东区域")
+                        # 区域标题不再成块：段落保持原样，标签留空。
+                        self.assertEqual([r["plant"] for r in rows], ["", "东莞厂"])
+                        self.assertEqual(_split_strategy_profit(rows[0])["plant"], "")
                         self.assertIn("东莞厂也需要调整报价", rows[0]["text"])
         notes = ["1、原始备注。", "注：含税（13%）口径。", "注:原始公式。"]
         table = {"column_widths": [42], "rows": [{"cells": [{"value": v}]} for v in ["电价", *notes]]}
@@ -352,14 +353,14 @@ class ManualPdfTests(unittest.TestCase):
                   "day_ahead": {"cards": []}, "realtime": {"cards": []},
                   "operations": {"dates": [], "rows": []},
                   "appendices": {"day_ahead": table, "realtime": {"rows": [], "column_widths": []}},
-                  "strategies": [{"plant": "粤东区域运行策略研究", "text": "策略总述。"}]}
+                  "strategies": [{"plant": "汕头厂", "text": "策略总述。"}]}
         with tempfile.TemporaryDirectory() as directory:
             _, phone, printing = pipeline._render_concise_outputs(Path(directory), report, lambda _: None)
             self.assertEqual(len(PdfReader(phone).pages), 1)
             for output in (phone, printing):
                 text = "".join(page.extract_text() for page in PdfReader(output).pages)
-                self.assertIn("粤东区域", text)
-                self.assertNotIn("粤东区域运行策略研究", text)
+                self.assertIn("汕头厂", text)
+                self.assertNotIn("粤东区域", text)
                 self.assertIn("-50", text)
                 self.assertIn("13%", text)
 

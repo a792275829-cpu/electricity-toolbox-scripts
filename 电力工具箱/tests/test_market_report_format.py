@@ -32,7 +32,7 @@ def thermal_payload(coal, gas, *, realtime=False):
 
 
 class MarketReportFormatTests(unittest.TestCase):
-    def test_regional_strategy_keeps_paragraphs_and_each_plants_profit(self):
+    def test_regional_strategy_keeps_paragraphs_without_regional_heading(self):
         for title in ("粤东策略", "粤东区域运行策略", "粤东区域运行策略研究"):
             with self.subTest(title=title):
                 text = (
@@ -43,12 +43,33 @@ class MarketReportFormatTests(unittest.TestCase):
                     "3.东莞厂独立策略。"
                 )
                 rows = _strategy_lines(text)
-                self.assertEqual([row["plant"] for row in rows], [title, "东莞厂"])
-                paragraphs = _split_strategy_profit(rows[0])["paragraphs"]
+                # 区域段落不再单独成块，也不输出「粤东区域」标题。
+                self.assertEqual([row["plant"] for row in rows], ["", "东莞厂"])
+                prepared = _split_strategy_profit(rows[0])
+                self.assertEqual(prepared["plant"], "")
+                paragraphs = prepared["paragraphs"]
                 self.assertEqual(len(paragraphs), 6)
                 self.assertIn("东莞厂也受需求变化影响。", paragraphs)
                 self.assertIn("汕头厂各机组日前偏差收益分别为：15万元", paragraphs[-2])
                 self.assertIn("海门厂各机组日前偏差收益分别为：70万元", paragraphs[-1])
+
+    def test_regional_strategy_splits_labelled_paragraphs_into_three_plants(self):
+        text = (
+            "2. 各厂报价策略与收益\n粤东区域：\n"
+            "500kV线路：胪盘乙线检修至12月底。\n"
+            "汕头厂：同步调整汕头厂策略。各机组日前收益分别为：68万元、-105万元、-20万元。\n"
+            "海门厂：动态优化报价策略。各机组日前收益分别为：-272万元、425万元、-275万元与474万元。\n"
+            "3.东莞厂：动态调整报价策略。各机组日前收益分别为：56万元、69万元、-76万元与-44万元。"
+        )
+        rows = _strategy_lines(text)
+        self.assertEqual([row["plant"] for row in rows], ["", "汕头厂", "海门厂", "东莞厂"])
+        prepared = [_split_strategy_profit(row) for row in rows]
+        self.assertNotIn("粤东", "".join(item["plant"] for item in prepared))
+        self.assertEqual(prepared[0]["paragraphs"], ["500kV线路：胪盘乙线检修至12月底。"])
+        self.assertIn("同步调整汕头厂策略", prepared[1]["body_text"])
+        self.assertIn("68万元", prepared[1]["profit_text"])
+        self.assertIn("-272万元", prepared[2]["profit_text"])
+        self.assertIn("56万元", prepared[3]["profit_text"])
 
     def test_coal_uses_first_mode_and_gas_uses_1900_for_both_dates(self):
         current = thermal_payload([115] * 12 + [113] * 12, [90] + [30] * 18 + [55] + [40] * 3 + [80])

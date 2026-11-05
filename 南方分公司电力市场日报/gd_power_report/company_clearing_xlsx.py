@@ -955,6 +955,32 @@ def _operation_table(
     return {"dates": dates, "rows": rows}
 
 
+PLANT_SECTION_RE = re.compile(r"[ \t]*(?P<plant>汕头|海门|东莞)(?:电厂|厂)?[ \t]*[：:][ \t]*")
+
+
+def _plant_sections(lines: list[str]) -> list[dict[str, str]]:
+    """Split a regional narrative into per-plant sections.
+
+    A regional block is never rendered as「粤东区域」; paragraphs that start with
+    a plant name become that plant's own section, and any regional lead text
+    before the first plant stays as one unlabelled section.
+    """
+    lead: list[str] = []
+    sections: list[dict[str, list[str]]] = []
+    for line in lines:
+        match = PLANT_SECTION_RE.match(line)
+        if match is None:
+            (sections[-1]["parts"] if sections else lead).append(line)
+            continue
+        sections.append({"plant": f"{match.group('plant')}厂", "parts": [line[match.end():].strip()]})
+    result = [{"plant": "", "text": "\n".join(lead)}] if lead else []
+    for section in sections:
+        body = "\n".join(part for part in section["parts"] if part)
+        if body:
+            result.append({"plant": section["plant"], "text": body})
+    return result
+
+
 def _strategy_lines(value: Any) -> list[dict[str, str]]:
     text = str(value or "")
     if "各厂报价策略与收益" in text:
@@ -972,10 +998,13 @@ def _strategy_lines(value: Any) -> list[dict[str, str]]:
         result = []
         for index, section in enumerate(sections):
             end = sections[index + 1].start() if index + 1 < len(sections) else len(text)
-            body = "\n".join(line.strip() for line in text[section.end():end].splitlines() if line.strip())
-            if body:
-                plant = section['plant'] if section['plant'].startswith('粤东') else '东莞厂'
-                result.append({"plant": plant, "text": body})
+            lines = [line.strip() for line in text[section.end():end].splitlines() if line.strip()]
+            if not lines:
+                continue
+            if section["plant"].startswith("粤东"):
+                result.extend(_plant_sections(lines))
+            else:
+                result.append({"plant": "东莞厂", "text": "\n".join(lines)})
         return result
     matches = list(
         re.finditer(
@@ -1046,19 +1075,6 @@ def _sync_strategy_profits(
     )
     result = []
     for strategy in strategies:
-        if strategy["plant"].startswith("粤东"):
-            def sync_regional_line(match):
-                plant = match.group("plant") + "厂"
-                synced = _sync_strategy_profits(
-                    [{"plant": plant, "text": match.group("profit")}], sheet, report_date
-                )[0]["text"]
-                return match.group("prefix") + synced
-            regional_text = re.sub(
-                r"(?m)^(?P<prefix>[ \t]*(?P<plant>汕头|海门)(?:电厂|厂)?)(?P<profit>各机组[^\n]+)",
-                sync_regional_line, strategy["text"],
-            )
-            result.append({**strategy, "text": regional_text})
-            continue
         expected_units = unit_orders.get(strategy["plant"])
         matches = list(sentence_pattern.finditer(strategy["text"]))
         if expected_units is None or len(matches) != 1:
