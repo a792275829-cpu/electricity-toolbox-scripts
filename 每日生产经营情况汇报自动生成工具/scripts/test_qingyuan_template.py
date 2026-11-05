@@ -16,7 +16,6 @@ from generate_red_marked_report import (
     clear_auto_section_red,
     ensure_daily_clearing_table_structure,
     ensure_qingyuan_template_content,
-    ensure_qingyuan_online_energy_text,
     ensure_spot_deviation_analysis,
     is_current_daily_clearing_table,
     load_day_ahead_clearing_summary,
@@ -101,14 +100,6 @@ class QingyuanTemplateTests(unittest.TestCase):
         day_ahead_text = document.paragraphs[heading_index + 2].text
         self.assertIn("清远", online_text)
         self.assertIn("清远（计划）", day_ahead_text)
-
-        legacy_online = (
-            "11月3日分公司上网电量6228万千瓦时，其中，汕头1279万、海门3449万、"
-            "东莞970万、海上风电207万、光伏95万千瓦时；分公司日前均价160厘/千瓦时。"
-        )
-        upgraded_online = ensure_qingyuan_online_energy_text(legacy_online)
-        self.assertEqual(upgraded_online.count("清远0万千瓦时"), 1)
-        self.assertEqual(ensure_qingyuan_online_energy_text(upgraded_online), upgraded_online)
 
         company = {"energy": 0, "price": 0}
         summary = {

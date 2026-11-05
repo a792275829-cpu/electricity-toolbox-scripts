@@ -490,6 +490,88 @@ def load_online_price_summary(date_text: str, workbook_path: Path | None = None)
     }
 
 
+def load_online_energy_summary(date_text: str, workbook_path: Path | None = None) -> dict[str, Any]:
+    """D-1 上网电量：读「快报」表。火电三厂与清远在 J 列，新能源区在 K 列。
+
+    清远取“分公司合计 － 火电三厂”，避免命中清远的套机组行。
+    """
+    if workbook_path is None:
+        workbook_path = find_clearing_workbook(date_text)
+    numbers: dict[tuple[int, int], float] = {}
+    labels: dict[str, int] = {}
+    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    try:
+        sheet_name = next((name for name in workbook.sheetnames if name.strip() == "快报"), None)
+        if sheet_name is None:
+            raise KeyError(f"{workbook_path} 中未找到快报工作表")
+        for row_number, row in enumerate(workbook[sheet_name].iter_rows(min_col=1, max_col=11, values_only=True), 1):
+            if isinstance(row[0], str) and row[0].strip():
+                labels.setdefault(row[0].strip(), row_number)
+            for column in (10, 11):
+                cell = row[column - 1]
+                if isinstance(cell, (int, float)) and not isinstance(cell, bool):
+                    numbers[(row_number, column)] = float(cell)
+    finally:
+        workbook.close()
+
+    def value(row: int, column: int) -> float:
+        return numbers.get((row, column), 0.0)
+
+    def label_row(wanted: tuple[str, ...]) -> int:
+        for name in wanted:
+            if name in labels:
+                return labels[name]
+        raise KeyError(f"{sheet_name} 中未找到行：{'/'.join(wanted)}")
+
+    shantou = value(8, 10)
+    haimen = value(13, 10)
+    dongguan = value(19, 10)
+    total_fire = value(7, 10)
+    offshore = value(label_row(("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535")), 11)
+    tuolian = value(label_row(("\u9b80\u83b2\u5149\u4f0f", "\u9b80\u83b2")), 11)
+    guihu = value(label_row(("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56")), 11)
+    qingyuan = total_fire - (shantou + haimen + dongguan)
+    renewable = offshore + tuolian + guihu
+    return {
+        "workbook": str(workbook_path),
+        "sheet": sheet_name,
+        "companies": {
+            "\u6c55\u5934": shantou,
+            "\u6d77\u95e8": haimen,
+            "\u4e1c\u839e": dongguan,
+            "\u6d77\u4e0a\u98ce\u7535": offshore,
+            "\u5149\u4f0f": tuolian + guihu,
+            "\u6e05\u8fdc": qingyuan,
+        },
+        "renewableEnergy": renewable,
+        "total": total_fire + renewable,
+    }
+
+
+def build_online_energy_text(date_text: str, energy: dict[str, Any], price_summary: dict[str, Any]) -> str:
+    """上网电量句：分项取「快报」J/K 列，日前均价取「快报（日前）」。"""
+    c = energy["companies"]
+    p = price_summary["companies"]
+    shantou, haimen, dongguan = c["汕头"], c["海门"], c["东莞"]
+    offshore, solar, qingyuan = c["海上风电"], c["光伏"], c["清远"]
+    return (
+        f"{date_label(date_text)}分公司上网电量{fmt_number(energy['total'])}万千瓦时，其中，"
+        f"汕头{fmt_number(shantou)}万、"
+        f"海门{fmt_number(haimen)}万、"
+        f"东莞{fmt_number(dongguan)}万、"
+        f"海上风电{fmt_number(offshore)}万、"
+        f"光伏{fmt_number(solar)}万千瓦时、"
+        f"清远{fmt_number(qingyuan)}万千瓦时；"
+        f"分公司日前均价{fmt_number(price_summary['averagePrice'])}厘/千瓦时，其中"
+        f"汕头{fmt_number(p['汕头'])}厘、"
+        f"海门{fmt_number(p['海门'])}厘、"
+        f"东莞{fmt_number(p['东莞'])}厘、"
+        f"海上风电{fmt_number(p['海上风电'])}厘、"
+        f"鮀莲{fmt_number(p['鮀莲'])}厘、"
+        f"归湖{fmt_number(p['归湖'])}厘/千瓦时。"
+    )
+
+
 def _cell_number(sheet, row: int, column: int) -> float | None:
     value = sheet.cell(row, column).value
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -1250,13 +1332,6 @@ def clear_auto_section_red(document, *, spot_filled: bool) -> None:
         clear_paragraph_red(find_exact_paragraph(document, "3.\u73b0\u8d27\u504f\u5dee\u5206\u6790"))
 
 
-def replace_leading_date(paragraph, date_text: str) -> None:
-    text = paragraph.text
-    updated = re.sub(r"^\d+月\d+日", date_label(date_text), text, count=1)
-    if updated != text:
-        replace_paragraph(paragraph, updated)
-
-
 def get_company_energy(run_date: str) -> dict[str, Any]:
     rows = collect_detail_rows(run_date, load_config())
     totals: dict[str, float] = {}
@@ -1430,17 +1505,6 @@ def build_energy_text(date_text: str, energy: dict[str, Any], kind: str) -> str:
     )
 
 
-def ensure_qingyuan_online_energy_text(text: str) -> str:
-    if "\u6e05\u8fdc" in text:
-        return text
-    return re.sub(
-        r"(\u5176\u4e2d\uff0c.*?\u5343\u74e6\u65f6)(\uff1b\u5206\u516c\u53f8\u65e5\u524d\u5747\u4ef7)",
-        lambda match: f"{match.group(1)}\u3001\u6e05\u8fdc0\u4e07\u5343\u74e6\u65f6{match.group(2)}",
-        text,
-        count=1,
-    )
-
-
 def build_day_ahead_clearing_text(date_text: str, summary: dict[str, Any]) -> str:
     companies = summary["companies"]
     shantou = companies["\u6c55\u5934"]
@@ -1466,34 +1530,6 @@ def build_day_ahead_clearing_text(date_text: str, summary: dict[str, Any]) -> st
         f"\u9b80\u83b2{fmt_number(tuolian['price'])}\u5398\u3001"
         f"\u5f52\u6e56{fmt_number(guihu['price'])}\u5398/\u5343\u74e6\u65f6\u3002"
     )
-
-
-def replace_online_price_text(paragraph, price_summary: dict[str, Any]) -> None:
-    text = paragraph.text
-    companies = price_summary["companies"]
-    shantou = companies["\u6c55\u5934"]
-    haimen = companies["\u6d77\u95e8"]
-    dongguan = companies["\u4e1c\u839e"]
-    offshore = companies["\u6d77\u4e0a\u98ce\u7535"]
-    tuolian = companies["\u9b80\u83b2"]
-    guihu = companies["\u5f52\u6e56"]
-    price_text = (
-        f"\u5206\u516c\u53f8\u65e5\u524d\u5747\u4ef7{fmt_number(price_summary['averagePrice'])}\u5398/\u5343\u74e6\u65f6\uff0c"
-        f"\u5176\u4e2d\u6c55\u5934{fmt_number(shantou)}\u5398\u3001"
-        f"\u6d77\u95e8{fmt_number(haimen)}\u5398\u3001"
-        f"\u4e1c\u839e{fmt_number(dongguan)}\u5398\u3001"
-        f"\u6d77\u4e0a\u98ce\u7535{fmt_number(offshore)}\u5398\u3001"
-        f"\u9b80\u83b2{fmt_number(tuolian)}\u5398\u3001"
-        f"\u5f52\u6e56{fmt_number(guihu)}\u5398/\u5343\u74e6\u65f6\u3002"
-    )
-    updated = re.sub(
-        r"\u5206\u516c\u53f8\u65e5\u524d\u5747\u4ef7.*?\u5f52\u6e56.*?\u5398/\u5343\u74e6\u65f6\u3002",
-        price_text,
-        text,
-        count=1,
-    )
-    if updated != text:
-        replace_paragraph(paragraph, updated)
 
 
 def fill_forecast_table(table, forecast: dict[str, Any]) -> None:
@@ -1566,10 +1602,26 @@ def generate(
     online_paragraph = next_nonempty_paragraph(doc, recent_heading)
     day_ahead_paragraph = next_nonempty_paragraph(doc, online_paragraph)
     # P13 is left unchanged until the online energy table source is confirmed.
-    replace_leading_date(online_paragraph, plan["actualOnlineEnergyDate"])
-    replace_paragraph(online_paragraph, ensure_qingyuan_online_energy_text(online_paragraph.text))
-    replace_online_price_text(online_paragraph, online_prices)
-    clear_paragraph_red(online_paragraph)
+    online_energy_error = None
+    try:
+        online_energy = load_online_energy_summary(plan["actualOnlineEnergyDate"], online_workbook)
+    except Exception as exc:
+        online_energy = None
+        online_energy_error = str(exc)
+    if online_energy and online_energy["total"] > 0:
+        replace_paragraph(
+            online_paragraph,
+            build_online_energy_text(plan["actualOnlineEnergyDate"], online_energy, online_prices),
+        )
+        clear_paragraph_red(online_paragraph)
+    else:
+        # D-1 上网电量尚未出数时不能只改日期：留在模板里的旧数字会被误认为当天的量。
+        if online_energy_error is None:
+            online_energy_error = (
+                f"{date_label(plan['actualOnlineEnergyDate'])} 的上网电量为 0（尚未出数），"
+                "上网电量段保留模板原文"
+            )
+        log(f"上网电量未取数，整段保留模板原文：{online_energy_error}")
     replace_paragraph(day_ahead_paragraph, build_day_ahead_clearing_text(plan["dayAheadDate"], day_ahead_clearing))
 
     strategy_heading = find_exact_paragraph(doc, "三、现货交易策略")
@@ -1639,10 +1691,11 @@ def generate(
         "unitStatusError": unit_status_error,
         "spotDeviationFilled": spot_filled,
         "spotDeviationSkipped": (daily_clearing or {}).get("spotSkipReason"),
+        "onlineEnergyError": online_energy_error,
         "dailyClearingError": daily_clearing_error,
         "weatherError": weather_error,
         "knownGaps": [
-            "P13 上网电量来源尚未确认，电量暂保留模板原文；日前均价来自报告日出清情况 Excel 的快报（日前）工作表。",
+            "上网电量取 D-1 出清情况工作簿「快报」表：火电三厂与清远取 J 列，新能源取 K 列，总数为 J7＋新能源合计；D-1 尚未出数（全为 0）时整段保留模板原文并保持红字。",
             "P14 日前出清电量和日前价格来自报告日出清情况 Excel；火电取快报（日前）F/G，新能源按表头取 G/H，清远计划电量取基础信息!AA64+AC64 后除以10，并计入分公司总电量。",
             "P29 未来三天最高负荷来源尚未确认，暂不替换。",
             "日清分表取 D-2 日出清情况工作簿「快报」表；分公司现货偏差收益按各厂合计（汕头/东莞取现货偏差合计边际贡献，海门取三项偏差边际贡献之和）。",
