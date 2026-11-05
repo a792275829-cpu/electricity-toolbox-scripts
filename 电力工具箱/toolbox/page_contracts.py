@@ -37,6 +37,6 @@ PAGE_BINDINGS = MappingProxyType({
     'report': PageBinding('report', ('report_date', 'online_workbook', 'day_ahead_workbook', 'daily_workbook', 'template_report', 'fetch_data', 'generate_word')),
     'guangdong-price': PageBinding('guangdong-price', ('run_date', 'master_workbook', 'prediction_output_dir', 'training_months', 'forecast_days')),
     'group-upload': PageBinding('group-upload', ('force',)),
-    'private-batch-upload': PageBinding('private-batch-upload', ('unit', 'summary_type', 'power_source', 'verify')),
+    'private-batch-upload': PageBinding('private-batch-upload', ('unit', 'summary_type', 'verify')),
     'summary-upload': PageBinding('summary-upload', ('input_dir', 'mode')),
 })

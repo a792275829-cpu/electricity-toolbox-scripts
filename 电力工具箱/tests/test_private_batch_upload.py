@@ -128,9 +128,7 @@ class PrivateBatchRegistrationTests(unittest.TestCase):
         fields = {field["key"]: field for field in tool["fields"]}
         self.assertEqual([c[0] for c in fields["unit"]["choices"]], ["海风", "鮀莲", "归湖", "东莞", "汕头", "海门"])
         self.assertEqual(fields["files"]["kind"], "files")
-        self.assertEqual([c[0] for c in fields["power_source"]["choices"]],
-                         ["不适用", "北京东润环能", "国能日新", "南瑞", "北京华软恒信", "其他"])
-        self.assertEqual(fields["power_source"]["default"], "不适用")
+        self.assertNotIn("power_source", fields)
         self.assertEqual([c[0] for c in fields["summary_type"]["choices"]], ["none", "formal", "temporary"])
         self.assertEqual([c[1] for c in fields["summary_type"]["choices"]],
                          ["非月度结算单", "正式账单", "临时账单"])
@@ -248,9 +246,6 @@ class PrivateBatchPageTests(unittest.TestCase):
         self.assertEqual(command[command.index("--unit") + 1], "海门")
         self.assertEqual(command[command.index("--files") + 1], str(path))
         self.assertNotIn("--power-source", command)
-        self.page.power_source.set("南瑞")
-        command = self.page.build_upload_command()
-        self.assertEqual(command[command.index("--power-source") + 1], "南瑞")
 
     def test_monthly_checkbox_controls_summary_type(self) -> None:
         path = self.folder / "结算.xlsx"
@@ -274,16 +269,9 @@ class PrivateBatchPageTests(unittest.TestCase):
         self.assertEqual(self.page.monthly_type.get(), "temporary")
         self.assertNotIn("--summary-type", self.page.build_upload_command())
 
-    def test_power_source_is_disabled_for_thermal_units(self) -> None:
-        self.assertFalse(self.page.source_buttons[0].instate(["disabled"]))
-        self.page.power_source.set("南瑞")
-        self.page.unit.set("汕头")
-        self.assertTrue(self.page.source_buttons[0].instate(["disabled"]))
-        self.assertEqual(self.page.power_source.get(), "不适用")
-        path = self.folder / "日前.xlsx"
-        path.write_bytes(b"0")
-        self.page.apply_files([path])
-        self.assertNotIn("--power-source", self.page.build_upload_command())
+    def test_page_has_no_power_source_selector(self) -> None:
+        self.assertFalse(hasattr(self.page, "power_source"))
+        self.assertFalse(hasattr(self.page, "source_buttons"))
 
 
 if __name__ == "__main__":
