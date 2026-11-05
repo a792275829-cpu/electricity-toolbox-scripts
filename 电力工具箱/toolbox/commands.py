@@ -24,7 +24,7 @@ def login(paths, tool_id):
             "--workspace", str(paths.workspace), "--tool", tool_id]
 
 
-def private_batch(paths, unit, files, *, summary_type="none", verify=True):
+def private_batch(paths, unit, files, *, summary_type="none", verify=True, power_source="不适用"):
     from .runtime import node_executable
     if not files:
         raise ValueError("请至少选择一个上传文件。")
@@ -32,6 +32,8 @@ def private_batch(paths, unit, files, *, summary_type="none", verify=True):
                "--unit", str(unit), "--files", ",".join(str(path) for path in files)]
     if summary_type in {"formal", "temporary"}:
         command.extend(("--summary-type", summary_type))
+    if power_source and power_source != "不适用":
+        command.extend(("--power-source", str(power_source)))
     if not verify:
         command.append("--no-verify")
     return command

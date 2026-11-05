@@ -23,6 +23,9 @@ class PrivateBatchUploadPage(ToolPage):
     UNITS = (("海风", "海风"), ("鮀莲", "鮀莲"), ("归湖", "归湖"),
              ("东莞", "东莞"), ("汕头", "汕头"), ("海门", "海门"))
     SUMMARY_TYPES = (("none", "不适用"), ("formal", "正式账单"), ("temporary", "临时账单"))
+    # 网站“数据来源”下拉：只影响新能源单元的原始功率预测数据。
+    POWER_SOURCES = (("不适用", "不适用"), ("北京东润环能", "东润"), ("国能日新", "日新"),
+                     ("南瑞", "南瑞"), ("北京华软恒信", "华软"), ("其他", "其他"))
 
     def __init__(self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry) -> None:
         super().__init__(
@@ -36,6 +39,7 @@ class PrivateBatchUploadPage(ToolPage):
         self.selected_paths: list[Path] = []
         self.unit = tk.StringVar(master=self, value="海风")
         self.summary_type = tk.StringVar(master=self, value="none")
+        self.power_source = tk.StringVar(master=self, value="不适用")
         self.verify = tk.BooleanVar(master=self, value=True)
         self.selection_var = tk.StringVar(master=self, value="未选择文件")
         self.summary_var = tk.StringVar(master=self, value="请选择要上传到该单元的文件。")
@@ -52,17 +56,28 @@ class PrivateBatchUploadPage(ToolPage):
         summary_types = SegmentedGroup(form, variable=self.summary_type, choices=self.SUMMARY_TYPES)
         summary_types.grid(row=1, column=1, sticky="w", pady=(0, 8))
 
-        ttk.Label(form, textvariable=self.summary_var).grid(row=2, column=0, columnspan=2, sticky="w")
+        ttk.Label(form, text="数据来源").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(0, 8))
+        power_sources = SegmentedGroup(form, variable=self.power_source, choices=self.POWER_SOURCES)
+        power_sources.grid(row=2, column=1, sticky="w", pady=(0, 8))
+        ttk.Label(
+            form, text="“数据来源”只用于新能源单元的原始功率预测数据；申报功率预测数据固定走调度OPS平台。",
+            style="Muted.TLabel", wraplength=680,
+        ).grid(row=3, column=1, sticky="w", pady=(0, 8))
+
+        ttk.Label(form, textvariable=self.summary_var).grid(row=4, column=0, columnspan=2, sticky="w")
         ttk.Label(
             form, textvariable=self.selection_var, justify="left", style="Muted.TLabel",
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         self.choose_button = FileSelectButton(self.actions, text="选择文件", command=self.choose_files)
         self.choose_button.pack(side="left")
         self.run_button = ttk.Button(self.actions, text="开始上传", command=self.confirm_upload)
         self.run_button.pack(side="left", padx=(8, 0))
         SettingCheckbutton(self.actions, text="上传后回读数据状态", variable=self.verify).pack(side="right")
-        self.register_busy_widgets(self.choose_button, self.run_button, *units.buttons, *summary_types.buttons)
+        self.register_busy_widgets(
+            self.choose_button, self.run_button,
+            *units.buttons, *summary_types.buttons, *power_sources.buttons,
+        )
 
     @property
     def file_dialogs(self) -> FileDialogState:
@@ -117,6 +132,7 @@ class PrivateBatchUploadPage(ToolPage):
         return commands.private_batch(
             self.paths, self.unit.get(), self.selected_paths,
             summary_type=self.summary_type.get(), verify=self.verify.get(),
+            power_source=self.power_source.get(),
         )
 
     def confirm_upload(self) -> None:
@@ -133,10 +149,13 @@ class PrivateBatchUploadPage(ToolPage):
             return
         unit = self.unit.get()
         count = self.batch_count(self.selected_paths)
+        source = self.power_source.get()
+        source_line = f"\n原始功率预测数据来源：{source}" if source != "不适用" else ""
         if not messagebox.askokcancel(
             "确认上传",
             f"确认把 {len(self.selected_paths)} 个文件上传到「{unit}」？\n\n"
             + "\n".join(path.name for path in self.selected_paths)
+            + source_line
             + f"\n\n将分 {count} 批调用批量上传接口。",
             parent=self,
         ):

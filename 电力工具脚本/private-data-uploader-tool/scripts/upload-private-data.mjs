@@ -10,6 +10,7 @@ import { acquireAuthLock } from './auth-lock.mjs';
 import {
   TARGETS,
   buildMultipart,
+  buildSourceMap,
   datesOf,
   isAllowedFile,
   planBatches,
@@ -50,6 +51,7 @@ function parseArgs(argv) {
     summaryType: undefined,
     verify: true,
     date: undefined,
+    powerSource: undefined,
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -77,6 +79,7 @@ function parseArgs(argv) {
       args.files.push(...String(argv[++i] ?? '').split(',').map((value) => value.trim()).filter(Boolean));
     }
     else if (arg === '--summary-type') args.summaryType = argv[++i];
+    else if (arg === '--power-source') args.powerSource = argv[++i];
     else if (arg === '--no-verify') args.verify = false;
     else throw new Error(`未知参数：${arg}`);
   }
@@ -642,12 +645,14 @@ async function runBatch(config, args) {
   const target = resolveTarget(args.unit);
   const files = await collectBatchFiles(args.files);
   const batches = planBatches(files);
-  const fields = { personalDataTypeSourceMap: '{}' };
+  const sourceMap = buildSourceMap({ source: args.powerSource }, target.energyType);
+  const fields = { personalDataTypeSourceMap: JSON.stringify(sourceMap) };
   if (args.summaryType === 'formal' || args.summaryType === 'temporary') {
     fields['customParams[summaryType]'] = args.summaryType === 'temporary' ? '2' : '1';
   }
 
   log(`单元：${target.key} -> ${target.company}`);
+  if (args.powerSource) log(`原始功率预测数据来源：${args.powerSource}`);
   log(`共 ${files.length} 个文件，分 ${batches.length} 批上传。`);
 
   const releaseLock = await acquireAuthLock(config, undefined, log);

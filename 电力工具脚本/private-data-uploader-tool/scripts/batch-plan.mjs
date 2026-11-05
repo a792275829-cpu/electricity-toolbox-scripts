@@ -58,6 +58,32 @@ export const TARGETS = [
   },
 ];
 
+// 功率预测数据的来源编码，与网站“数据来源”下拉一致。
+export const POWER_SOURCES = {
+  北京东润环能: 'BEIJING_DR_HN',
+  国能日新: 'GUO_HN_RI_XIN',
+  南瑞: 'NAN_RUI',
+  北京华软恒信: 'BEIJING_HR_HX',
+  其他: 'OTHER',
+  电力交易平台: 'ELECTRIC_TRADE_PLATFORM',
+  调度OPS平台: 'DISPATCH_OPS_PLATFORM',
+};
+
+/**
+ * personalDataTypeSourceMap：新能源单元的功率预测数据必须带来源，否则该行无法定位。
+ * 申报功率预测数据只有“调度OPS平台”一个选项，直接固定；原始功率预测数据由用户选。
+ */
+export function buildSourceMap({ source } = {}, energyType) {
+  const map = {};
+  if (energyType === 'NEW_ENERGY') map.DECLARE_POWER_PREDICT = 'DISPATCH_OPS_PLATFORM';
+  if (source) {
+    const code = POWER_SOURCES[source];
+    if (!code) throw new Error(`未知数据来源：${source}（可选：${Object.keys(POWER_SOURCES).join('、')}）`);
+    map.RAW_POWER_PREDICT = code;
+  }
+  return map;
+}
+
 export function resolveTarget(unit) {
   const value = String(unit ?? '').trim();
   if (!value) throw new Error('请选择上传单元。');

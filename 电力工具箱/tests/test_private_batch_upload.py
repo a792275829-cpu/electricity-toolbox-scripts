@@ -84,6 +84,21 @@ class BatchPlanNodeTests(unittest.TestCase):
         )
         self.assertEqual(body, {"files": 2, "map": True, "cn": True})
 
+    def test_new_energy_source_map_covers_declare_and_raw(self) -> None:
+        result = self.run_node(
+            "console.log(JSON.stringify({\n"
+            "  withSource: m.buildSourceMap({source:'国能日新'}, 'NEW_ENERGY'),\n"
+            "  plain: m.buildSourceMap({}, 'NEW_ENERGY'),\n"
+            "  fire: m.buildSourceMap({source:'南瑞'}, 'FIRE'),\n"
+            "}));"
+        )
+        self.assertEqual(result["withSource"], {
+            "DECLARE_POWER_PREDICT": "DISPATCH_OPS_PLATFORM",
+            "RAW_POWER_PREDICT": "GUO_HN_RI_XIN",
+        })
+        self.assertEqual(result["plain"], {"DECLARE_POWER_PREDICT": "DISPATCH_OPS_PLATFORM"})
+        self.assertEqual(result["fire"], {"RAW_POWER_PREDICT": "NAN_RUI"})
+
 
 class PrivateBatchRegistrationTests(unittest.TestCase):
     def test_tool_is_registered_in_upload_category(self) -> None:
@@ -97,6 +112,9 @@ class PrivateBatchRegistrationTests(unittest.TestCase):
         fields = {field["key"]: field for field in tool["fields"]}
         self.assertEqual([c[0] for c in fields["unit"]["choices"]], ["海风", "鮀莲", "归湖", "东莞", "汕头", "海门"])
         self.assertEqual(fields["files"]["kind"], "files")
+        self.assertEqual([c[0] for c in fields["power_source"]["choices"]],
+                         ["不适用", "北京东润环能", "国能日新", "南瑞", "北京华软恒信", "其他"])
+        self.assertEqual(fields["power_source"]["default"], "不适用")
         self.assertEqual([a["id"] for a in tool["actions"]], ["run", "login"])
 
     def test_service_requires_confirmation_with_unit_and_count(self) -> None:
@@ -133,6 +151,13 @@ class PrivateBatchCommandTests(unittest.TestCase):
         command = commands.private_batch(self.paths, "海风", [file], summary_type="temporary", verify=False)
         self.assertEqual(command[command.index("--summary-type") + 1], "temporary")
         self.assertIn("--no-verify", command)
+
+    def test_power_source_is_passed_only_when_selected(self) -> None:
+        file = self.make_file("原始功率预测.xlsx")
+        default = commands.private_batch(self.paths, "海风", [file])
+        self.assertNotIn("--power-source", default)
+        chosen = commands.private_batch(self.paths, "海风", [file], power_source="国能日新")
+        self.assertEqual(chosen[chosen.index("--power-source") + 1], "国能日新")
 
     def test_login_uses_dedicated_batch_state(self) -> None:
         command = commands.login(self.paths, "private-batch-upload")
@@ -203,6 +228,10 @@ class PrivateBatchPageTests(unittest.TestCase):
         command = self.page.build_upload_command()
         self.assertEqual(command[command.index("--unit") + 1], "海门")
         self.assertEqual(command[command.index("--files") + 1], str(path))
+        self.assertNotIn("--power-source", command)
+        self.page.power_source.set("南瑞")
+        command = self.page.build_upload_command()
+        self.assertEqual(command[command.index("--power-source") + 1], "南瑞")
 
 
 if __name__ == "__main__":

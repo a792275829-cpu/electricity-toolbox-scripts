@@ -198,7 +198,8 @@ def plan(paths, tool_id, action, p):
         if oversized:
             raise ValueError("网站不接受超过 10MB 的单个文件：" + "、".join(oversized))
         return [(commands.private_batch(paths, p["unit"], files,
-                summary_type=p.get("summary_type", "none"), verify=p.get("verify", True)),
+                summary_type=p.get("summary_type", "none"), verify=p.get("verify", True),
+                power_source=p.get("power_source", "不适用")),
                 paths.private_uploader_dir)]
     elif tool_id == "group-upload":
         selected_files(p)
