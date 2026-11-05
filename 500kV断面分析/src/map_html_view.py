@@ -7,6 +7,10 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
                     curve_css: str, curve_js: str, VIEW_HTML: str) -> str:
     json_data = json.dumps(data, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
     diagram_mode = data.get("metadata", {}).get("coordinate_mode") == "wiring-diagram"
+    try:
+        threshold_text = f"{float(data.get('metadata', {}).get('threshold', 80.0)):g}"
+    except (TypeError, ValueError):
+        threshold_text = "80"
     artifact_title = "广东电网 500kV 接线拓扑与电价分析" if diagram_mode else "广东省电网 500kV 节点断面地图"
     map_label = "广东500kV接线拓扑与节点电价图" if diagram_mode else "广东500kV节点断面地图"
     if diagram_mode:
@@ -102,6 +106,23 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       padding:0 10px; color:var(--ink); background:var(--soft); outline:none; font-size:12px;
     }}
     .node-search:focus {{ border-color:var(--cyan); box-shadow:0 0 0 3px rgba(56,214,255,.10); }}
+    .threshold-control {{
+      display:flex; align-items:center; gap:6px; flex:0 0 auto; margin-right:auto; padding:0 2px;
+    }}
+    .threshold-label {{ font-size:12px; font-weight:700; color:var(--muted); letter-spacing:.02em; white-space:nowrap; }}
+    .threshold-input {{
+      width:74px; min-height:32px; border:1px solid var(--line); border-radius:8px; padding:0 8px;
+      background:var(--soft); color:var(--ink); font-size:13px; font-weight:700;
+      font-variant-numeric:tabular-nums; outline:none;
+    }}
+    .threshold-input:focus {{ border-color:var(--cyan); box-shadow:0 0 0 3px rgba(56,214,255,.10); }}
+    .threshold-unit {{ font-size:11px; color:var(--muted); white-space:nowrap; }}
+    .threshold-reset {{
+      min-height:28px; border:1px solid var(--line); border-radius:8px; padding:0 8px;
+      background:transparent; color:var(--muted); font-size:11px; cursor:pointer;
+    }}
+    .threshold-reset:hover {{ border-color:var(--cyan); color:var(--cyan); }}
+    .threshold-count {{ font-size:11px; font-weight:700; color:var(--accent); white-space:nowrap; }}
     .toggle {{
       border: 1px solid var(--line); background: var(--soft); color: var(--ink);
       border-radius: 8px; padding: 6px 9px; font-size: 12px; cursor: pointer;
@@ -466,6 +487,13 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
   </nav>
 
         <div class="map-toolbar">
+        <div class="threshold-control" role="group" aria-label="价差阈值">
+          <label class="threshold-label" for="gapThreshold" title="相邻节点电价一涨一跌、且两端价差严格大于该值的时点全天累计满 4 个才记为断面">价差阈值</label>
+          <input class="threshold-input" id="gapThreshold" type="number" min="0" step="5" inputmode="decimal" value="{threshold_text}" aria-describedby="gapThresholdHint">
+          <span class="threshold-unit" id="gapThresholdHint">元/MWh</span>
+          <button class="threshold-reset" id="gapThresholdReset" type="button" title="恢复生成时的默认阈值">重置</button>
+          <span class="threshold-count" id="thresholdCount" role="status" aria-live="polite">0 条断面</span>
+        </div>
         <div class="zoom-controls" aria-label="地图操作">
           <button class="toggle" id="toggleFlow" type="button" aria-pressed="true">潮流查看</button>
           <button id="zoomIn" type="button" title="放大">+</button>
@@ -582,13 +610,15 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     }}
     const nodeByName = new Map(DATA.nodes.map(d => [d.name, d]));
     const regionData = DATA.regions || [];
-    const sectionEdges = DATA.edges.filter(d => d.is_section);
+    let sectionEdges = DATA.edges.filter(d => d.is_section);
     const mapSvg = document.getElementById('map');
     const mapViewport = document.getElementById('mapViewport');
     const edgeLines = new Map();
+    const edgeHitLines = new Map();
     const sectionEdgeLines = new Map();
     const flowArrowItems = new Map();
     const nodeGroups = new Map();
+    const nodeCircles = new Map();
     const nodeLabelItems = [];
     const edgesByNode = new Map(DATA.nodes.map(node => [node.name, []]));
     DATA.edges.forEach(edge => {{
@@ -610,22 +640,33 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     const topologyTimes = Array.from({{length:96}}, (_, i) => `${{String(Math.floor(i / 4)).padStart(2,'0')}}:${{String(i % 4 * 15).padStart(2,'0')}}`);
     const topologyTimeIndices = topologyTimes.map(time => DATA.time_headers.indexOf(time));
     // Sum price gaps of all sections actually triggered at each time, independent of the list filter.
-    const timelineCongestion = topologyTimeIndices.map((index, slot) => {{
-      if (index <= 0) return null;
-      const hasData = DATA.edges.some(edge => {{
-        const a = nodeByName.get(edge.a)?.prices, b = nodeByName.get(edge.b)?.prices;
-        return [a?.[index], b?.[index], a?.[index-1], b?.[index-1]].every(Number.isFinite);
+    const timelineCongestion = topologyTimeIndices.map(() => null);
+    let timelineMax = 0;
+    refreshTimelineBand();
+
+    function refreshTimelineBand() {{
+      topologyTimeIndices.forEach((index, slot) => {{
+        if (index <= 0) {{ timelineCongestion[slot] = null; return; }}
+        const hasData = DATA.edges.some(edge => {{
+          const a = nodeByName.get(edge.a)?.prices, b = nodeByName.get(edge.b)?.prices;
+          return [a?.[index], b?.[index], a?.[index-1], b?.[index-1]].every(Number.isFinite);
+        }});
+        timelineCongestion[slot] = hasData
+          ? DATA.edges.reduce((sum, edge) => sum + (edge.congestion_by_time?.[topologyTimes[slot]] || 0), 0)
+          : null;
       }});
-      if (!hasData) return null;
-      return DATA.edges.reduce((sum, edge) => sum + (edge.congestion_by_time?.[topologyTimes[slot]] || 0), 0);
-    }});
-    const timelineMax = Math.max(0, ...timelineCongestion.filter(Number.isFinite));
-    const timelineStops = timelineCongestion.flatMap((value, i) => {{
-      const ratio = value === null ? null : (timelineMax ? value / timelineMax : 0);
-      const color = ratio === null ? '#cbd5e1' : `hsl(${{120 * (1 - ratio)}} 72% 42%)`;
-      return [`${{color}} ${{i / 96 * 100}}%`, `${{color}} ${{(i+1) / 96 * 100}}%`];
-    }});
-    document.getElementById('topologyTime').style.setProperty('--congestion-gradient', `linear-gradient(to right, ${{timelineStops.join(',')}})`);
+      timelineMax = Math.max(0, ...timelineCongestion.filter(Number.isFinite));
+      const stops = timelineCongestion.flatMap((value, i) => {{
+        const ratio = value === null ? null : (timelineMax ? value / timelineMax : 0);
+        const color = ratio === null ? '#cbd5e1' : `hsl(${{120 * (1 - ratio)}} 72% 42%)`;
+        return [`${{color}} ${{i / 96 * 100}}%`, `${{color}} ${{(i+1) / 96 * 100}}%`];
+      }});
+      document.getElementById('topologyTime').style.setProperty('--congestion-gradient', `linear-gradient(to right, ${{stops.join(',')}})`);
+      const strength = timelineCongestion[topologyTimeSlot];
+      document.getElementById('topologyTime').title = strength === null
+        ? `${{topologyTimes[topologyTimeSlot]}}：数据不足`
+        : `${{topologyTimes[topologyTimeSlot]}}：触发断面价差合计 ${{strength.toFixed(2)}} 元/MWh`;
+    }}
 
     function clampView() {{
       const visibleMarginX = mapCanvas.width * .12;
@@ -804,6 +845,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       edgesG.appendChild(hitLine);
       edgesG.appendChild(line);
       edgeLines.set(edge.edge, line);
+      edgeHitLines.set(edge.edge, hitLine);
       if (edge.is_section) sectionEdgeLines.set(edge.edge, line);
     }});
 
@@ -1058,6 +1100,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       nodeLabelsG.appendChild(label);
       nodeLabelItems.push({{ node, label, leader }});
       nodeGroups.set(node.name, group);
+      nodeCircles.set(node.name, circle);
       bindNodePriceTooltip(group, node);
       bindNodePriceTooltip(label, node);
     }});
@@ -1456,6 +1499,206 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       if (event.key === 'Escape' && document.body.classList.contains('focus-mode')) document.getElementById('focusMode').click();
     }});
     renderSectionList();
+
+    // 价差阈值：在网页内实时重算断面判定，不必重新生成文件。
+    const DEFAULT_GAP_THRESHOLD = Number.isFinite(Number(DATA.metadata.threshold))
+      ? Number(DATA.metadata.threshold) : 80;
+    const SECTION_MIN_INTERVALS = Number(DATA.metadata.min_section_intervals) || 4;
+    const gapThresholdInput = document.getElementById('gapThreshold');
+    const gapThresholdCount = document.getElementById('thresholdCount');
+    let gapThresholdApplied = DEFAULT_GAP_THRESHOLD;
+    let gapThresholdTimer = 0;
+
+    function isPriceValue(value) {{
+      return typeof value === 'number' && Number.isFinite(value);
+    }}
+
+    function sectionWindows(records) {{
+      const indexes = records.map(record => record.index).sort((a, b) => a - b);
+      const bounds = [];
+      let start = indexes[0], previous = indexes[0];
+      indexes.slice(1).forEach(index => {{
+        if (index === previous + 1) {{ previous = index; return; }}
+        bounds.push([start, previous]);
+        start = previous = index;
+      }});
+      bounds.push([start, previous]);
+      return bounds.map(([begin, end]) => begin === end
+        ? DATA.time_headers[begin] : `${{DATA.time_headers[begin]}}-${{DATA.time_headers[end]}}`).join('; ');
+    }}
+
+    // Same rule as src/analyze_500kv_section_gaps.py: opposite moves, |gap| > threshold,
+    // and at least MIN_SECTION_INTERVALS triggering points accumulated over the day.
+    function edgeSectionStats(edge, threshold) {{
+      const a = nodeByName.get(edge.a), b = nodeByName.get(edge.b);
+      if (!a || !b) return null;
+      const records = [];
+      for (let index = 1; index < DATA.time_headers.length; index++) {{
+        const priceA = a.prices[index], priceB = b.prices[index];
+        const previousA = a.prices[index - 1], previousB = b.prices[index - 1];
+        if (![priceA, priceB, previousA, previousB].every(isPriceValue)) continue;
+        if ((priceA - previousA) * (priceB - previousB) >= 0) continue;
+        const difference = priceB - priceA, absDiff = Math.abs(difference);
+        if (absDiff <= threshold) continue;
+        records.push({{
+          index, time: DATA.time_headers[index], absDiff,
+          low: difference > 0 ? edge.a : edge.b,
+          high: difference > 0 ? edge.b : edge.a,
+          direction: difference > 0 ? `${{edge.a}}->${{edge.b}}` : `${{edge.b}}->${{edge.a}}`
+        }});
+      }}
+      if (records.length < SECTION_MIN_INTERVALS) return null;
+      const maxRecord = records.reduce((best, record) => record.absDiff > best.absDiff ? record : best, records[0]);
+      const counts = new Map();
+      records.forEach(record => counts.set(record.direction, (counts.get(record.direction) || 0) + 1));
+      const mainDirection = [...counts.entries()]
+        .sort((x, y) => (y[1] - x[1]) || (x[0] < y[0] ? 1 : -1))[0][0];
+      const congestion = {{}};
+      records.forEach(record => {{ congestion[record.time] = record.absDiff; }});
+      return {{
+        intervals: records.length,
+        windows: sectionWindows(records),
+        maxAbsDiff: maxRecord.absDiff,
+        maxTime: maxRecord.time,
+        maxLow: maxRecord.low,
+        maxHigh: maxRecord.high,
+        mainDirection,
+        directionCounts: [...counts.entries()].sort((x, y) => x[0] < y[0] ? -1 : 1)
+          .map(([direction, count]) => `${{direction}}:${{count}}`).join('; '),
+        congestion
+      }};
+    }}
+
+    function refreshEdgeStyles() {{
+      DATA.edges.forEach(edge => {{
+        const line = edgeLines.get(edge.edge);
+        if (!line) return;
+        line.classList.toggle('section', edge.is_section);
+        line.setAttribute('stroke', severityColor(edge.severity));
+        line.setAttribute('stroke-width', edge.is_section ? String(4.8 + edge.severity * 4.4) : '1.1');
+        line.style.display = '';
+        const hit = edgeHitLines.get(edge.edge);
+        if (!hit) return;
+        hit.classList.toggle('section-hit', edge.is_section);
+        hit.setAttribute('aria-label', edge.is_section
+          ? `${{edge.edge}}，最大价差 ${{edge.max_abs_diff.toFixed(0)}} 元每兆瓦时`
+          : `${{edge.edge}}，500千伏拓扑线路`);
+      }});
+      sectionEdgeLines.clear();
+      DATA.edges.filter(edge => edge.is_section)
+        .forEach(edge => sectionEdgeLines.set(edge.edge, edgeLines.get(edge.edge)));
+    }}
+
+    function refreshBlockedNodes() {{
+      const blockedNames = new Set();
+      DATA.edges.filter(edge => edge.is_section)
+        .forEach(edge => {{ blockedNames.add(edge.a); blockedNames.add(edge.b); }});
+      let changed = false;
+      DATA.nodes.forEach(node => {{
+        const blocked = blockedNames.has(node.name);
+        if (node.blocked === blocked) return;
+        node.blocked = blocked;
+        changed = true;
+        const circle = nodeCircles.get(node.name);
+        if (circle) {{
+          const region = regionData.find(item => item.name === node.region);
+          circle.setAttribute('r', blocked ? 7.2 : (node.prices.length ? 3.4 : 2.8));
+          circle.setAttribute('class', blocked ? 'node blocked' : (node.prices.length ? 'node' : 'node missing'));
+          circle.setAttribute('stroke', blocked ? '#a40012' : (region?.color || '#9aabbc'));
+        }}
+        nodeLabelItems.filter(item => item.node === node)
+          .forEach(item => item.label.classList.toggle('blocked-label', blocked));
+      }});
+      if (!changed) return;
+      layoutNodeLabels();
+      if (autoFitMap) fitMap(); else applyView();
+    }}
+
+    function refreshFlowSectionStyles() {{
+      DATA.edges.forEach(edge => {{
+        const item = flowArrowItems.get(edge.edge);
+        if (!item) return;
+        item.group.classList.toggle('section-flow', edge.is_section);
+        item.group.classList.toggle('non-section-flow', !edge.is_section);
+        item.direction = '';
+        item.time = '';
+      }});
+      resetAllFlowArrows();
+    }}
+
+    function updateThresholdCount(count) {{
+      if (gapThresholdCount) gapThresholdCount.textContent = `${{count}} 条断面`;
+    }}
+
+    function applyGapThreshold(threshold) {{
+      const value = Number.isFinite(threshold) ? Math.max(0, threshold) : DEFAULT_GAP_THRESHOLD;
+      if (value === gapThresholdApplied) return;
+      gapThresholdApplied = value;
+      DATA.edges.forEach(edge => {{
+        const stats = edgeSectionStats(edge, value);
+        edge.is_section = Boolean(stats);
+        edge.intervals = stats ? stats.intervals : 0;
+        edge.windows = stats ? stats.windows : '';
+        edge.max_abs_diff = stats ? stats.maxAbsDiff : 0;
+        edge.max_time = stats ? stats.maxTime : '';
+        edge.max_low = stats ? stats.maxLow : '';
+        edge.max_high = stats ? stats.maxHigh : '';
+        edge.main_direction = stats ? stats.mainDirection : '';
+        edge.direction_counts = stats ? stats.directionCounts : '';
+        edge.detail_count = stats ? stats.intervals : 0;
+        edge.congestion_by_time = stats ? stats.congestion : {{}};
+        edge.gap_severity = 0;
+        edge.interval_severity = 0;
+        edge.severity = 0;
+        edge.severity_score = 0;
+      }});
+      const flagged = DATA.edges.filter(edge => edge.is_section);
+      const gapValues = flagged.map(edge => edge.max_abs_diff);
+      const intervalValues = flagged.map(edge => edge.intervals);
+      const normalize = (score, values) => (!values.length || Math.max(...values) === Math.min(...values))
+        ? 1 : (score - Math.min(...values)) / (Math.max(...values) - Math.min(...values));
+      flagged.forEach(edge => {{
+        edge.gap_severity = normalize(edge.max_abs_diff, gapValues);
+        edge.interval_severity = normalize(edge.intervals, intervalValues);
+        edge.severity = edge.severity_score = .15 + .85 * (edge.gap_severity + edge.interval_severity) / 2;
+      }});
+      sectionEdges = flagged;
+      refreshEdgeStyles();
+      refreshBlockedNodes();
+      refreshTimelineBand();
+      renderSectionList();
+      refreshFlowSectionStyles();
+      updateThresholdCount(flagged.length);
+    }}
+
+    function readGapThreshold() {{
+      const value = Number(gapThresholdInput.value);
+      return gapThresholdInput.value.trim() === '' || !Number.isFinite(value) || value < 0 ? null : value;
+    }}
+
+    gapThresholdInput.addEventListener('input', () => {{
+      clearTimeout(gapThresholdTimer);
+      gapThresholdTimer = setTimeout(() => {{
+        const value = readGapThreshold();
+        if (value !== null) applyGapThreshold(value);
+      }}, 140);
+    }});
+    gapThresholdInput.addEventListener('change', () => {{
+      clearTimeout(gapThresholdTimer);
+      const value = readGapThreshold();
+      if (value === null) {{ gapThresholdInput.value = String(gapThresholdApplied); return; }}
+      applyGapThreshold(value);
+    }});
+    gapThresholdInput.addEventListener('keydown', event => {{
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      gapThresholdInput.blur();
+    }});
+    document.getElementById('gapThresholdReset').addEventListener('click', () => {{
+      gapThresholdInput.value = String(DEFAULT_GAP_THRESHOLD);
+      applyGapThreshold(DEFAULT_GAP_THRESHOLD);
+    }});
+    updateThresholdCount(sectionEdges.length);
 
     function attachPriceCrosshair(svg, options) {{
       const {{ series, x, y, count, margin, width, height, make, onIndexChange, onLeave }} = options;

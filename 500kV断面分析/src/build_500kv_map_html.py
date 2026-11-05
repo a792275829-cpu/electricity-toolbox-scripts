@@ -197,6 +197,7 @@ def build_map_html(
     node_positions_path: Path | None = None,
     *,
     analysis_data: dict | None = None,
+    threshold: float = 80.0,
 ) -> None:
     topology_path = Path(topology_path)
     original_price_path = Path(original_price_path)
@@ -284,6 +285,7 @@ def build_map_html(
             "skipped_duplicate_edges": skipped_duplicates,
             "missing_price_nodes": [node for node in topology_nodes if node not in matched_rows],
             "min_section_intervals": MIN_SECTION_INTERVALS,
+            "threshold": float(threshold),
             "section_interval_basis": "daily_accumulated",
             "severity_basis": "intervals_and_max_abs_diff",
             "layout_canvas_width": SVG_W,

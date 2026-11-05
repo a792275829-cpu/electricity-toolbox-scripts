@@ -140,7 +140,18 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertIn('"processed_rows": 2', html)
             self.assertIn('"severity_basis": "intervals_and_max_abs_diff"', html)
             self.assertIn('"min_section_intervals": 4', html)
+            self.assertIn('"threshold": 80.0', html)
             self.assertIn('"section_interval_basis": "daily_accumulated"', html)
+            self.assertIn('id="gapThreshold" type="number" min="0" step="5" inputmode="decimal" value="80"', html)
+            self.assertIn('id="gapThresholdReset"', html)
+            self.assertIn('id="thresholdCount"', html)
+            toolbar_start = html.index('<div class="map-toolbar">')
+            self.assertLess(toolbar_start, html.index('class="threshold-control"'))
+            self.assertLess(html.index('class="threshold-control"'), html.index('id="zoomIn"'))
+            self.assertIn('function edgeSectionStats(edge, threshold)', html)
+            self.assertIn('function applyGapThreshold(threshold)', html)
+            self.assertIn('function refreshTimelineBand()', html)
+            self.assertIn('if (absDiff <= threshold) continue;', html)
             self.assertIn('按累计时点', html)
             self.assertNotIn('累计时点更多、价差更大', html)
             self.assertNotIn('原始数据行数：', html)
@@ -301,6 +312,45 @@ class Build500kVMapHtmlTest(unittest.TestCase):
 
         self.assertLess(payloads[0]["severity"], payloads[1]["severity"])
         self.assertLess(payloads[1]["severity"], payloads[2]["severity"])
+
+    def test_build_map_html_embeds_generation_threshold_as_page_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            original_path = tmp_path / "original.xlsx"
+            processed_path = tmp_path / "processed.xlsx"
+            analysis_path = tmp_path / "analysis.xlsx"
+            topology_path = tmp_path / "topology.md"
+            output_path = tmp_path / "map.html"
+
+            self._write_price_workbook(original_path, extra_rows=0)
+            self._write_price_workbook(processed_path, extra_rows=0)
+            self._write_analysis_workbook(analysis_path)
+            topology_path.write_text(
+                """# test
+
+## 2. 跨片区主通道边
+
+### 佛山片 - 东莞片
+凤城-水乡
+
+## 3. next
+""",
+                encoding="utf-8",
+            )
+
+            build_map_html(
+                topology_path=topology_path,
+                original_price_path=original_path,
+                processed_price_path=processed_path,
+                analysis_path=analysis_path,
+                output_path=output_path,
+                threshold=120,
+            )
+
+            html = output_path.read_text(encoding="utf-8")
+            self.assertIn('"threshold": 120.0', html)
+            self.assertIn('id="gapThreshold" type="number" min="0" step="5" inputmode="decimal" value="120"', html)
+            self.assertIn("const DEFAULT_GAP_THRESHOLD = Number.isFinite(Number(DATA.metadata.threshold))", html)
 
     def _write_price_workbook(self, path: Path, extra_rows: int) -> None:
         wb = Workbook()

@@ -243,7 +243,7 @@ class CalendarInputTests(unittest.TestCase):
                             page.start_generate()
                         self.assertEqual(run.call_args.args[0][-1], "2026-05-03")
                     elif page_type is MarketReportPage:
-                        # 报告日期只读展示，由 d 日收益表自动识别。
+                        # 报告日期只读展示，由 D 日收益表自动识别。
                         form = next(child for child in page.content.winfo_children()
                                     if isinstance(child, ttk.LabelFrame))
 
@@ -255,7 +255,7 @@ class CalendarInputTests(unittest.TestCase):
                         labels = [child.cget("text") for child in descendants(form)
                                   if isinstance(child, ttk.Label)]
                         self.assertIn("报告日期", labels)
-                        self.assertIn("d-1 日收益表（必选）", labels)
+                        self.assertIn("D-1 日收益表", labels)
                         date_entries = [child for child in descendants(form) if isinstance(child, ttk.Entry)
                                         and str(child.cget("textvariable")) == str(page.report_date)]
                         self.assertEqual([str(entry.cget("state")) for entry in date_entries], ["readonly"])

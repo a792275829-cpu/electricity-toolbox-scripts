@@ -48,14 +48,14 @@ class MarketReportPage(ToolPage):
         date_row = ttk.Frame(form)
         date_row.grid(row=0, column=1, columnspan=2, sticky="w", pady=5)
         ttk.Entry(date_row, textvariable=self.report_date, width=18, state="readonly").pack(side="left")
-        self.date_hint = ttk.Label(date_row, text="选择 d 日收益表后自动识别", style="Muted.TLabel")
+        self.date_hint = ttk.Label(date_row, text="选择 D 日收益表后自动识别", style="Muted.TLabel")
         self.date_hint.pack(side="left", padx=(10, 0))
 
         buttons = []
         for row, label, variable, hook in (
-            (1, "d 日收益表", self.day_report, self.read_report_date),
-            (2, "d-1 日收益表（必选）", self.previous_report, None),
-            (3, "d-2 收益表", self.d2_report, None),
+            (1, "D 日收益表", self.day_report, self.read_report_date),
+            (2, "D-1 日收益表", self.previous_report, None),
+            (3, "D-2 日收益表", self.d2_report, None),
         ):
             buttons.append(add_path_row(
                 form, row=row, label=label, variable=variable,
@@ -118,13 +118,13 @@ class MarketReportPage(ToolPage):
             return
         self._date_source = str(path)
         self.report_date.set(detected.isoformat())
-        self.date_hint.configure(text="已按 d 日收益表识别")
+        self.date_hint.configure(text="已按 D 日收益表识别")
 
     def derive_report_date(self, path: Path) -> date:
         try:
             return report_date_from_day_report(path)
         except Exception as exc:
-            raise ValueError(f"无法从 d 日收益表识别报告日期：{exc}") from exc
+            raise ValueError(f"无法从 D 日收益表识别报告日期：{exc}") from exc
 
     def current_report_date(self) -> date:
         """Report date bound to the selected D workbook; a stale value is re-read."""
@@ -134,13 +134,13 @@ class MarketReportPage(ToolPage):
             return parse_date_input(text)
         if not day_path:
             if self._date_error:
-                raise ValueError(f"无法从 d 日收益表识别报告日期：{self._date_error}")
-            raise ValueError("请先选择 d 日收益表，报告日期将自动识别。")
+                raise ValueError(f"无法从 D 日收益表识别报告日期：{self._date_error}")
+            raise ValueError("请先选择 D 日收益表，报告日期将自动识别。")
         detected = self.derive_report_date(Path(day_path))
         self._date_source = day_path
         self._date_error = ""
         self.report_date.set(detected.isoformat())
-        self.date_hint.configure(text="已按 d 日收益表识别")
+        self.date_hint.configure(text="已按 D 日收益表识别")
         return detected
 
     def open_market_editor(self):
@@ -168,7 +168,7 @@ class MarketReportPage(ToolPage):
     def build_command(self) -> list[str]:
         variables = (self.day_report, self.previous_report, self.d2_report)
         if any(not variable.get().strip() for variable in variables):
-            raise ValueError("请选择 d 日收益表、d-1 日收益表和 d-2 收益表。")
+            raise ValueError("请选择 D 日收益表、D-1 日收益表和 D-2 日收益表。")
         sources = [Path(variable.get().strip()) for variable in variables]
         missing = [str(source) for source in sources if not source.is_file()]
         if missing:

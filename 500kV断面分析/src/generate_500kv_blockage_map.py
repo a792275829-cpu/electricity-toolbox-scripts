@@ -89,6 +89,7 @@ def _run_pipeline(
         analysis_path=analysis_result.output_path,
         output_path=html_path,
         analysis_data=analysis_result.data,
+        threshold=threshold,
     )
 
     return BlockageMapResult(
