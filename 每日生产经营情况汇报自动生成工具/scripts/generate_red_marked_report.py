@@ -153,6 +153,103 @@ def previous_report_path(report_date: str, output_dir: Path) -> Path:
     return output_dir / report_filename(previous_day.strftime("%Y-%m-%d"))
 
 
+WORKBOOK_DATE_TARGETS = (
+    ("online_workbook", "前一日工作簿（上网电量、前一日机组启停）", "actualOnlineEnergyDate"),
+    ("day_ahead_workbook", "报告日工作簿（日前电量、报告日机组启停）", "dayAheadDate"),
+    ("daily_clearing_workbook", "前两日工作簿（日清分表、现货偏差分析）", "dailyClearingDate"),
+)
+
+# 这些小节里只有首段由接口生成，其后段落沿用上一份报告，需人工核对。
+MANUAL_SECTION_SPECS = (
+    ("三、现货交易策略", "首段由接口数据生成；其后粤东线路检修与各厂策略沿用上一份报告，需人工核对。"),
+    ("五、短期市场预测", "首段天气由接口更新，段内「预计统调最高负荷…」为手写；其后负荷与均价区间沿用上一份报告，需人工核对。"),
+)
+
+SECTION_STOP_PREFIXES = ("一、", "二、", "三、", "四、", "五、", "表1", "表2", "下表为")
+
+
+def collect_manual_sections(document) -> list[dict[str, str]]:
+    """按小节结构列出仍需人工维护的段落，避免上一份报告的文字被当成当日内容。"""
+    sections: list[dict[str, str]] = []
+    for title, note in MANUAL_SECTION_SPECS:
+        try:
+            heading = find_exact_paragraph(document, title)
+        except ValueError:
+            continue
+        texts: list[str] = []
+        node = heading._p.getnext()
+        while node is not None:
+            if node.tag == qn("w:p"):
+                text = Paragraph(node, heading._parent).text.strip()
+                if text.startswith(SECTION_STOP_PREFIXES):
+                    break
+                if text:
+                    texts.append(text)
+            node = node.getnext()
+        for text in texts[1:]:
+            sections.append({"section": title, "text": text, "note": note})
+    return sections
+
+
+def read_workbook_run_date(workbook_path: Path | None) -> str | None:
+    """读取「基础信息」A2 的运行日；读不到时返回 None。"""
+    if not workbook_path:
+        return None
+    try:
+        workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    except Exception:
+        return None
+    value: Any = None
+    try:
+        sheet_name = next(
+            (name for name in workbook.sheetnames if name.strip() == "\u57fa\u7840\u4fe1\u606f"),
+            None,
+        )
+        if sheet_name is None:
+            return None
+        for row in workbook[sheet_name].iter_rows(
+            min_row=2, max_row=2, min_col=1, max_col=1, values_only=True
+        ):
+            value = row[0] if row else None
+            break
+    finally:
+        workbook.close()
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, str):
+        text = value.strip()
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(text[:10], fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        return None
+    return None
+
+
+def check_workbook_dates(plan: dict[str, str], **workbooks: Path | None) -> list[dict[str, str]]:
+    """核对三份工作簿的运行日与日期口径；不符只报警，不中断生成。"""
+    mismatches: list[dict[str, str]] = []
+    for key, label, plan_key in WORKBOOK_DATE_TARGETS:
+        path = workbooks.get(key)
+        if not path:
+            continue
+        expected = plan[plan_key]
+        actual = read_workbook_run_date(Path(path))
+        if actual == expected:
+            continue
+        mismatches.append(
+            {
+                "workbook": key,
+                "label": label,
+                "file": str(path),
+                "expectedDate": expected,
+                "actualDate": actual or "\u8bfb\u4e0d\u5230\u8fd0\u884c\u65e5",
+            }
+        )
+    return mismatches
+
+
 def resolve_template_path(
     report_date: str,
     template_path: Path,
@@ -1556,6 +1653,19 @@ def generate(
     from fetch_daily_data import build_report_date_plan, run_daily_data
 
     plan = build_report_date_plan(report_date)
+    workbook_date_warnings = check_workbook_dates(
+        plan,
+        online_workbook=online_workbook,
+        day_ahead_workbook=day_ahead_workbook,
+        daily_clearing_workbook=daily_clearing_workbook,
+    )
+    for warning in workbook_date_warnings:
+        log(
+            "\u5de5\u4f5c\u7c3f\u65e5\u671f\u4e0e\u53e3\u5f84\u4e0d\u7b26\uff1a"
+            f"{warning['label']} \u5e94\u4e3a {warning['expectedDate']}\uff0c"
+            f"\u5b9e\u9645\u8fd0\u884c\u65e5 {warning['actualDate']}"
+            f"\uff08{Path(warning['file']).name}\uff09"
+        )
     actual_template_path = resolve_template_path(
         report_date,
         template_path,
@@ -1667,6 +1777,10 @@ def generate(
         doc.save(out_path)
 
     audit_path = output_dir / f"red_report_audit_{report_date}.json"
+    manual_sections = collect_manual_sections(doc)
+    if manual_sections:
+        names = sorted({item["section"] for item in manual_sections})
+        log(f"以下小节共 {len(manual_sections)} 段沿用上一份报告，需人工核对：{'、'.join(names)}")
     audit = {
         "reportDate": report_date,
         "datePlan": plan,
@@ -1691,6 +1805,8 @@ def generate(
         "unitStatusError": unit_status_error,
         "spotDeviationFilled": spot_filled,
         "spotDeviationSkipped": (daily_clearing or {}).get("spotSkipReason"),
+        "workbookDateWarnings": workbook_date_warnings,
+        "manualSections": manual_sections,
         "onlineEnergyError": online_energy_error,
         "dailyClearingError": daily_clearing_error,
         "weatherError": weather_error,
