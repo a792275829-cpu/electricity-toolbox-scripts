@@ -1449,9 +1449,8 @@ def fill_spot_deviation_analysis(document, texts: tuple[str, str]) -> bool:
         return False
     for label, text in targets:
         label_paragraph = find_exact_paragraph(document, label)
-        body = next_nonempty_paragraph(document, label_paragraph)
-        replace_paragraph(body, text)
-        highlight_negative_numbers(body)
+        # 现货偏差分析两段正文不标红负数（只有日清分表与市场分析段标红）。
+        replace_paragraph(next_nonempty_paragraph(document, label_paragraph), text)
     return True
 
 

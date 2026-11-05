@@ -225,6 +225,26 @@ class DailyClearingFillTests(unittest.TestCase):
         label = texts.index("实际-实时：")
         self.assertIn("实现45万元增收", texts[label + 1])
 
+    def test_spot_paragraphs_are_not_red(self) -> None:
+        # 现货偏差分析两段正文不标红负数，只有日清分表与市场分析段标红。
+        target = Path(self._directory.name) / "report_plain.docx"
+        shutil.copy(LOCAL_TEMPLATE_PATH, target)
+        document = Document(target)
+        fill_spot_deviation_analysis(document, build_spot_deviation_texts(self.data["spot"]))
+        document.save(target)
+
+        saved = Document(target)
+        texts = [paragraph.text.strip() for paragraph in saved.paragraphs]
+        for heading in ("日前-实时：", "实际-实时："):
+            body = saved.paragraphs[texts.index(heading) + 1]
+            reds = [
+                run.text
+                for run in body.runs
+                if run.font.color and run.font.color.rgb
+                and str(run.font.color.rgb).upper() == "FF0000"
+            ]
+            self.assertEqual(reds, [], f"{heading} 正文不应标红")
+
 
 if __name__ == "__main__":
     unittest.main()
