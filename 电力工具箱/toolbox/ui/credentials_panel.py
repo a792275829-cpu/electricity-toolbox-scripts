@@ -351,7 +351,7 @@ class CredentialsPanel(ttk.Frame):
     def _login_current_tool(self) -> None:
         page = getattr(self.winfo_toplevel(), "_visible_page", None)
         from toolbox_shared.login_tools import STATE_DIRS
-        if getattr(page, "tool_id", None) in {*STATE_DIRS, "summary-upload", "group-upload"}:
+        if getattr(page, "tool_id", None) in {*STATE_DIRS, "summary-upload", "group-upload", "private-batch-upload"}:
             callback = getattr(page, "start_login", None)
             if callback is not None:
                 callback()

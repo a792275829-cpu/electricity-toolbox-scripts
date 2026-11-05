@@ -79,7 +79,8 @@ class ToolboxService:
                 raise ValueError("该工具已有任务运行，请等待完成")
             if self.confirmation(tool_id, action, p) and params.get("confirmed") is not True:
                 raise ValueError("请先确认上传、覆盖或文件归类操作")
-            writable = tool_id in {"market-table", "transaction-info", "power-benefit", "spot-price", "group-upload"}
+            writable = tool_id in {"market-table", "transaction-info", "power-benefit", "spot-price",
+                                   "group-upload", "private-batch-upload"}
             cancellable = action not in {"run", "update"} or not (writable or tool_id in {"wps-writer", "guangdong-price"} or
                           tool_id == "summary-upload" and p["mode"] != "summary")
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix="toolbox-task-", suffix=".json", delete=False) as stream:
@@ -141,6 +142,8 @@ class ToolboxService:
 
     @staticmethod
     def confirmation(tool_id, action, p):
+        if tool_id == "private-batch-upload" and action == "run":
+            return f"确认将 {len(p.get('files') or [])} 个文件上传到「{p.get('unit', '')}」？"
         if tool_id == "group-upload" and action == "run":
             return "确认上传当前选择的数据文件？"
         if tool_id == "summary-upload":

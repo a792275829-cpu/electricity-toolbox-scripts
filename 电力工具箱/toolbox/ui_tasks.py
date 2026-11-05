@@ -125,7 +125,7 @@ class RemoteTaskRegistry(TaskRegistry):
             values = {key: get(key) for key in fields}
             if tool_id in {"section-analysis", "trade-analysis"}:
                 values["files"] = [str(p) for p in page.files]
-            if tool_id == "group-upload":
+            if tool_id in {"group-upload", "private-batch-upload"}:
                 values["files"] = [str(p) for p in page.selected_paths]
             if tool_id == "spot-price":
                 for key, label in (("guihu", "归湖"), ("tuolian", "鮀莲"), ("haifeng", "海风")):

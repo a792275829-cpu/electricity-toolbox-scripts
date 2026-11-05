@@ -37,7 +37,7 @@ class SampleMigrationTests(unittest.TestCase):
 
     def test_complete_idempotent_pack_keeps_relative_paths_and_excludes_unlisted_files(self):
         result = samples.migrate(self.source, self.destination, self.manifest)
-        self.assertEqual((result["modules"], result["local_file_modules"], result["sample_files"]), (15, 13, 13))
+        self.assertEqual((result["modules"], result["local_file_modules"], result["sample_files"]), (16, 13, 13))
         self.assertEqual(samples.migrate(self.source, self.destination, self.manifest)["copied_files"], 0)
         folder = Path(result["samples"])
         (folder / "auth_state.json").write_text('private')

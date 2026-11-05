@@ -24,7 +24,8 @@ def normalize_permissions(root: Path) -> None:
 
 EXCLUDED_PARTS = {".git", ".venv", "node_modules", "dist", "__pycache__", ".codegraph",
                   ".toolbox", ".state", ".qingneng-session", ".browser-profile",
-                  ".browser-profile-uploader", "wps-browser-profile", "输出", "logs", "local_data", "result", "测试样例"}
+                  ".browser-profile-uploader", ".batch-upload", "wps-browser-profile",
+                  "输出", "logs", "local_data", "result", "测试样例"}
 EXCLUDED_NAMES = {"config.json", "auth_state.json", "auth_state.json.lock", "upload.config.json",
                   "wps_excel_to_kdocs_config.json", "file_dialog_settings.json", "wps-chrome.pid",
                   "wps-chrome-state.json", "500kv_node_position_candidates.png",

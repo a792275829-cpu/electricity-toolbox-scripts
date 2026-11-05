@@ -1,6 +1,6 @@
 # 电力工作工具箱 macOS 版
 
-这是一个面向 macOS 的电力业务桌面工具集合。统一入口为 Tkinter 图形界面，当前集成 15 个工具，名称与工具箱侧栏一致：导出上网电量、风力预测截图、市场表更新、现货价格分析表更新、交易系统信息更新、功率调整收益统计表更新、广东电价预测、出清结果汇总上传、广东运行日报解析上传、出力受限分析、500kV断面分析、南方分公司电力市场日报、早报生成、上传集团每日数据和 WPS写入工具。
+这是一个面向 macOS 的电力业务桌面工具集合。统一入口为 Tkinter 图形界面，当前集成 16 个工具，名称与工具箱侧栏一致：导出上网电量、风力预测截图、市场表更新、现货价格分析表更新、交易系统信息更新、功率调整收益统计表更新、广东电价预测、出清结果汇总上传、广东运行日报解析上传、出力受限分析、500kV断面分析、南方分公司电力市场日报、早报生成、私有数据批量上传、上传集团每日数据和 WPS写入工具。
 
 仓库公开地址：[a792275829-cpu/electricity-toolbox-scripts](https://github.com/a792275829-cpu/electricity-toolbox-scripts)
 
@@ -35,7 +35,7 @@ macOS 14+、Apple 芯片电脑使用 DMG 桌面版，已内置 Python、Node、C
 - macOS 14 或更新版本（与桌面发行版一致；更旧的系统未验证）
 - Python 3.11（与发行运行时一致）
 - Google Chrome，用于网页登录、上传和 WPS/KDocs 流程
-- Node.js 18 或更新版本，仅“出清结果汇总上传”的上传功能需要
+- Node.js 18 或更新版本，仅“出清结果汇总上传”与“私有数据批量上传”的上传功能需要
 - 能访问相关业务系统的网络环境；如公司网络要求代理或 VPN，请先连接
 
 项目使用根目录下的 `.venv` 作为 Python 环境。不要把系统 Python 或个人电脑上的绝对解释器路径写入项目配置。
@@ -79,7 +79,7 @@ chmod +x setup_macos.command "00_启动/电力工具箱.command" \
 4. 检测 Node.js/npm；如果存在，则安装私有数据上传工具的 Node 依赖。
 5. 修复工具箱和 WPS 专用 Chrome 的 `.command` 启动权限。
 
-如果暂时没有 Node.js，其他 Python 工具仍可使用，只有“出清结果汇总上传”的上传功能不可用，汇总仍可使用。安装 Node.js 后执行：
+如果暂时没有 Node.js，其他 Python 工具仍可使用，只有“出清结果汇总上传”“私有数据批量上传”的上传功能不可用，汇总仍可使用。安装 Node.js 后执行：
 
 ```bash
 cd "电力工具脚本/private-data-uploader-tool"
@@ -239,7 +239,11 @@ cp "电力工具脚本/private-data-uploader-tool/upload.config.example.json" \
 电力工具脚本/private-data-uploader-tool/auth_state.json
 电力工具脚本/private-data-uploader-tool/auth_state.json.lock
 电力工具脚本/private-data-uploader-tool/.browser-profile-uploader/
+电力工具脚本/private-data-uploader-tool/.batch-upload/auth_state.json
+电力工具脚本/private-data-uploader-tool/.batch-upload/.browser-profile/
 ```
+
+“出清结果汇总上传”与“私有数据批量上传”各用一套登录态、锁和浏览器目录，可以同时运行；`.batch-upload/` 下的一组专供批量上传。
 
 首次执行“预览”或“开始上传”时会自动建立登录态。网络不可达时，日志会提示检查内网、VPN、代理和 `baseUrl`。
 

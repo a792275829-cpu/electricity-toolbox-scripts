@@ -37,6 +37,7 @@ from .transaction_info_page import TransactionInfoUpdatePage
 from .power_benefit_page import PowerBenefitUpdatePage
 from .market_report_page import MarketReportPage
 from .summary_upload_page import SummaryUploadPage
+from .private_batch_upload_page import PrivateBatchUploadPage
 from .page_support import DateInput, DateRangeInput, DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
 from .page_support import (
     add_path_row as _add_path_row,
@@ -1235,6 +1236,7 @@ def page_factories() -> Mapping[str, object]:
         "南方分公司电力市场日报": MarketReportPage,
         "出清结果汇总上传": SummaryUploadPage,
         "早报生成": ReportPage,
+        "私有数据批量上传": PrivateBatchUploadPage,
         "上传集团每日数据": GroupUploadPage,
         "市场表更新": MarketTableUpdatePage,
         "现货价格分析表更新": SpotPriceUpdatePage,

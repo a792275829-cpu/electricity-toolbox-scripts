@@ -7,56 +7,22 @@ import { fileURLToPath } from 'node:url';
 import { loadSharedAccount, markAccountSession, prepareAccountSession, writePrivateJson } from './qingneng-account.mjs';
 import { dataPath } from './storage-paths.mjs';
 import { acquireAuthLock } from './auth-lock.mjs';
+import {
+  TARGETS,
+  buildMultipart,
+  datesOf,
+  isAllowedFile,
+  planBatches,
+  resolveTarget,
+  summarizeImport,
+} from './batch-plan.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const dataDir = dataPath(rootDir);
 const defaultConfigPath = path.join(dataDir, 'upload.config.json');
 
-const targets = [
-  {
-    key: '海风',
-    aliases: ['海风'],
-    company: '华能广东汕头海上风电有限责任公司',
-    tenantId: 'e4c88ecc8ec18540018eeb6d767241fe',
-    pagePath: '/gdfire/PrivateDataManageCE/DataImport',
-  },
-  {
-    key: '鮀莲',
-    aliases: ['鮀莲', '金平'],
-    company: '华能（汕头金平）新能源有限责任公司',
-    tenantId: 'e4c9c04d959356250196b2b15da14f65',
-    pagePath: '/gdfire/PrivateDataManageCE/DataImport',
-  },
-  {
-    key: '归湖',
-    aliases: ['归湖', '潮州', '潮安'],
-    company: '华能（潮州潮安）新能源有限责任公司',
-    tenantId: 'e4c17edf9942cca6019974cabef4188d',
-    pagePath: '/gdfire/PrivateDataManageCE/DataImport',
-  },
-  {
-    key: '东莞',
-    aliases: ['东莞', '谢岗'],
-    company: '谢岗电厂',
-    tenantId: 'e4e6eb5c80731ac70180faa7f96904eb',
-    pagePath: '/gdfire/PrivateDataManage/DataImport',
-  },
-  {
-    key: '汕头',
-    aliases: ['汕头'],
-    company: '汕头电厂',
-    tenantId: 'e4e6eb5c80731ac70180fab1ba2f0559',
-    pagePath: '/gdfire/PrivateDataManage/DataImport',
-  },
-  {
-    key: '海门',
-    aliases: ['海门'],
-    company: '海门电厂',
-    tenantId: 'e4e6eb5c80731ac70180fab3532d0592',
-    pagePath: '/gdfire/PrivateDataManage/DataImport',
-  },
-];
+const targets = TARGETS;
 
 function log(message = '') {
   console.log(message);
@@ -78,6 +44,12 @@ function parseArgs(argv) {
     source: undefined,
     configPath: defaultConfigPath,
     headless: undefined,
+    batchState: false,
+    unit: undefined,
+    files: [],
+    summaryType: undefined,
+    verify: true,
+    date: undefined,
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -85,10 +57,27 @@ function parseArgs(argv) {
     if (arg === '--plan') args.mode = 'plan';
     else if (arg === '--execute') args.mode = 'execute';
     else if (arg === '--login') args.mode = 'login';
+    else if (arg === '--batch') {
+      // 批量模式使用独立的登录态与浏览器目录，可与“出清结果汇总上传”同时运行。
+      args.batchState = true;
+      if (args.mode === 'plan') args.mode = 'batch';
+    }
+    else if (arg === '--status') {
+      args.mode = 'status';
+      args.batchState = true;
+      args.verify = false;
+    }
+    else if (arg === '--date') args.date = argv[++i];
     else if (arg === '--headed') args.headless = false;
     else if (arg === '--headless') args.headless = true;
     else if (arg === '--source') args.source = argv[++i];
     else if (arg === '--config') args.configPath = argv[++i];
+    else if (arg === '--unit') args.unit = argv[++i];
+    else if (arg === '--files') {
+      args.files.push(...String(argv[++i] ?? '').split(',').map((value) => value.trim()).filter(Boolean));
+    }
+    else if (arg === '--summary-type') args.summaryType = argv[++i];
+    else if (arg === '--no-verify') args.verify = false;
     else throw new Error(`未知参数：${arg}`);
   }
 
@@ -110,7 +99,9 @@ async function loadConfig(args) {
   const loginConfig = await readJson(loginConfigPath, {});
   const sharedAccount = await loadSharedAccount(path.resolve(rootDir, '../..'));
   const sourceDir = args.source ?? config.sourceDir;
-  if (args.mode !== 'login' && !sourceDir) throw new Error('请选择复盘文件夹或配置 sourceDir。');
+  if (args.mode !== 'login' && !args.batchState && !sourceDir) throw new Error('请选择复盘文件夹或配置 sourceDir。');
+  // 批量上传与目录上传是两条可并行的路径：登录态、锁和浏览器目录各自独立。
+  const stateDir = args.batchState ? path.join(dataDir, '.batch-upload') : dataDir;
   return {
     ...config,
     loginConfigPath,
@@ -119,8 +110,12 @@ async function loadConfig(args) {
     accountRevision: sharedAccount.revision ?? '',
     headless: args.headless ?? config.headless ?? loginConfig.headless ?? true,
     sourceDir: path.resolve(sourceDir ?? dataDir),
-    authStatePath: dataPath(path.resolve(config.authStatePath ?? path.join(dataDir, 'auth_state.json'))),
-    userDataDir: dataPath(path.resolve(config.userDataDir ?? path.join(dataDir, '.browser-profile-uploader'))),
+    authStatePath: dataPath(path.resolve(
+      args.batchState ? path.join(stateDir, 'auth_state.json') : (config.authStatePath ?? path.join(stateDir, 'auth_state.json')),
+    )),
+    userDataDir: dataPath(path.resolve(
+      args.batchState ? path.join(stateDir, '.browser-profile') : (config.userDataDir ?? path.join(stateDir, '.browser-profile-uploader')),
+    )),
     chromeExecutablePath: config.chromeExecutablePath,
     baseUrl: config.baseUrl ?? 'https://xhxt.chng.com.cn',
   };
@@ -506,6 +501,205 @@ async function executeUpload(plan, config) {
   }
 }
 
+async function collectBatchFiles(values) {
+  if (!Array.isArray(values) || values.length === 0) throw new Error('请至少选择一个上传文件。');
+  const files = [];
+  for (const value of values) {
+    const resolved = path.resolve(String(value));
+    const stat = await fs.stat(resolved).catch(() => undefined);
+    if (!stat?.isFile()) throw new Error(`文件不存在：${resolved}`);
+    const name = path.basename(resolved);
+    if (!isAllowedFile(name)) {
+      throw new Error(`不支持的文件类型：${name}（网站只接受 csv、xls、xlsx、pdf、zip）`);
+    }
+    if (stat.size > 10 * 1024 * 1024) throw new Error(`单个文件超过 10MB，网站不接受：${name}`);
+    files.push({ path: resolved, size: stat.size });
+  }
+  return files;
+}
+
+async function switchTenantForImport(page, config, target) {
+  log(`切换单位：${target.key} -> ${target.company}`);
+  const switchResponse = await page.goto(`${config.baseUrl}/usercenter/web/switchTenant?tenantId=${target.tenantId}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000,
+  });
+  log(`切换接口返回：HTTP ${switchResponse?.status() ?? 'unknown'}`);
+  const importResponse = await page.goto(`${config.baseUrl}${target.pagePath}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 60_000,
+  });
+  log(`导入页面返回：HTTP ${importResponse?.status() ?? 'unknown'}`);
+  if (isLoginPage(page)) {
+    throw loginFailure('session', '进入私有数据导入页面时登录态失效，请先重新登录。');
+  }
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+}
+
+async function postBatch(context, config, batch, fields) {
+  const payloadFiles = [];
+  for (const file of batch.files) {
+    payloadFiles.push({ ...file, buffer: await fs.readFile(file.path) });
+  }
+  const { body, contentType } = buildMultipart(payloadFiles, fields);
+  const startedAt = Date.now();
+  const label = `${batch.files.length} 个文件`;
+  const heartbeat = setInterval(() => {
+    const elapsed = Math.round((Date.now() - startedAt) / 1000);
+    log(`服务器仍在处理${label}，已等待 ${elapsed} 秒`);
+  }, 15_000);
+  try {
+    const response = await context.request.post(`${config.baseUrl}/gdfire/api/data/personal/import`, {
+      headers: { 'content-type': contentType },
+      data: body,
+      timeout: 300_000,
+    });
+    const text = await response.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`上传接口返回内容不是 JSON（HTTP ${response.status()}）：${text.slice(0, 300)}`);
+    }
+    if (response.status() >= 400 || (parsed?.retCode && parsed.retCode !== 'T200')) {
+      throw new Error(`上传失败 HTTP ${response.status()}：${JSON.stringify(parsed).slice(0, 500)}`);
+    }
+    return summarizeImport(Array.isArray(parsed) ? parsed : parsed?.data);
+  } finally {
+    clearInterval(heartbeat);
+  }
+}
+
+/** 返回 undefined 表示查询失败（未登录、参数被拒等），空数组才是“确实没有记录”。 */
+async function fetchImportStatus(context, config, dates) {
+  const start = dates[0];
+  const end = dates[dates.length - 1];
+  // 与页面一致：dataTypes 传分类标记 TRADE，返回体在 data.data 里。
+  const response = await context.request.get(`${config.baseUrl}/gdfire/api/data/personal`, {
+    params: { startTime: start, endTime: end, currentTime: start, dataTypes: 'TRADE' },
+    timeout: 30_000,
+  }).catch(() => undefined);
+  if (!response || response.status() >= 400) return undefined;
+  const body = await response.json().catch(() => undefined);
+  if (body?.retCode !== 'T200') return undefined;
+  const rows = body?.data?.data ?? body?.data?.records ?? body?.data;
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function logImportStatus(context, config, items) {
+  const dates = datesOf(items);
+  if (dates.length === 0) {
+    log('回读：接口未返回数据日期，跳过状态核对。');
+    return;
+  }
+  const rows = await fetchImportStatus(context, config, dates);
+  if (rows === undefined) {
+    log('回读：数据状态查询接口暂不可用，已以导入接口返回结果为准。');
+    return;
+  }
+  const pending = rows.filter((row) => String(row.importStatus) !== '1');
+  log(`回读 ${dates.map((value) => String(value).slice(0, 10)).join('、')}：共 ${rows.length} 条记录，已上传 ${rows.length - pending.length} 条，未上传 ${pending.length} 条。`);
+  for (const row of pending.slice(0, 20)) {
+    log(`   未上传：${String(row.date ?? '').slice(0, 10)} ${row.dataType ?? ''} ${row.updateTime ?? ''}`.trim());
+  }
+}
+
+function shanghaiToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+async function runStatus(config, args) {
+  const target = resolveTarget(args.unit);
+  const day = args.date ?? shanghaiToday();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error(`日期格式应为 YYYY-MM-DD：${day}`);
+  log(`单元：${target.key} -> ${target.company}`);
+  log(`查询日期：${day}`);
+
+  const releaseLock = await acquireAuthLock(config, undefined, log);
+  let browser;
+  let context;
+  try {
+    ({ browser, context } = await launchContext(config));
+    await ensureLogin(context, config);
+    const page = await context.newPage();
+    await switchTenantForImport(page, config, target);
+    const rows = await fetchImportStatus(context, config, [day]);
+    if (rows === undefined) throw new Error('数据状态查询失败，请检查登录态或接口是否变更。');
+    log(`共 ${rows.length} 条记录：`);
+    for (const row of rows) {
+      const status = String(row.importStatus) === '1' ? '已上传' : '未上传';
+      log(`   ${[row.date, row.dataType, row.units, status, row.updateTime].filter(Boolean).join(' | ')}`);
+    }
+    await saveAuthState(context, config);
+  } finally {
+    await context?.close().catch(() => {});
+    await browser?.close().catch(() => {});
+    await releaseLock();
+  }
+}
+
+async function runBatch(config, args) {
+  const target = resolveTarget(args.unit);
+  const files = await collectBatchFiles(args.files);
+  const batches = planBatches(files);
+  const fields = { personalDataTypeSourceMap: '{}' };
+  if (args.summaryType === 'formal' || args.summaryType === 'temporary') {
+    fields['customParams[summaryType]'] = args.summaryType === 'temporary' ? '2' : '1';
+  }
+
+  log(`单元：${target.key} -> ${target.company}`);
+  log(`共 ${files.length} 个文件，分 ${batches.length} 批上传。`);
+
+  const releaseLock = await acquireAuthLock(config, undefined, log);
+  let browser;
+  let context;
+  const succeeded = [];
+  const failed = [];
+  try {
+    ({ browser, context } = await launchContext(config));
+    await ensureLogin(context, config);
+    const page = await context.newPage();
+    await switchTenantForImport(page, config, target);
+
+    for (let index = 0; index < batches.length; index += 1) {
+      const batch = batches[index];
+      log(`[${index + 1}/${batches.length}] 上传 ${batch.files.length} 个文件（${(batch.bytes / 1048576).toFixed(2)}MB）`);
+      for (const file of batch.files) log(`   ${path.basename(file.path)}`);
+      const result = await postBatch(context, config, batch, fields);
+      succeeded.push(...result.succeeded);
+      failed.push(...result.failed);
+      if (result.items.length === 0) {
+        // 网站前端把空数组当作“全部成功”，此时没有逐文件明细可展示。
+        succeeded.push(...batch.files.map(() => ({ date: '', dataType: '' })));
+        log('   接口未返回逐文件明细，按本批全部提交成功处理。');
+        continue;
+      }
+      for (const item of result.succeeded) {
+        log(`   成功：${[item.date, item.dataType].filter(Boolean).join(' ')}`.trim());
+      }
+      for (const item of result.failed) {
+        log(`   失败：${[item.date, item.dataType, item.detail].filter(Boolean).join(' ')}`);
+      }
+      if (result.items.length < batch.files.length) {
+        log(`   提示：本批返回 ${result.items.length} 条结果，少于提交的 ${batch.files.length} 个文件，请核对网站下拉框中的明细。`);
+      }
+    }
+
+    await saveAuthState(context, config);
+    if (args.verify) await logImportStatus(context, config, [...succeeded, ...failed]);
+  } finally {
+    await context?.close().catch(() => {});
+    await browser?.close().catch(() => {});
+    await releaseLock();
+  }
+
+  if (failed.length > 0) {
+    const detail = failed.slice(0, 10).map((item) => `${item.date || '未知日期'} ${item.detail}`).join('；');
+    throw new Error(`有 ${failed.length} 个文件导入失败：${detail}`);
+  }
+  log(`全部上传完成：成功 ${succeeded.length} 个文件。`);
+}
+
 async function loginOnly(config) {
   const releaseLock = await acquireAuthLock(config, undefined, log);
   let browser;
@@ -528,6 +722,16 @@ async function main() {
 
   if (args.mode === 'login') {
     await loginOnly(config);
+    return;
+  }
+
+  if (args.mode === 'batch') {
+    await runBatch(config, args);
+    return;
+  }
+
+  if (args.mode === 'status') {
+    await runStatus(config, args);
     return;
   }
 

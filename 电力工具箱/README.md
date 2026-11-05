@@ -9,9 +9,9 @@
 ```text
 电力工具箱/
 ├── toolbox/
-│   ├── catalog.py          # 15 个工具的 tool_id、名称、分组、页面类
+│   ├── catalog.py          # 16 个工具的 tool_id、名称、分组、页面类
 │   ├── pages.py            # 大部分工具页面（ToolPage 子类）
-│   ├── *_page.py           # 独立页面的工具（现货价格、交易系统、风力、500kV、日报、市场日报、功率收益、汇总上传）
+│   ├── *_page.py           # 独立页面的工具（现货价格、交易系统、风力、500kV、日报、市场日报、功率收益、汇总上传、私有数据批量上传）
 │   ├── commands.py         # 页面参数 → 子进程命令行
 │   ├── runtime.py          # ToolPaths（各工具脚本与输出路径）、load_module
 │   ├── tasks/              # 进程执行、取消、进程组回收、任务事件

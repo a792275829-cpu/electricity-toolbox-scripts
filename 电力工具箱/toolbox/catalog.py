@@ -47,6 +47,7 @@ def default_catalog() -> tuple[ToolDescriptor, ...]:
         ToolDescriptor("section-analysis", "500kV断面分析", "分析与报告", "SectionAnalysisPage", "清洗节点电价并生成拓扑断面分析网页", page_module=".section_analysis_page"),
         ToolDescriptor("market-report", "南方分公司电力市场日报", "分析与报告", "MarketReportPage", "生成手机预览版与打印版 PDF", page_module=".market_report_page"),
         ToolDescriptor("report", "早报生成", "分析与报告", "ReportPage", "生成生产经营情况报告"),
+        ToolDescriptor("private-batch-upload", "私有数据批量上传", "上传与写入", "PrivateBatchUploadPage", "按单元批量上传私有数据，直连网站批量上传接口", page_module=".private_batch_upload_page"),
         ToolDescriptor("group-upload", "上传集团每日数据", "上传与写入", "GroupUploadPage", "上传能销和省内日报"),
         ToolDescriptor("wps-writer", "WPS写入工具", "上传与写入", "WpsWriterPage", "将本地或在线表格数据写入金山文档"),
     )

@@ -11,13 +11,30 @@ from .runtime import python_executable
 
 def login(paths, tool_id):
     from toolbox_shared.login_tools import STATE_DIRS
-    if tool_id == "summary-upload":
+    if tool_id in {"summary-upload", "private-batch-upload"}:
         from .runtime import node_executable
-        return [node_executable(), str(paths.private_uploader), "--login", "--headed"]
+        command = [node_executable(), str(paths.private_uploader), "--login", "--headed"]
+        # 批量上传使用独立登录态与浏览器目录，可与目录上传并行。
+        if tool_id == "private-batch-upload":
+            command.append("--batch")
+        return command
     if tool_id not in STATE_DIRS:
         raise ValueError("当前工具不使用清能网站登录。")
     return [python_executable(), str(paths.workspace / "toolbox_shared/login_tools.py"),
             "--workspace", str(paths.workspace), "--tool", tool_id]
+
+
+def private_batch(paths, unit, files, *, summary_type="none", verify=True):
+    from .runtime import node_executable
+    if not files:
+        raise ValueError("请至少选择一个上传文件。")
+    command = [node_executable(), str(paths.private_uploader), "--batch",
+               "--unit", str(unit), "--files", ",".join(str(path) for path in files)]
+    if summary_type in {"formal", "temporary"}:
+        command.extend(("--summary-type", summary_type))
+    if not verify:
+        command.append("--no-verify")
+    return command
 
 
 def dated_script(script: Path, run_date: str) -> list[str]:

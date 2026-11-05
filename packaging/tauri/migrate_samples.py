@@ -17,7 +17,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "电力工具箱")]
 from toolbox.catalog import default_catalog
 from toolbox_shared.credentials import write_private_json
 
-ONLINE_ONLY = {"online-energy", "wind-forecast"}
+ONLINE_ONLY = {"online-energy", "wind-forecast", "private-batch-upload"}
 ALLOWED_SUFFIXES = {".xlsx", ".xls", ".xlsm", ".docx", ".pdf", ".md", ".json", ".csv", ".txt"}
 PRIVATE_NAMES = {"config.json", "auth_state.json", "upload.config.json", "wps_excel_to_kdocs_config.json"}
 

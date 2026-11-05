@@ -36,7 +36,7 @@ assert "tkinter" not in sys.modules
         replies = {row['id']: row for row in rows if 'id' in row}
         self.assertIn('error', replies[None])
         self.assertEqual(replies[1]['result']['protocol'], 3)
-        self.assertEqual(len(replies[2]['result']), 15)
+        self.assertEqual(len(replies[2]['result']), 16)
         self.assertEqual(rows[-1]['event']['kind'], 'service-closed')
 
 

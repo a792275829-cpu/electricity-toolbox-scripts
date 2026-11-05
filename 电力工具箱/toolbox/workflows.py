@@ -192,6 +192,14 @@ def plan(paths, tool_id, action, p):
         p["output_file"] = str(output)
         if action == "preview" or p["mode"] != "summary":
             node_executable()
+    elif tool_id == "private-batch-upload":
+        files = selected_files(p)
+        oversized = [path.name for path in files if path.stat().st_size > 10 * 1024 * 1024]
+        if oversized:
+            raise ValueError("网站不接受超过 10MB 的单个文件：" + "、".join(oversized))
+        return [(commands.private_batch(paths, p["unit"], files,
+                summary_type=p.get("summary_type", "none"), verify=p.get("verify", True)),
+                paths.private_uploader_dir)]
     elif tool_id == "group-upload":
         selected_files(p)
     elif tool_id == "wps-writer":

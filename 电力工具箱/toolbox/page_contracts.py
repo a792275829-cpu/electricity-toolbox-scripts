@@ -14,7 +14,7 @@ def requires_qingneng(tool_id, action="run", values=None):
     if tool_id == "report":
         return action == "login" or values.get("fetch_data", True)
     return tool_id in {"online-energy", "wind-forecast", "market-table", "transaction-info", "power-benefit",
-                       "spot-price", "market-report", "guangdong-price", "group-upload"}
+                       "spot-price", "market-report", "guangdong-price", "group-upload", "private-batch-upload"}
 
 
 @dataclass(frozen=True)
@@ -37,5 +37,6 @@ PAGE_BINDINGS = MappingProxyType({
     'report': PageBinding('report', ('report_date', 'online_workbook', 'day_ahead_workbook', 'daily_workbook', 'template_report', 'fetch_data', 'generate_word')),
     'guangdong-price': PageBinding('guangdong-price', ('run_date', 'master_workbook', 'prediction_output_dir', 'training_months', 'forecast_days')),
     'group-upload': PageBinding('group-upload', ('force',)),
+    'private-batch-upload': PageBinding('private-batch-upload', ('unit', 'summary_type', 'verify')),
     'summary-upload': PageBinding('summary-upload', ('input_dir', 'mode')),
 })

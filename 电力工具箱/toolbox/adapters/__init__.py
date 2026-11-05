@@ -29,6 +29,7 @@ def default_adapters() -> dict[str, ToolAdapter]:
         ToolAdapter("summary-upload", destructive=True),
         ToolAdapter("report"),
         ToolAdapter("group-upload", destructive=True),
+        ToolAdapter("private-batch-upload", destructive=True),
         ToolAdapter("wps-writer", destructive=True),
     )
     return {item.tool_id: item for item in rows}

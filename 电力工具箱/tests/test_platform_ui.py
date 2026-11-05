@@ -8,12 +8,12 @@ from pathlib import Path
 
 
 class CatalogTests(unittest.TestCase):
-    def test_catalog_has_fifteen_unique_tools_in_business_groups(self) -> None:
+    def test_catalog_has_unique_tools_in_business_groups(self) -> None:
         from toolbox.catalog import default_catalog
 
         catalog = default_catalog()
-        self.assertEqual(15, len(catalog))
-        self.assertEqual(15, len({item.tool_id for item in catalog}))
+        self.assertEqual(16, len(catalog))
+        self.assertEqual(16, len({item.tool_id for item in catalog}))
         self.assertEqual(
             {"数据采集", "分析与报告", "上传与写入"},
             {item.category for item in catalog},
