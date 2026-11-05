@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from docx import Document
+from docx.oxml.ns import qn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -85,11 +86,40 @@ class ForecastTableCompactTests(unittest.TestCase):
 
     def test_compact_keeps_table_within_one_page(self) -> None:
         document, table = self._table()
-        compact_forecast_table(table)
         section = document.sections[0]
         available = section.page_height.cm - section.top_margin.cm - section.bottom_margin.cm
+        compact_forecast_table(table, available_height_cm=available)
+        # 行高按版心高度反算，保证标题＋整表不超过一页。
         total = sum(row.height.cm for row in table.rows)
-        self.assertLess(total + 1.0, available)  # 预留标题行
+        self.assertLess(total + 2.0, available)
+
+    def test_compact_caps_row_height_for_small_page(self) -> None:
+        _, table = self._table()
+        compact_forecast_table(table, available_height_cm=10.0)
+        # (10 - 2) / 26 ≈ 0.31cm，下限 0.32cm；26 行共 8.32cm + 2cm < 10cm。
+        for row in table.rows:
+            self.assertAlmostEqual(row.height.cm, 0.32, places=2)
+        self.assertLess(sum(row.height.cm for row in table.rows) + 2.0, 10.5)
+
+    def test_compact_disables_document_grid_and_cell_padding(self) -> None:
+        # 模板带 docGrid；不关「对齐到网格」时 Word 会把 10pt 行吸到 31pt，26 行跨两页。
+        _, table = self._table()
+        compact_forecast_table(table)
+        margins = table._tbl.tblPr.find(qn("w:tblCellMar"))
+        self.assertIsNotNone(margins)
+        self.assertEqual(margins.find(qn("w:top")).get(qn("w:w")), "0")
+        self.assertEqual(margins.find(qn("w:bottom")).get(qn("w:w")), "0")
+        for row in table.rows:
+            self.assertIsNotNone(row._tr.get_or_add_trPr().find(qn("w:cantSplit")))
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    properties = paragraph._p.get_or_add_pPr()
+                    snap = properties.find(qn("w:snapToGrid"))
+                    self.assertIsNotNone(snap)
+                    self.assertEqual(snap.get(qn("w:val")), "0")
+                    mark = properties.find(qn("w:rPr"))
+                    self.assertIsNotNone(mark)
+                    self.assertEqual(mark.find(qn("w:sz")).get(qn("w:val")), "20")
 
 
 class LeadingDateTests(unittest.TestCase):

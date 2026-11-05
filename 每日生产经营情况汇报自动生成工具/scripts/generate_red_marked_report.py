@@ -19,6 +19,7 @@ from typing import Any
 from openpyxl import load_workbook
 from docx import Document
 from docx.enum.table import WD_ROW_HEIGHT_RULE
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 from docx.text.paragraph import Paragraph
@@ -1838,22 +1839,86 @@ def fill_forecast_table(table, forecast: dict[str, Any]) -> None:
 
 FORECAST_TABLE_FONT_SIZE = 10  # pt
 FORECAST_TABLE_ROW_HEIGHT = Cm(0.5)
+FORECAST_TABLE_HEADING_ALLOWANCE_CM = 2.0  # 标题段 + 页脚/安全余量
 
 
-def compact_forecast_table(table) -> int:
-    """收紧海风预测表的字号、行高与段距，让 26 行整表落在一页内。"""
+def _disable_paragraph_grid(paragraph, font_size_pt: float) -> None:
+    """关掉「对齐到网格」并把段落标记字号一起缩小。
+
+    模板的节里有 <w:docGrid w:type="lines" w:linePitch="312"/>，Word 会把表格里
+    每一行文字吸附到文档网格上，10pt 字实际占两格（约 31pt），26 行会撑到两页。
+    只改字号和行高没有用，必须显式写 <w:snapToGrid w:val="0"/>；段落标记的
+    rPr/sz 也要同步，否则 Word 仍按 12pt 段落标记计算行高。
+    """
+    properties = paragraph._p.get_or_add_pPr()
+    snap = properties.find(qn("w:snapToGrid"))
+    if snap is None:
+        snap = OxmlElement("w:snapToGrid")
+        properties.insert_element_before(
+            snap, "w:spacing", "w:ind", "w:contextualSpacing", "w:mirrorIndents",
+            "w:suppressOverlap", "w:jc", "w:textDirection", "w:textAlignment",
+            "w:textboxTightWrap", "w:outlineLvl", "w:divId", "w:cnfStyle",
+            "w:rPr", "w:sectPr", "w:pPrChange",
+        )
+    snap.set(qn("w:val"), "0")
+    mark = properties.find(qn("w:rPr"))
+    if mark is None:
+        mark = OxmlElement("w:rPr")
+        properties.insert_element_before(mark, "w:sectPr", "w:pPrChange")
+    size = mark.get_or_add_sz()
+    size.val = Pt(font_size_pt)
+
+
+def _compact_table_cell_margins(table) -> None:
+    """表格单元格上下边距设为 0，避免默认样式把每行顶到 1cm 以上。"""
+    properties = table._tbl.tblPr
+    margins = properties.find(qn("w:tblCellMar"))
+    if margins is None:
+        margins = OxmlElement("w:tblCellMar")
+        properties.insert_element_before(
+            margins, "w:tblLook", "w:tblCaption", "w:tblDescription", "w:tblPrChange"
+        )
+    for side, width in (("top", 0), ("bottom", 0), ("left", 60), ("right", 60)):
+        element = margins.find(qn(f"w:{side}"))
+        if element is None:
+            element = OxmlElement(f"w:{side}")
+            margins.append(element)
+        element.set(qn("w:w"), str(width))
+        element.set(qn("w:type"), "dxa")
+
+
+def compact_forecast_table(table, *, available_height_cm: float | None = None) -> int:
+    """收紧海风预测表，使 26 行连同标题稳定落在一页 A4 内。
+
+    available_height_cm 传入版心高度时会按行数反算行高上限，防止模板换成
+    更小的纸张或更大边距后表格重新跨页。
+    """
+    count = len(table.rows)
+    row_height = FORECAST_TABLE_ROW_HEIGHT
+    if available_height_cm is not None and count:
+        budget_cm = (available_height_cm - FORECAST_TABLE_HEADING_ALLOWANCE_CM) / count
+        if budget_cm > 0:
+            row_height = min(row_height, Cm(max(0.32, budget_cm)))
+    _compact_table_cell_margins(table)
     for row in table.rows:
-        row.height = FORECAST_TABLE_ROW_HEIGHT
+        row.height = row_height
         row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+        row_properties = row._tr.get_or_add_trPr()
+        if row_properties.find(qn("w:cantSplit")) is None:
+            row_properties.insert_element_before(
+                OxmlElement("w:cantSplit"), "w:trHeight", "w:tblHeader",
+                "w:tblCellSpacing", "w:jc", "w:hidden", "w:ins", "w:del", "w:trPrChange",
+            )
         for cell in row.cells:
             for paragraph in cell.paragraphs:
                 paragraph_format = paragraph.paragraph_format
                 paragraph_format.space_before = Pt(0)
                 paragraph_format.space_after = Pt(0)
                 paragraph_format.line_spacing = 1.0
+                _disable_paragraph_grid(paragraph, FORECAST_TABLE_FONT_SIZE)
                 for run in paragraph.runs:
                     run.font.size = Pt(FORECAST_TABLE_FONT_SIZE)
-    return len(table.rows)
+    return count
 
 
 def generate(
@@ -2004,7 +2069,13 @@ def generate(
 
     if len(doc.tables) >= 2:
         fill_forecast_table(doc.tables[1], payload["rollingForecast"])
-        compact_forecast_table(doc.tables[1])
+        section = doc.sections[0]
+        compact_forecast_table(
+            doc.tables[1],
+            available_height_cm=(
+                section.page_height.cm - section.top_margin.cm - section.bottom_margin.cm
+            ),
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / report_filename(report_date)
