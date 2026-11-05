@@ -13,12 +13,19 @@ from github_update import Cancelled, GitHubUpdater
 
 
 class UpdateController:
+    # 后台检测失败时退避重试，避免网络短暂抖动就让新版本一直不出现。
+    RETRY_DELAY_MS = 30_000
+    RETRY_LIMIT = 2
+    # 长时间开机时不重启也应在几小时内发现新版本。
+    RECHECK_MS = 3 * 60 * 60 * 1000
+
     def __init__(self, app, service, updater=None):
         self.app, self.service = app, service
         self.updater = updater or GitHubUpdater(os.environ.get("TOOLBOX_APP_VERSION", "0.1.3"))
         self.release = None
         self.checking = False
         self.manual = False
+        self.retries = self.RETRY_LIMIT
         self.window = None
         self.messages = queue.Queue()
         self.app.after(40, self.poll)
@@ -44,7 +51,9 @@ class UpdateController:
         self.app.after(40, self.poll)
 
     def check(self, manual=False):
-        self.manual = self.manual or manual
+        if manual:
+            self.manual = True
+            self.retries = self.RETRY_LIMIT
         if self.checking:
             return
         self.checking = True
@@ -54,9 +63,15 @@ class UpdateController:
         self.checking = False
         manual, self.manual = self.manual, False
         if error:
+            self.app.set_update_check_failed(True)
             if manual:
                 messagebox.showerror("无法检查更新", str(error), parent=self.app)
+            elif self.retries:
+                self.retries -= 1
+                self.app.after(self.RETRY_DELAY_MS, self.check)
             return
+        self.retries = self.RETRY_LIMIT
+        self.app.set_update_check_failed(False)
         self.release = release
         self.app.set_update_available(release is not None)
         if manual:
@@ -64,6 +79,8 @@ class UpdateController:
                 self.show()
             else:
                 messagebox.showinfo("已是最新版本", f"当前版本 v{self.updater.current}", parent=self.app)
+        elif release is None:
+            self.app.after(self.RECHECK_MS, self.check)
 
     def show(self):
         if not self.release:

@@ -137,6 +137,28 @@ class GitHubUpdateTests(unittest.TestCase):
             self.assertEqual(result.update_asset["name"], "update-manifest.json")
             self.assertEqual(sum(method == "HEAD" for _, method in calls), 2)
 
+    def test_unreachable_api_still_finds_the_release_through_github_com(self):
+        """国内直连 api.github.com 常常超时，但 github.com 还能打开。"""
+        import socket
+        public, _ = self.public_opener()
+
+        def opener(request, timeout):
+            if request.full_url.startswith("https://api.github.com/"):
+                raise urllib.error.URLError(socket.timeout("timed out"))
+            return public(request, timeout)
+
+        result = GitHubUpdater("0.1.3", opener=opener).check()
+        self.assertEqual(result.version, "v1.2.0")
+        self.assertEqual(result.asset["size"], 123)
+        self.assertIsNotNone(result.update_asset)
+
+    def test_unreachable_api_and_public_page_report_both_failures(self):
+        def opener(request, timeout):
+            raise urllib.error.URLError("nodename nor servname provided")
+
+        with self.assertRaisesRegex(UpdateError, "无法连接 GitHub 更新接口.*备用检测失败"):
+            GitHubUpdater("0.1.3", opener=opener).check()
+
     def test_public_fallback_rejects_invalid_metadata_and_preserves_first_error(self):
         for options in ({"page": "https://evil.example/tag/v1.2.0"},
                         {"page": f"https://github.com/{REPO}/releases/tag/v1.2-beta"},

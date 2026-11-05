@@ -66,12 +66,14 @@ class ToolboxApp(tk.Tk):
         lazy_pages: bool | None = None,
         render_prototype: bool = False,
         check_updates: Callable[[], None] | None = None,
+        check_updates_manual: Callable[[], None] | None = None,
         registry: TaskRegistry | None = None,
     ) -> None:
         super().__init__()
         self.title("电力工作工具箱")
         self.paths = ToolPaths(workspace or default_workspace())
         self._check_updates = check_updates
+        self._check_updates_manual = check_updates_manual
         self._restart_requested = False
         # One shared asset serves the original Tk UI and both desktop targets.
         icon = Path(__file__).resolve().parents[2] / "desktop/assets/app-icon-256.png"
@@ -204,6 +206,9 @@ class ToolboxApp(tk.Tk):
         self.rail_toggle.grid(row=0, column=1, sticky="e")
         self.version_label = ttk.Label(status, text=application_version(), anchor="e", style="Status.TLabel")
         self.version_label.grid(row=0, column=2, sticky="e", padx=(14, 0))
+        if self._check_updates_manual is not None:
+            self.version_label.configure(cursor="hand2")
+            self.version_label.bind("<Button-1>", self._manual_update_check)
         if os.environ.get("TOOLBOX_SOURCE_DEBUG") == "1":
             self.restart_button = ttk.Button(status, text="重启源码版", command=self._restart, style="Quiet.TButton")
             self.restart_button.grid(row=0, column=3, sticky="e", padx=(14, 0))
@@ -214,6 +219,15 @@ class ToolboxApp(tk.Tk):
             self.update_button.pack(anchor="w")
         else:
             self.update_button.pack_forget()
+
+    def set_update_check_failed(self, failed: bool) -> None:
+        """检测失败时把版本号变成「检查更新」入口，别让失败静默成“已是最新”。"""
+        text = application_version()
+        self.version_label.configure(text=f"{text} · 检查更新" if failed else text)
+
+    def _manual_update_check(self, _event=None) -> None:
+        if self._check_updates_manual is not None:
+            self._check_updates_manual()
 
     def _resize_navigation(self, _event=None) -> None:
         width = self.nav_canvas.winfo_width()

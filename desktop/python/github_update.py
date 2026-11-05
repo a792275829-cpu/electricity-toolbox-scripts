@@ -161,22 +161,34 @@ class GitHubUpdater:
                      "X-GitHub-Api-Version": "2022-11-28", "Cache-Control": "no-cache"},
         )
         try:
-            with self.open(request, timeout=20) as response:
+            # 接口正常时通常 1～2 秒就返回；卡住说明这条链路走不通，早点改用发布页。
+            with self.open(request, timeout=10) as response:
                 if response.status != 200:
                     raise UpdateError(f"更新服务返回错误（HTTP {response.status}）")
                 data = json.loads(response.read(2 * 1024 * 1024))
             return parse_release(data, self.current, self.repository)
         except urllib.error.HTTPError as exc:
-            if exc.code in {403, 429}:
-                try:
-                    return self.check_public_release()
-                except Exception as fallback:
-                    raise UpdateError(f"GitHub 更新接口受限（HTTP {exc.code}）；备用检测失败：{fallback}") from exc
+            # 限流和服务端故障都还能从 github.com 的发布页读出最新版本。
+            if exc.code in {403, 429} or exc.code >= 500:
+                return self.check_fallback(f"GitHub 更新接口返回 HTTP {exc.code}", exc)
             messages = {403: "GitHub 请求次数已达上限，请稍后重试", 429: "GitHub 请求次数已达上限，请稍后重试",
                         404: "更新仓库尚未发布正式版本"}
             raise UpdateError(messages.get(exc.code, f"更新服务返回错误（HTTP {exc.code}）")) from exc
+        except (urllib.error.URLError, TimeoutError, ConnectionError, ssl.SSLError) as exc:
+            # api.github.com 在部分网络下完全不可达（国内直连常见），而 github.com
+            # 仍可访问；不回落会让应用一直显示「已是最新版本」。
+            reason = getattr(exc, "reason", exc)
+            if isinstance(reason, TimeoutError) or "timed out" in str(reason):
+                reason = "连接超时"
+            return self.check_fallback(f"无法连接 GitHub 更新接口（{reason}）", exc)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise UpdateError("GitHub 版本信息无效") from exc
+
+    def check_fallback(self, reason: str, cause: Exception | None = None) -> Release | None:
+        try:
+            return self.check_public_release()
+        except Exception as fallback:
+            raise UpdateError(f"{reason}；备用检测失败：{fallback}") from cause
 
     def check_public_release(self) -> Release | None:
         base = f"https://github.com/{self.repository}/releases"

@@ -58,6 +58,16 @@ class UpdateUiTests(unittest.TestCase):
             self.controller.checked(None, ValueError("离线"))
             error.assert_called_once()
 
+    def test_failed_check_leaves_a_clickable_hint_and_retries(self):
+        label = self.app.version_label
+        # 后台失败不能静默：版本号变成「检查更新」，并退避重试。
+        self.controller.checked(None, ValueError("离线"))
+        self.assertIn("检查更新", label.cget("text"))
+        self.assertEqual(self.controller.retries, self.controller.RETRY_LIMIT - 1)
+        self.controller.checked(self.release, None)
+        self.assertNotIn("检查更新", label.cget("text"))
+        self.assertEqual(self.controller.retries, self.controller.RETRY_LIMIT)
+
     def test_dmg_download_cancellation_waits_for_worker_ack(self):
         self.controller.release = self.release
         self.controller.show()

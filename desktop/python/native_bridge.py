@@ -146,7 +146,8 @@ def serve(root: Path = ROOT, *, remote_business: bool = False):
         from toolbox.ui_tasks import BusinessClient, RemoteTaskRegistry
         client = BusinessClient(send)
         registry = RemoteTaskRegistry(client)
-    app = ToolboxApp(workspace=root, registry=registry, check_updates=lambda: service.updater.show())
+    app = ToolboxApp(workspace=root, registry=registry, check_updates=lambda: service.updater.show(),
+                     check_updates_manual=lambda: service.updater.check(manual=True))
     service = NativeService(app, emit=send)
     from update_ui import UpdateController
     updater = None
