@@ -159,34 +159,143 @@ WORKBOOK_DATE_TARGETS = (
     ("daily_clearing_workbook", "前两日工作簿（日清分表、现货偏差分析）", "dailyClearingDate"),
 )
 
-# 这些小节里只有首段由接口生成，其后段落沿用上一份报告，需人工核对。
+# 这些小节里只有首段由接口生成，其余段落或有其他数据源、或沿用上一份报告。
 MANUAL_SECTION_SPECS = (
-    ("三、现货交易策略", "首段由接口数据生成；其后粤东线路检修与各厂策略沿用上一份报告，需人工核对。"),
+    ("三、现货交易策略", "首段由接口数据生成，三厂策略取自 D 日「快报（日前）」A39；其余段落沿用上一份报告，需人工核对。"),
     ("五、短期市场预测", "首段天气由接口更新，段内「预计统调最高负荷…」为手写；其后负荷与均价区间沿用上一份报告，需人工核对。"),
 )
 
 SECTION_STOP_PREFIXES = ("一、", "二、", "三、", "四、", "五、", "表1", "表2", "下表为")
 
+PLANT_STRATEGY_LABELS = ("汕头厂", "海门厂", "东莞厂")
+EAST_GUANGDONG_PREFIX = "粤东区域"
+PLANT_STRATEGY_PATTERN = re.compile(
+    r"^(?:\d+[.、]?)?\s*(?P<plant>" + "|".join(PLANT_STRATEGY_LABELS) + r")\s*[：:]\s*(?P<body>.*)$"
+)
+NEGATIVE_TEXT_PATTERN = re.compile(r"^-\d+(?:\.\d+)?$")
+NEGATIVE_IN_TEXT_PATTERN = re.compile(r"(?<![0-9A-Za-z])-\d+(?:\.\d+)?")
 
-def collect_manual_sections(document) -> list[dict[str, str]]:
+
+def section_paragraphs(document, title: str) -> list:
+    """按小节标题收集其下正文段落，遇到下一个标题停止。"""
+    try:
+        heading = find_exact_paragraph(document, title)
+    except ValueError:
+        return []
+    paragraphs: list = []
+    node = heading._p.getnext()
+    while node is not None:
+        if node.tag == qn("w:p"):
+            paragraph = Paragraph(node, heading._parent)
+            text = paragraph.text.strip()
+            if text.startswith(SECTION_STOP_PREFIXES):
+                break
+            if text:
+                paragraphs.append(paragraph)
+        node = node.getnext()
+    return paragraphs
+
+
+def extract_plant_strategies(text: str | None) -> dict[str, str]:
+    """把 A39 日前简析里的三厂策略拆出来，去掉行首序号与厂名前缀。
+
+    段落以厂名开头，标题行（日前简析、1.运行日统调负荷…）与粤东线路信息不算。
+    """
+    strategies: dict[str, str] = {}
+    current: str | None = None
+    buffer: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = PLANT_STRATEGY_PATTERN.match(line)
+        if match:
+            if current and buffer:
+                strategies[current] = "".join(buffer).strip()
+            current = match.group("plant")
+            buffer = [match.group("body").strip()]
+            continue
+        if current:
+            buffer.append(line)
+    if current and buffer:
+        strategies[current] = "".join(buffer).strip()
+    return {plant: body for plant, body in strategies.items() if body}
+
+
+def load_plant_strategies(workbook_path: Path | None) -> dict[str, str]:
+    """读取 D 日「快报（日前）」的日前简析（A39），解析三厂策略。"""
+    if not workbook_path:
+        return {}
+    try:
+        workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    except Exception:
+        return {}
+    text: str | None = None
+    try:
+        sheet_name = next(
+            (name for name in workbook.sheetnames if name.replace(" ", "") == "快报(日前)"),
+            None,
+        )
+        if sheet_name is None:
+            return {}
+        sheet = workbook[sheet_name]
+        for row in sheet.iter_rows(min_row=39, max_row=39, min_col=1, max_col=1, values_only=True):
+            value = row[0] if row else None
+            text = str(value) if isinstance(value, str) else None
+            break
+        if not text or "日前简析" not in text:
+            # 行号漂移时回退为按内容查找。
+            text = None
+            for row in sheet.iter_rows(min_row=1, max_row=80, min_col=1, max_col=1, values_only=True):
+                value = row[0] if row else None
+                if isinstance(value, str) and "日前简析" in value:
+                    text = value
+                    break
+    finally:
+        workbook.close()
+    return extract_plant_strategies(text)
+
+
+def fill_plant_strategies(document, strategies: dict[str, str]) -> list[str]:
+    """用 A39 的三厂策略替换报告对应段落，返回实际替换的厂名。"""
+    if not strategies:
+        return []
+    paragraphs = section_paragraphs(document, "三、现货交易策略")
+    filled: list[str] = []
+    for plant in PLANT_STRATEGY_LABELS:
+        body = strategies.get(plant)
+        if not body:
+            continue
+        target = next(
+            (item for item in paragraphs if item.text.strip().startswith(f"{plant}：")), None
+        )
+        if target is None:
+            continue
+        replace_paragraph(target, f"{plant}：{body}")
+        filled.append(plant)
+    return filled
+
+
+def remove_east_guangdong_section(document) -> bool:
+    """删除「粤东区域：500kV线路…」段落——不是每日固定内容。"""
+    for paragraph in section_paragraphs(document, "三、现货交易策略"):
+        if paragraph.text.strip().startswith(EAST_GUANGDONG_PREFIX):
+            element = paragraph._p
+            element.getparent().remove(element)
+            return True
+    return False
+
+
+def collect_manual_sections(document, *, filled_plants: set[str] | None = None) -> list[dict[str, str]]:
     """按小节结构列出仍需人工维护的段落，避免上一份报告的文字被当成当日内容。"""
+    skip_prefixes = {f"{plant}：" for plant in (filled_plants or set())}
     sections: list[dict[str, str]] = []
     for title, note in MANUAL_SECTION_SPECS:
-        try:
-            heading = find_exact_paragraph(document, title)
-        except ValueError:
-            continue
-        texts: list[str] = []
-        node = heading._p.getnext()
-        while node is not None:
-            if node.tag == qn("w:p"):
-                text = Paragraph(node, heading._parent).text.strip()
-                if text.startswith(SECTION_STOP_PREFIXES):
-                    break
-                if text:
-                    texts.append(text)
-            node = node.getnext()
-        for text in texts[1:]:
+        paragraphs = section_paragraphs(document, title)
+        for paragraph in paragraphs[1:]:  # 首段由接口生成
+            text = paragraph.text.strip()
+            if any(text.startswith(prefix) for prefix in skip_prefixes):
+                continue
             sections.append({"section": title, "text": text, "note": note})
     return sections
 
@@ -1211,7 +1320,7 @@ def fill_daily_clearing_table(table, rows: list[tuple[str, str | None, dict[int,
         cells = table.rows[row_index].cells
         for column, text in values.items():
             if column <= len(cells):
-                replace_cell_text(cells[column - 1], text)
+                replace_cell_text(cells[column - 1], text, highlight_negative=True)
         filled += 1
     return filled
 
@@ -1224,7 +1333,9 @@ def fill_spot_deviation_analysis(document, texts: tuple[str, str]) -> bool:
         return False
     for label, text in targets:
         label_paragraph = find_exact_paragraph(document, label)
-        replace_paragraph(next_nonempty_paragraph(document, label_paragraph), text)
+        body = next_nonempty_paragraph(document, label_paragraph)
+        replace_paragraph(body, text)
+        highlight_negative_numbers(body)
     return True
 
 
@@ -1262,9 +1373,50 @@ def replace_paragraph(paragraph, text: str, *, keep_red: bool = False) -> None:
         run.font.color.rgb = RGBColor(0, 0, 0)
 
 
-def replace_cell_text(cell, text: str) -> None:
+def replace_cell_text(cell, text: str, *, highlight_negative: bool = False) -> None:
     paragraph = cell.paragraphs[0]
     replace_paragraph(paragraph, text)
+    if highlight_negative and is_negative_text(text):
+        for run in paragraph.runs:
+            run.font.color.rgb = RGBColor(0xFF, 0, 0)
+
+
+def is_negative_text(text: str) -> bool:
+    """判断表格文本是否为负值；「-0」「/」不算。"""
+    value = (text or "").strip()
+    if not NEGATIVE_TEXT_PATTERN.match(value):
+        return False
+    return float(value) < 0
+
+
+def highlight_negative_numbers(paragraph) -> int:
+    """把段落正文里的负数（-50、-111.5）标红，其余文字保持黑色。
+
+    只认“非数字、非字母后面紧跟负号”的写法，因此「0-1点」这类区间与日期不会被误标。
+    """
+    text = paragraph.text
+    matches = list(NEGATIVE_IN_TEXT_PATTERN.finditer(text))
+    if not matches:
+        return 0
+    template_run = paragraph.runs[0] if paragraph.runs else None
+    for index in range(len(paragraph.runs) - 1, -1, -1):
+        paragraph._element.remove(paragraph.runs[index]._element)
+
+    def add_segment(segment: str, red: bool) -> None:
+        if not segment:
+            return
+        run = paragraph.add_run(segment)
+        if template_run is not None:
+            copy_run_format(template_run, run)
+        run.font.color.rgb = RGBColor(0xFF, 0, 0) if red else RGBColor(0, 0, 0)
+
+    position = 0
+    for match in matches:
+        add_segment(text[position:match.start()], red=False)
+        add_segment(match.group(0), red=True)
+        position = match.end()
+    add_segment(text[position:], red=False)
+    return len(matches)
 
 
 def paragraph_index(document, paragraph) -> int:
@@ -1736,6 +1888,17 @@ def generate(
 
     strategy_heading = find_exact_paragraph(doc, "三、现货交易策略")
     replace_paragraph(next_nonempty_paragraph(doc, strategy_heading), build_strategy_text(payload))
+    # 粤东 500kV 线路信息不是每日固定内容，模板里带的那段直接删掉。
+    remove_east_guangdong_section(doc)
+    try:
+        plant_strategies = load_plant_strategies(day_ahead_workbook)
+    except Exception as exc:
+        plant_strategies = {}
+        log(f"三厂策略取数失败，已保留模板原文：{exc}")
+    filled_plants = fill_plant_strategies(doc, plant_strategies)
+    missing_plants = [p for p in PLANT_STRATEGY_LABELS if p not in filled_plants]
+    if missing_plants:
+        log("以下厂策略未在 D 日「快报（日前）」A39 中找到，保留模板原文：" + "、".join(missing_plants))
     table_title = find_paragraph(doc, lambda text: text.startswith("表1"))
     replace_paragraph(table_title, f"表1  {date_label(plan['dailyClearingDate'])}分公司日清分情况")
     if daily_clearing is not None:
@@ -1746,9 +1909,13 @@ def generate(
             )
     clear_auto_section_red(doc, spot_filled=spot_filled)
     day_ahead_heading = find_exact_paragraph(doc, "1.日前市场")
-    replace_paragraph(next_nonempty_paragraph(doc, day_ahead_heading), build_day_ahead_market_text(payload))
+    day_ahead_paragraph = next_nonempty_paragraph(doc, day_ahead_heading)
+    replace_paragraph(day_ahead_paragraph, build_day_ahead_market_text(payload))
+    highlight_negative_numbers(day_ahead_paragraph)
     actual_heading = find_exact_paragraph(doc, "2.实时市场")
-    replace_paragraph(next_nonempty_paragraph(doc, actual_heading), build_actual_market_text(payload))
+    actual_paragraph = next_nonempty_paragraph(doc, actual_heading)
+    replace_paragraph(actual_paragraph, build_actual_market_text(payload))
+    highlight_negative_numbers(actual_paragraph)
     weather_paragraph = find_paragraph(
         doc,
         lambda text: text.startswith("未来三天") and "气温" in text,
@@ -1777,7 +1944,7 @@ def generate(
         doc.save(out_path)
 
     audit_path = output_dir / f"red_report_audit_{report_date}.json"
-    manual_sections = collect_manual_sections(doc)
+    manual_sections = collect_manual_sections(doc, filled_plants=set(filled_plants))
     if manual_sections:
         names = sorted({item["section"] for item in manual_sections})
         log(f"以下小节共 {len(manual_sections)} 段沿用上一份报告，需人工核对：{'、'.join(names)}")
@@ -1807,6 +1974,8 @@ def generate(
         "spotDeviationSkipped": (daily_clearing or {}).get("spotSkipReason"),
         "workbookDateWarnings": workbook_date_warnings,
         "manualSections": manual_sections,
+        "plantStrategiesFilled": filled_plants,
+        "plantStrategiesMissing": missing_plants,
         "onlineEnergyError": online_energy_error,
         "dailyClearingError": daily_clearing_error,
         "weatherError": weather_error,
