@@ -152,16 +152,16 @@ class QingyuanTemplateTests(unittest.TestCase):
 
             summary = load_day_ahead_clearing_summary("2026-08-12", workbook_path)
 
-        self.assertEqual(summary["companies"]["清远"]["energy"], 20)
+        self.assertEqual(summary["companies"]["清远"]["energy"], 2)
         self.assertEqual(summary["baseTotalEnergy"], 100)
-        self.assertEqual(summary["totalEnergy"], 120)
+        self.assertEqual(summary["totalEnergy"], 102)
         self.assertEqual(
             summary["qingyuanSource"],
             {"sheet": "基础信息", "cells": {"AA64": 12.4, "AC64": 7.6}},
         )
         generated = build_day_ahead_clearing_text("2026-08-12", summary)
-        self.assertTrue(generated.startswith("8月12日分公司日前出清电量120万千瓦时。"))
-        self.assertIn("、清远（计划）20万千瓦时；", generated)
+        self.assertTrue(generated.startswith("8月12日分公司日前出清电量102万千瓦时。"))
+        self.assertIn("、清远（计划）2万千瓦时；", generated)
 
 
 if __name__ == "__main__":

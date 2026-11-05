@@ -307,7 +307,7 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
         cell: parse_float(value)
         for cell, value in qingyuan_raw_values.items()
     }
-    qingyuan_energy = sum(qingyuan_components.values())
+    qingyuan_energy = sum(qingyuan_components.values()) / 10
 
     rows = {
         "company": 7,
@@ -930,7 +930,7 @@ def generate(
         "weatherError": weather_error,
         "knownGaps": [
             "P13 上网电量来源尚未确认，电量暂保留模板原文；日前均价来自报告日出清情况 Excel 的快报（日前）工作表。",
-            "P14 日前出清电量和日前价格来自报告日出清情况 Excel；火电取快报（日前）F/G，新能源按表头取 G/H，清远计划电量取基础信息!AA64+AC64，并计入分公司总电量。",
+            "P14 日前出清电量和日前价格来自报告日出清情况 Excel；火电取快报（日前）F/G，新能源按表头取 G/H，清远计划电量取基础信息!AA64+AC64 后除以10，并计入分公司总电量。",
             "P29 未来三天最高负荷来源尚未确认，暂不替换。",
             "日清分表和现货偏差分析已按新版模板保留，自动填充数据源尚未接入。",
         ],
