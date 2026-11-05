@@ -280,25 +280,206 @@ class CalendarInputTests(unittest.TestCase):
         self.root.update()
         self.addCleanup(widget.destroy)
 
-        widget.open_calendar()
-        widget.pick("left", date(2026, 11, 10))
+        widget.open_calendar("start")
+        widget.pick(date(2026, 11, 10))
         self.assertEqual((start.get(), end.get()), ("2026-11-10", "2026-11-10"))
         self.assertIsNotNone(widget.popup)
+        self.assertEqual(widget.stage, "end")
         self.assertIn("共 1 天", widget.hint_label.cget("text"))
 
-        widget.pick("right", date(2026, 11, 12))
+        widget.pick(date(2026, 11, 12))
         self.assertEqual((start.get(), end.get()), ("2026-11-10", "2026-11-12"))
         self.assertIsNone(widget.popup)
 
-        widget.open_calendar()
-        widget.pick("right", date(2026, 11, 1))
+        widget.open_calendar("start")
+        widget.pick(date(2026, 11, 10))
+        widget.pick(date(2026, 11, 1))
         self.assertEqual((start.get(), end.get()), ("2026-11-01", "2026-11-01"))
+        self.assertIsNone(widget.popup)
         widget.open_calendar()
         widget.select_today()
         self.assertEqual(start.get(), date.today().isoformat())
         self.assertEqual(end.get(), date.today().isoformat())
         self.assertIsNone(widget.popup)
         self.assertIsNone(self.root.grab_current())
+
+    def make_range(self, start="2026-11-05", end="2026-11-08", **kwargs):
+        start_variable = tk.StringVar(master=self.root, value=start)
+        end_variable = tk.StringVar(master=self.root, value=end)
+        widget = DateRangeInput(self.root, start_variable=start_variable,
+                                end_variable=end_variable, **kwargs)
+        widget.pack()
+        self.root.update()
+        self.addCleanup(widget.destroy)
+        return widget, start_variable, end_variable
+
+    @staticmethod
+    def day_buttons(frame, text):
+        found = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                if child.winfo_class() == "TButton" and child.cget("text") == text:
+                    found.append(child)
+                walk(child)
+
+        walk(frame)
+        return found
+
+    @staticmethod
+    def adjacent_labels(frame, text):
+        found = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                if child.winfo_class() == "TLabel" and child.cget("text") == text:
+                    found.append(child)
+                walk(child)
+
+        walk(frame)
+        return found
+
+    def test_same_month_range_completes_on_one_calendar_and_closes(self):
+        # 起止都在 11 月时右侧月历只能显示 12 月，旧实现里结束日期无处可选、弹层永不收起。
+        widget, start, end = self.make_range()
+        widget.open_calendar("start")
+        self.root.update()
+        self.assertEqual((widget.left_month, widget.right_month),
+                         (date(2026, 11, 1), date(2026, 12, 1)))
+
+        next(iter(self.day_buttons(widget.left_days_frame, "10"))).invoke()
+        self.root.update()
+        self.assertEqual((start.get(), end.get()), ("2026-11-10", "2026-11-10"))
+        self.assertEqual(widget.stage, "end")
+        self.assertIsNotNone(widget.popup)
+        self.assertIn("选择结束日期", widget.status_label.cget("text"))
+
+        next(iter(self.day_buttons(widget.left_days_frame, "12"))).invoke()
+        self.root.update()
+        self.assertEqual((start.get(), end.get()), ("2026-11-10", "2026-11-12"))
+        self.assertIsNone(widget.popup)
+
+    def test_end_field_opens_in_the_second_step_and_closes_on_one_pick(self):
+        widget, start, end = self.make_range()
+        widget._open_from_click("end")
+        self.root.update()
+        self.assertEqual(widget.stage, "end")
+        self.assertIn("2026-11-05", widget.status_label.cget("text"))
+        next(iter(self.day_buttons(widget.left_days_frame, "20"))).invoke()
+        self.root.update()
+        self.assertEqual((start.get(), end.get()), ("2026-11-05", "2026-11-20"))
+        self.assertIsNone(widget.popup)
+
+    def test_clicking_the_other_field_switches_the_step_without_rebuilding(self):
+        widget, _start, _end = self.make_range()
+        widget._open_from_click("start")
+        popup = widget.popup
+        widget._open_from_click("end")
+        self.root.update()
+        self.assertIs(widget.popup, popup)
+        self.assertEqual(widget.stage, "end")
+        widget._open_from_click("start")
+        self.root.update()
+        self.assertEqual(widget.stage, "start")
+        self.assertIs(widget.popup, popup)
+
+    def test_adjacent_month_days_are_clickable(self):
+        widget, start, end = self.make_range("2026-11-28", "2026-12-02")
+        widget.open_calendar("start")
+        self.root.update()
+        adjacent = self.adjacent_labels(widget.left_days_frame, "2")
+        self.assertEqual(len(adjacent), 1)
+        adjacent[0].event_generate("<Button-1>")
+        self.root.update()
+        self.assertEqual(start.get(), "2026-12-02")
+        self.assertIsNotNone(widget.popup)
+        next(iter(self.day_buttons(widget.right_days_frame, "5"))).invoke()
+        self.root.update()
+        self.assertEqual((start.get(), end.get()), ("2026-12-02", "2026-12-05"))
+        self.assertIsNone(widget.popup)
+
+    def test_confirm_and_today_buttons_always_close_the_popup(self):
+        widget, start, end = self.make_range()
+        widget.open_calendar("start")
+        widget.pick(date(2026, 11, 10))
+        self.assertIsNotNone(widget.popup)
+        widget.confirm()
+        self.assertIsNone(widget.popup)
+        self.assertEqual((start.get(), end.get()), ("2026-11-10", "2026-11-10"))
+
+        widget.open_calendar("start")
+        widget.select_today()
+        self.assertIsNone(widget.popup)
+        self.assertEqual((start.get(), end.get()),
+                         (date.today().isoformat(), date.today().isoformat()))
+
+    def test_return_and_escape_close_without_touching_the_values(self):
+        widget, start, end = self.make_range()
+        widget.open_calendar("start")
+        self.assertTrue(widget.start_entry.bind("<Return>"))
+        self.assertTrue(widget.end_entry.bind("<Return>"))
+        # 合成按键事件只送给当前焦点窗口；其它应用抢走焦点时无法验证。
+        widget.start_entry.focus_force()
+        self.root.update()
+        if self.root.focus_get() is widget.start_entry:
+            widget.start_entry.event_generate("<Return>")
+            self.root.update()
+            self.assertIsNone(widget.popup)
+        else:
+            widget.close_calendar()
+        widget.open_calendar("start")
+        widget.end_entry.focus_force()
+        self.root.update()
+        if self.root.focus_get() is widget.end_entry:
+            widget.end_entry.event_generate("<Escape>")
+            self.root.update()
+        else:
+            widget.close_calendar()
+        self.assertIsNone(widget.popup)
+        self.assertEqual((start.get(), end.get()), ("2026-11-05", "2026-11-08"))
+
+    def test_optional_start_stays_empty_when_only_the_end_is_picked(self):
+        widget, start, end = self.make_range("", "2026-11-04", start_optional=True)
+        widget.open_calendar("end")
+        self.assertEqual(widget.stage, "end")
+        widget.pick(date(2026, 11, 8))
+        self.assertEqual((start.get(), end.get()), ("", "2026-11-08"))
+        self.assertIsNone(widget.popup)
+
+    def test_invalid_typed_dates_do_not_block_the_calendar(self):
+        widget, start, end = self.make_range("2026-2-29", "abc")
+        widget.open_calendar("start")
+        self.assertEqual(widget.left_month, date.today().replace(day=1))
+        self.assertEqual(widget.stage, "start")
+        widget.pick(date(2026, 11, 4))
+        widget.pick(date(2026, 11, 6))
+        self.assertEqual((start.get(), end.get()), ("2026-11-04", "2026-11-06"))
+        self.assertIsNone(widget.popup)
+
+    def test_paging_and_link_toggle_keep_the_selection_completable(self):
+        widget, start, end = self.make_range()
+        widget.open_calendar("start")
+        widget.change_month("left", 2)
+        self.assertEqual((widget.left_month, widget.right_month),
+                         (date(2027, 1, 1), date(2027, 2, 1)))
+        widget.pick(date(2027, 1, 15))
+        self.assertIsNotNone(widget.popup)
+        widget.set_linked(False)
+        widget.change_month("right", 2)
+        widget.pick(date(2027, 4, 3))
+        self.assertEqual((start.get(), end.get()), ("2027-01-15", "2027-04-03"))
+        self.assertIsNone(widget.popup)
+
+    def test_reopening_after_a_same_month_pick_shows_the_new_range(self):
+        widget, _start, _end = self.make_range()
+        widget.open_calendar("start")
+        widget.pick(date(2026, 11, 3))
+        widget.pick(date(2026, 11, 9))
+        widget.open_calendar("end")
+        self.assertEqual((widget.left_month, widget.right_month),
+                         (date(2026, 11, 1), date(2026, 12, 1)))
+        self.assertEqual(widget.stage, "end")
+        self.assertIn("2026-11-03", widget.status_label.cget("text"))
 
     def test_date_range_input_closes_on_escape_outside_click_and_destroy(self):
         from types import SimpleNamespace

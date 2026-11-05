@@ -54,8 +54,8 @@ def add_date_row(parent: ttk.Frame, *, row: int, start_variable: tk.StringVar,
                  hint: str = "", start_optional: bool = False) -> ttk.Frame:
     """Single-line 开始日期/结束日期 row starting at the path entry column.
 
-    开始与结束横向排在同一行（``[开始] 至 [结束]``），点任一日期框弹出左右双月历；
-    标签只占一行左列，与工作簿选择行的“标签 + 输入”结构对齐。
+    开始与结束横向排在同一行（``[开始] 至 [结束]``），点任一日期框弹出左右双月历，
+    先点开始日期、再点结束日期；标签只占一行左列，与工作簿选择行的“标签 + 输入”结构对齐。
     """
     ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=3)
     line = ttk.Frame(parent)

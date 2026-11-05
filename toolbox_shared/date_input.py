@@ -47,6 +47,8 @@ def configure_calendar_styles(widget) -> None:
                     padding=(2, 5), anchor="center")
     style.configure("CalendarRangeNav.TButton", font=(family, 12), padding=(3, 4), anchor="center")
     style.configure("CalendarRangeMonth.TLabel", font=(family, 13, "bold"), anchor="center")
+    style.configure("CalendarRangeStatus.TLabel", font=(family, 12, "bold"),
+                    foreground="#2f2f2b", anchor="w")
     style.configure("CalendarRangeWeekday.TLabel", font=(family, 10), foreground="#777772",
                     anchor="center")
     style.configure("CalendarRangeAdjacent.TLabel", font=(family, 12), foreground="#b0b0aa")
@@ -69,7 +71,7 @@ RANGE_PALETTE = MonthPalette(weekday="CalendarRangeWeekday.TLabel",
 
 
 def draw_month(frame, month: date, *, day_style, on_pick,
-               palette: MonthPalette = SINGLE_PALETTE) -> None:
+               palette: MonthPalette = SINGLE_PALETTE, on_adjacent_pick=None) -> None:
     """Draw a fixed six-week grid so the popup never changes height while paging."""
     for child in frame.winfo_children():
         child.destroy()
@@ -86,11 +88,14 @@ def draw_month(frame, month: date, *, day_style, on_pick,
         for column, number in enumerate(week):
             if number == 0:
                 ordinal = first_ordinal + (row - 1) * 7 + column
-                label = str(date.fromordinal(ordinal).day) if 1 <= ordinal <= date.max.toordinal() else ""
-                ttk.Label(frame, text=label, style=palette.adjacent,
-                          width=palette.day_width, anchor="center").grid(
-                    row=row, column=column, sticky="nsew", padx=2, pady=3
-                )
+                adjacent = date.fromordinal(ordinal) if 1 <= ordinal <= date.max.toordinal() else None
+                label = str(adjacent.day) if adjacent else ""
+                cell = ttk.Label(frame, text=label, style=palette.adjacent,
+                                 width=palette.day_width, anchor="center")
+                cell.grid(row=row, column=column, sticky="nsew", padx=2, pady=3)
+                # 月初、月末补位的浅色日期同样可以点，跨月边界不用先翻页再选。
+                if adjacent is not None and label and on_adjacent_pick is not None:
+                    cell.bind("<Button-1>", lambda _event, value=adjacent: on_adjacent_pick(value))
                 continue
             day = date(month.year, month.month, number)
             ttk.Button(frame, text=str(day.day), width=palette.day_width, style=day_style(day),
@@ -236,9 +241,13 @@ class DateInput(ttk.Frame):
 class DateRangeInput(ttk.Frame):
     """开始日期／结束日期输入，弹层是左右两张月历。
 
-    左侧月历选择开始日期，右侧月历选择结束日期；默认翻月联动，翻任意一张月历时
-    两张月历一起推进、始终相邻。取消联动后两张月历各自独立翻页，适合跨较远月份
-    反复核对起止日期。
+    选择分两步：先点任意一张月历里的日期定开始日期，再点任意一张月历里的日期定
+    结束日期，选完结束日期弹层自动收起。两张月历都可以点，所以起止落在同一个月
+    时也能在同一个面板里连点两下选完；相邻月份补位的浅色日期同样可点，跨月边界
+    不用先翻页。从结束日期框打开弹层时直接进入第二步，点一下即收起。
+
+    默认翻月联动，翻任意一张月历时两张一起推进、始终相邻；取消联动后各自翻页，
+    适合跨较远月份反复核对起止日期。
     """
 
     def __init__(
@@ -261,6 +270,8 @@ class DateRangeInput(ttk.Frame):
         # 业务允许开始日期留空时（补缺并接续一类），提示行不催用户补开始日期。
         self.start_optional = bool(start_optional)
         self.link_var = tk.BooleanVar(master=self, value=self.link_months)
+        # "start"：下一次点日期是在定开始日期；"end"：在定结束日期。
+        self.stage = "start"
         self.left_month = date.today().replace(day=1)
         self.right_month = shift_month(self.left_month, 1)
         self.start_entry = ttk.Entry(self, textvariable=start_variable, width=width)
@@ -268,15 +279,17 @@ class DateRangeInput(ttk.Frame):
         ttk.Label(self, text=separator).grid(row=0, column=1, padx=6)
         self.end_entry = ttk.Entry(self, textvariable=end_variable, width=width)
         self.end_entry.grid(row=0, column=2, sticky="ew")
+        self.status_label: ttk.Label | None = None
         self.left_month_label: ttk.Label | None = None
         self.right_month_label: ttk.Label | None = None
         self.left_days_frame: ttk.Frame | None = None
         self.right_days_frame: ttk.Frame | None = None
         self.hint_label: ttk.Label | None = None
-        for entry in (self.start_entry, self.end_entry):
+        for entry, side in ((self.start_entry, "start"), (self.end_entry, "end")):
             entry.bind("<FocusOut>", lambda _event, target=entry: self._normalize(target))
-            entry.bind("<ButtonRelease-1>", self._open_from_click)
-            entry.bind("<Down>", self._open_from_key)
+            entry.bind("<ButtonRelease-1>", lambda _event, target=side: self._open_from_click(target))
+            entry.bind("<Down>", lambda _event, target=side: self._open_from_key(target))
+            entry.bind("<Return>", lambda _event: self._commit_entry())
             entry.bind("<Escape>", lambda _event: self.close_calendar())
         self.bind("<Destroy>", self._on_destroy, add="+")
 
@@ -299,18 +312,34 @@ class DateRangeInput(ttk.Frame):
             except ValueError:
                 pass  # Preserve invalid input for the page's own validation message.
 
-    def _open_from_click(self, _event=None) -> None:
-        self.open_calendar()
+    def _open_from_click(self, source: str, _event=None) -> None:
+        self.open_calendar(source)
 
-    def _open_from_key(self, _event=None) -> str:
-        self.open_calendar()
-        self.popup.focus_set()
+    def _open_from_key(self, source: str, _event=None) -> str:
+        self.open_calendar(source)
+        if self.popup is not None:
+            self.popup.focus_set()
         return "break"
 
-    def open_calendar(self) -> None:
+    def _commit_entry(self) -> None:
+        self._normalize(self.start_entry)
+        self._normalize(self.end_entry)
+        self.close_calendar()
+
+    @staticmethod
+    def _initial_stage(start: date | None) -> str:
+        """没有指定从哪个框打开时：还没开始日期就先选开始，否则直接改结束日期。"""
+        return "start" if start is None else "end"
+
+    def open_calendar(self, source: str | None = None) -> None:
         if self.popup is not None and self.popup.winfo_exists():
+            # 弹层已经打开时点另一个日期框：只切换这一步改开始还是结束，不重建弹层。
+            if source in ("start", "end") and source != self.stage:
+                self.stage = source
+                self._render()
             return
         start, end = self.selected_dates()
+        self.stage = source if source in ("start", "end") else self._initial_stage(start)
         left = (start or end or date.today()).replace(day=1)
         right = shift_month(left, 1)
         if not self.link_months and end is not None:
@@ -329,16 +358,16 @@ class DateRangeInput(ttk.Frame):
         outer = ttk.Frame(popup, style="CalendarPanel.TFrame", padding=(12, 12, 12, 10),
                           borderwidth=1, relief="solid")
         outer.pack(fill="both", expand=True)
+        self.status_label = ttk.Label(outer, text="", style="CalendarRangeStatus.TLabel")
+        self.status_label.pack(fill="x", pady=(0, 6))
         panels = ttk.Frame(outer)
         panels.pack(fill="both", expand=True)
         panels.columnconfigure(0, weight=1)
         panels.columnconfigure(2, weight=1)
-        self.left_month_label, self.left_days_frame = self._build_panel(
-            panels, 0, "开始日期", "left")
+        self.left_month_label, self.left_days_frame = self._build_panel(panels, 0, "left")
         ttk.Separator(panels, orient="vertical", style="Calendar.TSeparator").grid(
             row=0, column=1, sticky="ns", padx=10)
-        self.right_month_label, self.right_days_frame = self._build_panel(
-            panels, 2, "结束日期", "right")
+        self.right_month_label, self.right_days_frame = self._build_panel(panels, 2, "right")
         self.hint_label = ttk.Label(outer, text="", style="CalendarHint.TLabel")
         self.hint_label.pack(fill="x", pady=(8, 0))
         ttk.Separator(outer, style="Calendar.TSeparator").pack(fill="x", pady=(8, 8))
@@ -346,8 +375,11 @@ class DateRangeInput(ttk.Frame):
         footer.pack(fill="x")
         ttk.Button(footer, text="今天", style="CalendarTodayAction.TButton",
                    command=self.select_today).pack(side="left")
+        # side="right" 先放的贴最右，所以先放联动开关、再放“确定”。
         ttk.Checkbutton(footer, text="翻月联动", variable=self.link_var,
                         command=self._apply_link_choice).pack(side="right")
+        ttk.Button(footer, text="确定", style="CalendarTodayAction.TButton",
+                   command=self.confirm).pack(side="right", padx=(0, 12))
         self._render()
         popup.update_idletasks()
         x = min(self.winfo_rootx(), max(0, popup.winfo_screenwidth() - popup.winfo_reqwidth()))
@@ -360,12 +392,11 @@ class DateRangeInput(ttk.Frame):
             "<ButtonPress-1>", self._outside_click, add="+"
         )
 
-    def _build_panel(self, parent, column: int, title: str, side: str):
+    def _build_panel(self, parent, column: int, side: str):
         panel = ttk.Frame(parent)
         panel.grid(row=0, column=column, sticky="nsew")
-        ttk.Label(panel, text=title, style="CalendarPanelTitle.TLabel").pack(fill="x")
         navigation = ttk.Frame(panel)
-        navigation.pack(fill="x", pady=(4, 0))
+        navigation.pack(fill="x")
         for button_column, (label, offset) in enumerate((("«", -12), ("‹", -1))):
             ttk.Button(navigation, text=label, width=2, style="CalendarRangeNav.TButton",
                        command=lambda delta=offset, target=side: self.change_month(target, delta)
@@ -382,17 +413,22 @@ class DateRangeInput(ttk.Frame):
         return month_label, days
 
     def _render(self) -> None:
-        start, end = self.selected_dates()
+        if self.popup is None or not self.popup.winfo_exists():
+            return
         if self.left_month_label is None or self.right_month_label is None:
             return
+        start, end = self.selected_dates()
         self.left_month_label.configure(text=f"{self.left_month.year}年{self.left_month.month}月")
         self.right_month_label.configure(text=f"{self.right_month.year}年{self.right_month.month}月")
         draw_month(self.left_days_frame, self.left_month,
                    day_style=lambda day: self._day_style(day, start, end),
-                   on_pick=lambda day: self.pick("left", day), palette=RANGE_PALETTE)
+                   on_pick=self.pick, palette=RANGE_PALETTE,
+                   on_adjacent_pick=self.pick)
         draw_month(self.right_days_frame, self.right_month,
                    day_style=lambda day: self._day_style(day, start, end),
-                   on_pick=lambda day: self.pick("right", day), palette=RANGE_PALETTE)
+                   on_pick=self.pick, palette=RANGE_PALETTE,
+                   on_adjacent_pick=self.pick)
+        self._update_status(start)
         self._update_hint(start, end)
 
     @staticmethod
@@ -405,16 +441,27 @@ class DateRangeInput(ttk.Frame):
             return "CalendarRangeToday.TButton"
         return "CalendarRangeDay.TButton"
 
+    def _update_status(self, start: date | None) -> None:
+        if self.status_label is None:
+            return
+        if self.stage == "start":
+            text = "第 1 步 · 选择开始日期（左右月历都可点）"
+        elif start is None:
+            text = "第 2 步 · 选择结束日期"
+        else:
+            text = f"第 2 步 · 选择结束日期，开始 {start.isoformat()}"
+        self.status_label.configure(text=text)
+
     def _update_hint(self, start: date | None, end: date | None) -> None:
         if self.hint_label is None:
             return
         if start is None and end is None:
-            text = "左侧选择开始日期，右侧选择结束日期"
+            text = "点日期框弹出左右两张月历，先选开始、再选结束"
         elif start is None:
             text = (f"结束 {end.isoformat()}（开始日期可留空）" if self.start_optional
-                    else f"结束 {end.isoformat()}，请在左侧选择开始日期")
+                    else f"结束 {end.isoformat()}，请再选开始日期")
         elif end is None:
-            text = f"开始 {start.isoformat()}，请在右侧选择结束日期"
+            text = f"开始 {start.isoformat()}，请再选结束日期"
         elif end < start:
             text = f"开始 {start.isoformat()} 晚于结束 {end.isoformat()}，请重新选择"
         else:
@@ -422,6 +469,14 @@ class DateRangeInput(ttk.Frame):
         if not self.link_months:
             text = f"{text}（两月独立翻页）"
         self.hint_label.configure(text=text)
+
+    def _ensure_visible(self, day: date) -> None:
+        month = day.replace(day=1)
+        if month in (self.left_month, self.right_month):
+            return
+        self.left_month = month
+        if self.link_months:
+            self.right_month = shift_month(month, 1)
 
     def change_month(self, side: str, delta: int) -> None:
         if side == "left":
@@ -434,31 +489,47 @@ class DateRangeInput(ttk.Frame):
                 self.left_month = shift_month(self.right_month, -1)
         self._render()
 
-    def pick(self, side: str, day: date) -> None:
+    def pick(self, day: date) -> None:
+        """点月历里的任意一天：第一步定开始日期，第二步定结束日期并收起弹层。"""
         start, end = self.selected_dates()
-        if side == "left":
+        if self.stage == "start":
             start = day
-            if end is None or end < day:
-                end = day
-            self._apply(start, end)
+            if end is None or end < start:
+                end = start
+            self._set_values(start, end)
+            self.stage = "end"
+            self._ensure_visible(start)
+            self._render()
             return
         end = day
-        if start is None or start > day:
-            start = day
-        self._apply(start, end)
+        if start is None:
+            # 允许开始日期留空的页面，不因为选了结束日期就把开始日期填上。
+            if not self.start_optional:
+                start = end
+        elif start > end:
+            start = end
+        self._set_values(start, end)
         self.close_calendar()
-        self.end_entry.focus_set()
+        if self.end_entry.winfo_exists():
+            self.end_entry.focus_set()
 
     def select_today(self) -> None:
         today = date.today()
-        self._apply(today, today)
+        self._set_values(today, today)
+        self._ensure_visible(today)
         self.close_calendar()
-        self.end_entry.focus_set()
+        if self.end_entry.winfo_exists():
+            self.end_entry.focus_set()
 
-    def _apply(self, start: date, end: date) -> None:
-        self.start_variable.set(start.isoformat())
-        self.end_variable.set(end.isoformat())
-        self._render()
+    def confirm(self) -> None:
+        """收起弹层；当前输入框里的值就是最终值。"""
+        self.close_calendar()
+        if self.end_entry.winfo_exists():
+            self.end_entry.focus_set()
+
+    def _set_values(self, start: date | None, end: date | None) -> None:
+        self.start_variable.set("" if start is None else start.isoformat())
+        self.end_variable.set("" if end is None else end.isoformat())
 
     def set_linked(self, linked: bool) -> None:
         self.link_months = bool(linked)
@@ -486,6 +557,12 @@ class DateRangeInput(ttk.Frame):
             self.winfo_toplevel().unbind("<ButtonPress-1>", self._dismiss_binding)
             self._dismiss_binding = None
         popup, self.popup = self.popup, None
+        self.status_label = None
+        self.left_month_label = None
+        self.right_month_label = None
+        self.left_days_frame = None
+        self.right_days_frame = None
+        self.hint_label = None
         if popup is not None and popup.winfo_exists():
             popup.destroy()
 

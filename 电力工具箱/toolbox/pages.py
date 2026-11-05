@@ -83,7 +83,7 @@ class OnlineEnergyPage(ToolPage):
         ).grid(row=0, column=1, sticky="w", padx=(8, 14))
         ttk.Label(
             form,
-            text="左侧月历选开始日期、右侧选结束日期；同一天即导出当天",
+            text="弹层里先点开始日期、再点结束日期；同一天即导出当天",
             style="Muted.TLabel",
         ).grid(row=0, column=2, sticky="w")
 
