@@ -286,6 +286,22 @@ def remove_east_guangdong_section(document) -> bool:
     return False
 
 
+TABLE_PAGE_BREAK_ANCHORS = ("四、日清分情况", "下表为未来五天海风功率预测：")
+
+
+def apply_table_page_breaks(document) -> list[str]:
+    """让两个表格所在小节从新页开始，保证「标题＋表格」不被分页拆开。"""
+    applied: list[str] = []
+    for text in TABLE_PAGE_BREAK_ANCHORS:
+        try:
+            paragraph = find_exact_paragraph(document, text)
+        except ValueError:
+            continue
+        paragraph.paragraph_format.page_break_before = True
+        applied.append(text)
+    return applied
+
+
 def collect_manual_sections(document, *, filled_plants: set[str] | None = None) -> list[dict[str, str]]:
     """按小节结构列出仍需人工维护的段落，避免上一份报告的文字被当成当日内容。"""
     skip_prefixes = {f"{plant}：" for plant in (filled_plants or set())}
@@ -1048,10 +1064,23 @@ def load_daily_clearing_inputs(date_text: str,
 
 UNIT_STATUS_PLANTS = ("汕头", "海门", "东莞", "清远")
 UNIT_STATUS_RANK = ("运行", "备用", "供热", "检修")
-UNIT_STATUS_WORDS = {"运行": "运行", "备用": "备用", "停备": "备用", "停机": "备用", "供热": "供热", "检修": "检修"}
+UNIT_STATUS_WORDS = {
+    "运行": "运行",
+    "备用": "备用",
+    "停备": "备用",
+    "停机": "备用",
+    "应急备用": "应急备用",  # 保留原词，但排序按「备用」处理
+    "供热": "供热",
+    "检修": "检修",
+}
 DONGGUAN_STATUS_WORDS = {"运行": "调峰", "备用": "备用", "停备": "备用", "供热": "供热", "检修": "检修"}
+STATUS_RANK_ALIASES = {"停备": "备用", "停机": "备用", "应急备用": "备用"}
 CHINESE_DIGITS = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "七", "8": "八"}
+CHINESE_DIGITS_REVERSE = {value: key for key, value in CHINESE_DIGITS.items()}
 SECTION_HEADING = re.compile(r"^[一二三四五六七八九十]+、")
+SUITE_PLAN_PATTERN = re.compile(
+    r"^(?P<suites>[一二三四五六七八1-8、]+)套(?:机组)?(?P<status>调峰|备用|供热|检修|运行|停备|停机)$"
+)
 
 
 def _parse_unit_status(rows: list[tuple]) -> dict[str, list[tuple[str, str]]]:
@@ -1080,10 +1109,71 @@ def _parse_unit_status(rows: list[tuple]) -> dict[str, list[tuple[str, str]]]:
     return parsed
 
 
+def _parse_unit_constraints(rows: list[tuple]) -> dict[str, str]:
+    """收集各厂「约束情况」行 C 列的文字（含运行日运行方式、停机序列等）。"""
+    start = None
+    for index, row in enumerate(rows):
+        if len(row) > 2 and isinstance(row[2], str) and row[2].strip() == "机组状态":
+            start = index + 1
+            break
+    if start is None:
+        return {}
+
+    constraints: dict[str, str] = {}
+    plant = None
+    for row in rows[start:]:
+        first = row[0].strip() if isinstance(row[0], str) else ""
+        second = row[1].strip() if len(row) > 1 and isinstance(row[1], str) else ""
+        text = row[2].strip() if len(row) > 2 and isinstance(row[2], str) else ""
+        if first and SECTION_HEADING.match(first):
+            break
+        if first in UNIT_STATUS_PLANTS:
+            plant = first
+        if plant is not None and second == "约束情况" and text:
+            constraints[plant] = text
+    return constraints
+
+
+def parse_suite_plan(text: str | None) -> dict[int, str]:
+    """解析约束情况里的「运行日运行方式：一、二、四套机组调峰，三套检修」→ {1: 调峰, ...}。"""
+    if not text:
+        return {}
+    marker = "运行日运行方式"
+    start = text.find(marker)
+    if start < 0:
+        return {}
+    segment = text[start + len(marker):].lstrip("：: ")
+    segment = segment.split("。")[0].strip()
+    plan: dict[int, str] = {}
+    for clause in re.split(r"[，,]", segment):
+        match = SUITE_PLAN_PATTERN.match(clause.strip().rstrip("。"))
+        if not match:
+            continue
+        status = match.group("status")
+        for token in re.split(r"[、]", match.group("suites")):
+            token = token.strip()
+            if not token:
+                continue
+            number = CHINESE_DIGITS_REVERSE.get(token, token)
+            if number.isdigit():
+                plan[int(number)] = status
+    return plan
+
+
+def build_suite_plan_text(plan: dict[int, str]) -> str | None:
+    """按套号顺序逐套写成东莞句子，状态取自约束情况的运行方式。"""
+    if not plan:
+        return None
+    clauses = [
+        f"{CHINESE_DIGITS.get(str(suite), str(suite))}套机组"
+        f"{DONGGUAN_STATUS_WORDS.get(plan[suite], plan[suite])}"
+        for suite in sorted(plan)
+    ]
+    return "，".join(clauses) + "。"
+
+
 def _status_rank(status: str) -> int:
-    normalized = status if status in UNIT_STATUS_RANK else (
-        "备用" if status in ("停备", "停机") else status
-    )
+    normalized = STATUS_RANK_ALIASES.get(status, status)
     try:
         return UNIT_STATUS_RANK.index(normalized)
     except ValueError:
@@ -1148,11 +1238,19 @@ def load_unit_status_texts(date_text: str,
         workbook_path = find_clearing_workbook(date_text)
     rest = _read_clearing_values(workbook_path)
     unit_rows = rest[-1]
-    return {
-        plant: text
-        for plant, units in _parse_unit_status(unit_rows).items()
-        if (text := build_unit_status_text(plant, units))
-    }
+    parsed = _parse_unit_status(unit_rows)
+    constraints = _parse_unit_constraints(unit_rows)
+    texts: dict[str, str] = {}
+    for plant, units in parsed.items():
+        text = None
+        if plant == "东莞":
+            # 东莞以「约束情况」的运行日运行方式为准，C 列状态只在缺失时兜底。
+            text = build_suite_plan_text(parse_suite_plan(constraints.get("东莞")))
+        if text is None:
+            text = build_unit_status_text(plant, units)
+        if text:
+            texts[plant] = text
+    return texts
 
 
 def _startup_blocks(document) -> list[list]:
@@ -1912,6 +2010,8 @@ def generate(
         log("以下厂策略未在 D 日「快报（日前）」A39 中找到，保留模板原文：" + "、".join(missing_plants))
     table_title = find_paragraph(doc, lambda text: text.startswith("表1"))
     replace_paragraph(table_title, f"表1  {date_label(plan['dailyClearingDate'])}分公司日清分情况")
+    # 两个表格各自从新页开始，避免标题与表格被分页切断。
+    paginated = apply_table_page_breaks(doc)
     if daily_clearing is not None:
         daily_filled_rows = fill_daily_clearing_table(doc.tables[0], daily_clearing["rows"])
         if daily_clearing.get("spot"):
@@ -1985,6 +2085,7 @@ def generate(
         "spotDeviationSkipped": (daily_clearing or {}).get("spotSkipReason"),
         "workbookDateWarnings": workbook_date_warnings,
         "manualSections": manual_sections,
+        "tablePageBreaks": paginated,
         "plantStrategiesFilled": filled_plants,
         "plantStrategiesMissing": missing_plants,
         "onlineEnergyError": online_energy_error,

@@ -6,12 +6,17 @@ import unittest
 from pathlib import Path
 
 from docx import Document
+from openpyxl import Workbook
 
 from generate_red_marked_report import (
     LOCAL_TEMPLATE_PATH,
+    _parse_unit_constraints,
     _parse_unit_status,
+    build_suite_plan_text,
     build_unit_status_text,
     fill_startup_status,
+    load_unit_status_texts,
+    parse_suite_plan,
 )
 
 BASE_ROWS: list[tuple] = [
@@ -114,7 +119,7 @@ class StartupFillTests(unittest.TestCase):
         previous = {
             "汕头": "#1、#2机组运行；#3机组备用。",
             "海门": "#1机组运行；#2、#4机组备用；#3机组供热。",
-            "东莞": "二套机组调峰，一、四套机组备用，三套机组检修。",
+            "东莞": "一套机组备用，二套机组调峰，三套机组检修，四套机组备用。",
             "清远": "一套机组备用；二套机组运行。",
         }
         current = dict(previous)
@@ -129,7 +134,7 @@ class StartupFillTests(unittest.TestCase):
         previous = {
             "汕头": "#1、#2机组运行；#3机组备用。",
             "海门": "#1机组运行；#2、#4机组备用；#3机组供热。",
-            "东莞": "二套机组调峰，一、四套机组备用，三套机组检修。",
+            "东莞": "一套机组备用，二套机组调峰，三套机组检修，四套机组备用。",
             "清远": "一套机组备用；二套机组运行。",
         }
         blocks = self._filled_blocks(previous, dict(previous))
@@ -138,6 +143,90 @@ class StartupFillTests(unittest.TestCase):
         first_block = blocks[first_date:second_date]
         self.assertIn("汕头厂：#1、#2机组运行；#3机组备用。", first_block)
         self.assertNotIn("汕头厂：与前一日运行方式一致。", first_block)
+
+
+def _make_unit_workbook(path: Path, rows: list[tuple]) -> Path:
+    workbook = Workbook()
+    brief = workbook.active
+    brief.title = "快报  (日前)"
+    brief["A1"] = "项目"
+    base = workbook.create_sheet("基础信息")
+    for index, row in enumerate(rows, start=12):
+        for column, value in enumerate(row, start=1):
+            if value is not None:
+                base.cell(index, column, value)
+    workbook.save(path)
+    workbook.close()
+    return path
+
+
+DONGGUAN_ROWS: list[tuple] = [
+    ("南方分公司", None, "机组状态"),
+    ("东莞", "合计", "/", 1941.96),
+    (None, "#1,2", "供热", 472.5),
+    (None, "#3,4", "运行", 472.5),
+    (None, "#5,6", "检修", 498.48),
+    (None, "#7,8", "备用", 498.48),
+    (None, "约束情况", "运行日运行方式：一、二、四套机组调峰，三套检修。开机序列：2、4、1、3。"),
+]
+
+
+class ConstraintPlanTests(unittest.TestCase):
+    def test_parse_plan_from_constraint_text(self) -> None:
+        text = "运行日运行方式：一、二、四套机组调峰，三套检修。开机序列：2、4、1、3。"
+        self.assertEqual(
+            parse_suite_plan(text),
+            {1: "调峰", 2: "调峰", 3: "检修", 4: "调峰"},
+        )
+
+    def test_plan_absent_falls_back_to_empty(self) -> None:
+        self.assertEqual(parse_suite_plan("停机序列：3、1。"), {})
+        self.assertEqual(parse_suite_plan(None), {})
+
+    def test_plan_text_follows_suite_order(self) -> None:
+        plan = {4: "调峰", 1: "调峰", 3: "检修", 2: "备用"}
+        self.assertEqual(
+            build_suite_plan_text(plan),
+            "一套机组调峰，二套机组备用，三套机组检修，四套机组调峰。",
+        )
+        self.assertIsNone(build_suite_plan_text({}))
+
+    def test_constraint_wins_over_status_column(self) -> None:
+        # C 列是「供热/运行/检修/备用」，约束写的是「一、二、四套调峰，三套检修」，以约束为准。
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _make_unit_workbook(Path(tmp) / "wb.xlsx", DONGGUAN_ROWS)
+            texts = load_unit_status_texts("2026-11-06", path)
+        self.assertEqual(
+            texts["东莞"],
+            "一套机组调峰，二套机组调峰，三套机组检修，四套机组调峰。",
+        )
+
+    def test_status_column_used_when_constraint_missing(self) -> None:
+        rows = [row for row in DONGGUAN_ROWS if row[1] != "约束情况"]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _make_unit_workbook(Path(tmp) / "wb.xlsx", rows)
+            texts = load_unit_status_texts("2026-11-06", path)
+        self.assertEqual(
+            texts["东莞"],
+            "一套机组供热，二套机组调峰，三套机组检修，四套机组备用。",
+        )
+
+    def test_emergency_standby_keeps_word_and_sorts_as_reserve(self) -> None:
+        # 「应急备用」保留原词，但排序按「备用」处理，因此排在检修之前。
+        text = build_unit_status_text(
+            "汕头", [("3", "检修"), ("2", "应急备用"), ("1", "运行")]
+        )
+        self.assertEqual(text, "#1机组运行；#2机组应急备用；#3机组检修。")
+
+    def test_constraints_parsed_per_plant(self) -> None:
+        rows = DONGGUAN_ROWS[:1] + [
+            ("汕头", "合计", "/"),
+            (None, "#1", "运行"),
+            (None, "约束情况", "停机序列：1。"),
+        ] + DONGGUAN_ROWS[1:]
+        constraints = _parse_unit_constraints(rows)
+        self.assertIn("停机序列", constraints["汕头"])
+        self.assertIn("运行日运行方式", constraints["东莞"])
 
 
 if __name__ == "__main__":
