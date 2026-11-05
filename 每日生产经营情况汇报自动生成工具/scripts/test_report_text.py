@@ -4,11 +4,19 @@ import unittest
 
 from generate_red_marked_report import (
     build_actual_market_text, build_day_ahead_market_text,
-    build_realtime_text, build_strategy_text, LOAD_SUBJECT_CODES,
+    build_realtime_text, build_strategy_text, load_change_text, LOAD_SUBJECT_CODES,
 )
 
 
 class ReportTextTests(unittest.TestCase):
+    def test_load_change_text_uses_flat_when_delta_rounds_to_zero(self) -> None:
+        # 人工报告写「环比持平」，不写「环比上升0万千瓦」。
+        self.assertEqual(load_change_text(0), "持平")
+        self.assertEqual(load_change_text(4.9), "持平")
+        self.assertEqual(load_change_text(-4.9), "持平")
+        self.assertEqual(load_change_text(1000), "上升100万千瓦")
+        self.assertEqual(load_change_text(-1980), "下降198万千瓦")
+
     def test_word_fetches_the_local_power_code_required_by_its_text(self) -> None:
         self.assertEqual(LOAD_SUBJECT_CODES, ["1", "6", "2", "3"])
 

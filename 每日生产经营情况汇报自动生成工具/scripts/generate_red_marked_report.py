@@ -195,6 +195,14 @@ def fmt_mw_as_10k_kw(value_mw: float | None) -> str:
     return fmt_number(value_mw / 10 if value_mw is not None else None)
 
 
+def load_change_text(diff_mw: float, unit: str = "\u4e07\u5343\u74e6") -> str:
+    """负荷环比：变化量四舍五入为 0 时写「持平」，与人工报告一致。"""
+    delta = mw_to_10k_kw(diff_mw)
+    if delta == 0:
+        return "\u6301\u5e73"
+    return f"{trend_word(diff_mw)}{abs(delta)}{unit}"
+
+
 def weather_code_label(code: Any) -> str:
     try:
         value = int(code)
@@ -1243,9 +1251,9 @@ def build_strategy_text(payload: dict[str, Any]) -> str:
     return (
         f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{trend_word(load_max['difference'])}\uff0c"
         f"\u5168\u5929\u6700\u5927{mw_to_10k_kw(load_max['selected'])}\u4e07\u5343\u74e6\uff0c"
-        f"\u73af\u6bd4{trend_word(load_max['difference'])}{abs(mw_to_10k_kw(load_max['difference']))}\u4e07\u5343\u74e6\uff0c"
+        f"\u73af\u6bd4{load_change_text(load_max['difference'])}\uff0c"
         f"\u6700\u5c0f\u503c{mw_to_10k_kw(load_min['selected'])}\u4e07\u5343\u74e6\uff0c"
-        f"\u73af\u6bd4{trend_word(load_min['difference'])}{abs(mw_to_10k_kw(load_min['difference']))}\u4e07\u5343\u74e6\uff1b"
+        f"\u73af\u6bd4{load_change_text(load_min['difference'])}\uff1b"
         f"A\u7c7b\u7535\u6e90\u51fa\u529b{change_word(a_avg['difference'])}\u3001"
         f"\u5730\u65b9\u7535\u6e90\u51fa\u529b{change_word(local_avg['difference'])}\u3002"
         f"\u68c0\u4fee\u5bb9\u91cf{fmt_number(capacity)}\u4e07\u5343\u74e6\u3002"
@@ -1302,9 +1310,9 @@ def build_day_ahead_market_text(payload: dict[str, Any]) -> str:
     return (
         f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{trend_word(load.get('maxDiff') or 0)}\uff0c"
         f"\u5168\u5929\u6700\u5927\u503c{fmt_mw_as_10k_kw(selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
-        f"\u73af\u6bd4{trend_word(load.get('maxDiff') or 0)}{abs(mw_to_10k_kw(load.get('maxDiff') or 0))}\u4e07\u5343\u74e6\uff0c"
-        f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(selected.get('min'))}\u4e07\uff0c"
-        f"\u73af\u6bd4{trend_word(load.get('minDiff') or 0)}{abs(mw_to_10k_kw(load.get('minDiff') or 0))}\u4e07\u5343\u74e6\uff1b"
+        f"\u73af\u6bd4{load_change_text(load.get('maxDiff') or 0)}\uff0c"
+        f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
+        f"\u73af\u6bd4{load_change_text(load.get('minDiff') or 0)}\uff1b"
         f"A\u7c7b\u7535\u51fa\u529b{change_word(a_power.get('avgDiff') or 0)}\u3001"
         f"\u5730\u65b9\u7535\u51fa\u529b{change_word(local.get('avgDiff') or 0)}\uff0c"
         f"\u68c0\u4fee\u5bb9\u91cf{fmt_number(capacity)}\u4e07\u5343\u74e6\u3002"
@@ -1389,8 +1397,7 @@ def build_day_ahead_clearing_text(date_text: str, summary: dict[str, Any]) -> st
         f"\u6d77\u95e8{fmt_number(haimen['energy'])}\u4e07\u3001"
         f"\u4e1c\u839e{fmt_number(dongguan['energy'])}\u4e07\u3001"
         f"\u6d77\u4e0a\u98ce\u7535{fmt_number(offshore['energy'])}\u4e07\u3001"
-        f"\u9b80\u83b2{fmt_number(tuolian['energy'])}\u4e07\u3001"
-        f"\u5f52\u6e56{fmt_number(guihu['energy'])}\u4e07\u5343\u74e6\u65f6\u3001"
+        f"\u5149\u4f0f{fmt_number(tuolian['energy'] + guihu['energy'])}\u4e07\u5343\u74e6\u65f6\u3001"
         f"\u6e05\u8fdc\uff08\u8ba1\u5212\uff09{fmt_number(qingyuan['energy'])}\u4e07\u5343\u74e6\u65f6\uff1b"
         f"\u5206\u516c\u53f8\u65e5\u524d\u5747\u4ef7{fmt_number(summary['averagePrice'])}\u5398/\u5343\u74e6\u65f6\uff0c"
         f"\u5176\u4e2d\u6c55\u5934{fmt_number(shantou['price'])}\u5398\u3001"

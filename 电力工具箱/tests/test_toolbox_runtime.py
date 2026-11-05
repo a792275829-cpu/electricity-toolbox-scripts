@@ -355,7 +355,10 @@ print('192 slots verified; dependency identity preserved')
                 },
             },
         )
-        self.assertIn("归湖34万千瓦时、清远（计划）0万千瓦时；", clearing_text)
+        self.assertIn("光伏58万千瓦时、清远（计划）0万千瓦时；", clearing_text)
+        # 电量按「光伏」合并（24.45 + 33.80 = 58.25 → 58），电价仍分列鮀莲、归湖。
+        self.assertNotIn("鮀莲24万", clearing_text)
+        self.assertIn("鮀莲513厘、归湖465厘/千瓦时。", clearing_text)
 
     def test_utf8_environment_sets_python_encoding(self) -> None:
         from toolbox.runtime import utf8_environment
