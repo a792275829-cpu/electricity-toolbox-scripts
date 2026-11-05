@@ -150,6 +150,39 @@ class QingyuanTemplateTests(unittest.TestCase):
         clear_auto_section_red(document, spot_filled=True)
         self.assertEqual(red_runs(bias), [])
 
+    def test_day_ahead_total_includes_qingyuan_plan_energy(self) -> None:
+        # 口径已确认：日前出清总电量＝快报（日前）F7 火电口径 + 清远计划电量，
+        # 不能再退回「只报火电」的写法（人工稿曾写 6035，与分项对不上）。
+        with tempfile.TemporaryDirectory() as directory:
+            workbook_path = Path(directory) / "出清情况（分公司2026.11.4).xlsx"
+            workbook = Workbook()
+            basic_info = workbook.active
+            basic_info.title = "基础信息"
+            basic_info["AA64"] = 0
+            basic_info["AC64"] = 2300
+            day_ahead = workbook.create_sheet("快报  (日前)")
+            for row, energy, price in ((7, 6034.8139, 236), (8, 1636, 539)):
+                day_ahead.cell(row, 6, energy)
+                day_ahead.cell(row, 7, price)
+            for row, label, energy, price in (
+                (25, "汕头海风", 452, 432),
+                (26, "鮀莲光伏", 39, 591),
+                (27, "归湖光伏", 33, 553),
+            ):
+                day_ahead.cell(row, 1, label)
+                day_ahead.cell(row, 7, energy)
+                day_ahead.cell(row, 8, price)
+            workbook.save(workbook_path)
+
+            summary = load_day_ahead_clearing_summary("2026-11-04", workbook_path)
+
+        self.assertAlmostEqual(summary["qingyuanSource"]["cells"]["AC64"], 2300)
+        self.assertAlmostEqual(summary["baseTotalEnergy"], 6034.8139)
+        self.assertAlmostEqual(summary["totalEnergy"], 6264.8139)
+        generated = build_day_ahead_clearing_text("2026-11-04", summary)
+        self.assertTrue(generated.startswith("11月4日分公司日前出清电量6265万千瓦时。"))
+        self.assertIn("、清远（计划）230万千瓦时；", generated)
+
     def test_qingyuan_day_ahead_energy_sums_basic_info_cells(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workbook_path = Path(directory) / "出清情况（分公司2026.8.12).xlsx"
