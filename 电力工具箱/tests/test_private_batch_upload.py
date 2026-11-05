@@ -84,6 +84,15 @@ class BatchPlanNodeTests(unittest.TestCase):
         )
         self.assertEqual(body, {"files": 2, "map": True, "cn": True})
 
+    def test_dates_fall_back_to_filename_or_date_flag(self) -> None:
+        result = self.run_node(
+            "console.log(JSON.stringify({"
+            "names: m.inferDatesFromNames([{path:'/a/20261025结算单.xlsx'},{path:'/a/x.xlsx'}], undefined),"
+            "flag: m.inferDatesFromNames([{path:'/a/x.xlsx'}], '2026-10-25'),"
+            "none: m.inferDatesFromNames([{path:'/a/x.xlsx'}], undefined)}));"
+        )
+        self.assertEqual(result, {"names": ["2026-10-25"], "flag": ["2026-10-25"], "none": []})
+
     def test_source_codes_map_to_human_readable_names(self) -> None:
         result = self.run_node(
             "console.log(JSON.stringify({a:m.sourceName('1'), b:m.sourceName(101),"

@@ -24,9 +24,10 @@ node scripts/upload-private-data.mjs --batch --unit 汕头 \
 - `--summary-type formal|temporary`：上传月度结算单时使用，对应网站的“正式账单／临时账单”。
 - `--power-source 北京东润环能|国能日新|南瑞|北京华软恒信|其他`：新能源单元上传原始功率预测数据时的“数据来源”。不传则只固定申报功率预测数据为“调度OPS平台”。
 - `--no-verify`：跳过上传后的数据状态回读。
+- `--date YYYY-MM-DD`：接口没回逐文件明细时，用它或文件名里的 `YYYYMMDD` 决定回读日期。
 - `--login --batch`：只登录并保存批量上传自己的登录态。
 
-上传直接 `POST /gdfire/api/data/personal/import`（multipart，`files` 字段重复出现，另带 `personalDataTypeSourceMap`），不经过“点按钮选文件”的界面操作。接口返回逐文件结果，`detail` 非空即该文件失败，脚本按文件汇报并在末尾汇总失败项。
+上传直接 `POST /gdfire/api/data/personal/import`（multipart，`files` 字段重复出现，另带 `personalDataTypeSourceMap`），不经过“点按钮选文件”的界面操作。接口返回逐文件结果，`detail` 非空即该文件失败，脚本按文件汇报并在末尾汇总失败项；返回空数组时按整批成功处理，并用 `--date` 或文件名日期回读核对。
 
 `personalDataTypeSourceMap` 是“数据类型 → 来源编码”的 JSON：新能源单元固定带 `DECLARE_POWER_PREDICT: DISPATCH_OPS_PLATFORM`，原始功率预测数据按 `--power-source` 填 `RAW_POWER_PREDICT`（东润 `BEIJING_DR_HN`、国能日新 `GUO_HN_RI_XIN`、南瑞 `NAN_RUI`、华软 `BEIJING_HR_HX`、其他 `OTHER`）。
 

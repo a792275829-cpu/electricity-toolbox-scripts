@@ -12,6 +12,7 @@ import {
   buildMultipart,
   buildSourceMap,
   datesOf,
+  inferDatesFromNames,
   isAllowedFile,
   planBatches,
   resolveTarget,
@@ -610,20 +611,21 @@ function formatStatusRow(row) {
   ].filter(Boolean).join(' | ');
 }
 
-async function logImportStatus(context, config, items) {
-  const dates = datesOf(items);
-  if (dates.length === 0) {
-    log('回读：接口未返回数据日期，跳过状态核对。');
+async function logImportStatus(context, config, dates) {
+  const values = [...new Set(dates.filter(Boolean))].sort();
+  if (values.length === 0) {
+    log('回读：未取得数据日期（文件名里没有 YYYYMMDD 时可加 --date），跳过状态核对。');
     return;
   }
-  const rows = await fetchImportStatus(context, config, dates);
+  const rows = await fetchImportStatus(context, config, values);
   if (rows === undefined) {
     log('回读：数据状态查询接口暂不可用，已以导入接口返回结果为准。');
     return;
   }
   const pending = rows.filter((row) => String(row.importStatus) !== '1');
   const monthly = rows.some((row) => String(row.dataType ?? '').includes('月度'));
-  log(`回读 ${dates.map((value) => String(value).slice(0, 10)).join('、')}：共 ${rows.length} 条记录${monthly ? '（含月度账单）' : ''}，已上传 ${rows.length - pending.length} 条，未上传 ${pending.length} 条。`);
+  log(`回读 ${values.join('、')}：当日共 ${rows.length} 条记录${monthly ? '（含月度账单）' : ''}，当前已上传 ${rows.length - pending.length} 条、其余 ${pending.length} 条未上传。`);
+  if (pending.length > 0) log('   以下数据项仍为未上传（可能是本次没有准备的数据项）：');
   for (const row of pending.slice(0, 20)) {
     log(`   未上传：${formatStatusRow(row)}`);
   }
@@ -710,7 +712,10 @@ async function runBatch(config, args) {
     }
 
     await saveAuthState(context, config);
-    if (args.verify) await logImportStatus(context, config, [...succeeded, ...failed]);
+    if (args.verify) {
+      const reported = datesOf([...succeeded, ...failed]);
+      await logImportStatus(context, config, reported.length > 0 ? reported : inferDatesFromNames(files, args.date));
+    }
   } finally {
     await context?.close().catch(() => {});
     await browser?.close().catch(() => {});

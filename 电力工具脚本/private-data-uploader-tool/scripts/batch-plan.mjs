@@ -200,6 +200,17 @@ export function summarizeImport(payload) {
   return { items, succeeded, failed };
 }
 
+/** 接口没返回数据日期时，用 --date 或文件名里的 YYYYMMDD 兜底。 */
+export function inferDatesFromNames(files, date) {
+  if (date) return [date];
+  const dates = [];
+  for (const file of files ?? []) {
+    const match = String(file.path ?? '').match(/(20\d{2})(\d{2})(\d{2})/);
+    if (match) dates.push(`${match[1]}-${match[2]}-${match[3]}`);
+  }
+  return [...new Set(dates)].sort();
+}
+
 export function datesOf(items) {
   return [...new Set(items.map((item) => item.date).filter(Boolean))].sort();
 }
