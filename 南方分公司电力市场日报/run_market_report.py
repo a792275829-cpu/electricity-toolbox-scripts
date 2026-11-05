@@ -41,7 +41,7 @@ def main() -> int:
     d2_source = validate_report_workbook(args.d2_report)
     for label, actual, expected in (
         ("D 日收益表", infer_report_date(day_source), args.report_date),
-        ("上一日对比表", infer_day_ahead_comparison_date(previous_source), args.report_date - timedelta(days=1)),
+        ("D-1 收益表", infer_day_ahead_comparison_date(previous_source), args.report_date - timedelta(days=1)),
         ("D-2 收益表", infer_report_date(d2_source), args.report_date - timedelta(days=2)),
     ):
         if actual != expected:

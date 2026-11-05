@@ -33,7 +33,7 @@ PAGE_BINDINGS = MappingProxyType({
     'power-benefit': PageBinding('power-benefit', ('start_date', 'end_date', 'overwrite', 'create_backup')),
     'spot-price': PageBinding('spot-price', ('start_date', 'end_date', 'overwrite', 'create_backup')),
     'daily-pdf-parser': PageBinding('daily-pdf-parser', ('pdf_path', 'output_path', 'mode')),
-    'market-report': PageBinding('market-report', ('report_date', 'day_report', 'previous_report', 'd2_report', 'manual_market')),
+    'market-report': PageBinding('market-report', ('day_report', 'previous_report', 'd2_report', 'manual_market')),
     'report': PageBinding('report', ('report_date', 'online_workbook', 'day_ahead_workbook', 'daily_workbook', 'template_report', 'fetch_data', 'generate_word')),
     'guangdong-price': PageBinding('guangdong-price', ('run_date', 'master_workbook', 'prediction_output_dir', 'training_months', 'forecast_days')),
     'group-upload': PageBinding('group-upload', ('force',)),

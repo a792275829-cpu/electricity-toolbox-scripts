@@ -144,11 +144,13 @@ def plan(paths, tool_id, action, p):
         return [(commands.daily_pdf(paths, source, output, p["mode"]), paths.daily_pdf_parser_dir)]
     elif tool_id == "market-report":
         sources = [required_path(p, key) for key in ("day_report", "previous_report", "d2_report")]
-        command = [py, str(paths.market_report_runner), day("report_date").isoformat(),
+        from .market_report_dates import report_date_from_day_report
+        report_day = report_date_from_day_report(sources[0])
+        command = [py, str(paths.market_report_runner), report_day.isoformat(),
                    "--day-report", str(sources[0]), "--previous-report", str(sources[1]), "--d2-report", str(sources[2])]
         if str(p.get("manual_market", "")).strip():
             from .market_editor import market_module
-            data = market_module().normalize_manual_market(json.loads(p["manual_market"]), day("report_date"))
+            data = market_module().normalize_manual_market(json.loads(p["manual_market"]), report_day)
             command.extend(("--manual-market", json.dumps(data, ensure_ascii=False)))
         return [(command, paths.market_report_dir)]
     elif tool_id == "report":
