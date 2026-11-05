@@ -416,6 +416,12 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
         "\u5f52\u6e56": _clearing_label_row(label_rows, ("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56"), sheet_name),
     }
     base_total_energy = parse_float(value(rows["company"], 6))
+    # 分公司口径 F7 只含火电三厂，新能源在下方独立区块（G 列为电量），
+    # 报告要求「所有单元相加」，因此总数＝火电 + 新能源 + 清远计划。
+    renewable_energy = sum(
+        parse_float(value(rows[label], 7))
+        for label in ("\u6d77\u4e0a\u98ce\u7535", "\u9b80\u83b2", "\u5f52\u6e56")
+    )
     return {
         "workbook": str(workbook_path),
         "sheet": sheet_name,
@@ -424,7 +430,8 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
             "cells": qingyuan_components,
         },
         "baseTotalEnergy": base_total_energy,
-        "totalEnergy": base_total_energy + qingyuan_energy,
+        "renewableEnergy": renewable_energy,
+        "totalEnergy": base_total_energy + renewable_energy + qingyuan_energy,
         "averagePrice": parse_float(value(rows["company"], 7)),
         "companies": {
             "\u6c55\u5934": {

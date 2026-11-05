@@ -178,9 +178,10 @@ class QingyuanTemplateTests(unittest.TestCase):
 
         self.assertAlmostEqual(summary["qingyuanSource"]["cells"]["AC64"], 2300)
         self.assertAlmostEqual(summary["baseTotalEnergy"], 6034.8139)
-        self.assertAlmostEqual(summary["totalEnergy"], 6264.8139)
+        self.assertAlmostEqual(summary["renewableEnergy"], 524)
+        self.assertAlmostEqual(summary["totalEnergy"], 6788.8139)
         generated = build_day_ahead_clearing_text("2026-11-04", summary)
-        self.assertTrue(generated.startswith("11月4日分公司日前出清电量6265万千瓦时。"))
+        self.assertTrue(generated.startswith("11月4日分公司日前出清电量6789万千瓦时。"))
         self.assertIn("、清远（计划）230万千瓦时；", generated)
 
     def test_qingyuan_day_ahead_energy_sums_basic_info_cells(self) -> None:
@@ -214,13 +215,14 @@ class QingyuanTemplateTests(unittest.TestCase):
 
         self.assertEqual(summary["companies"]["清远"]["energy"], 2)
         self.assertEqual(summary["baseTotalEnergy"], 100)
-        self.assertEqual(summary["totalEnergy"], 102)
+        self.assertEqual(summary["renewableEnergy"], 10)  # 海风 5 + 鮀莲 3 + 归湖 2
+        self.assertEqual(summary["totalEnergy"], 112)
         self.assertEqual(
             summary["qingyuanSource"],
             {"sheet": "基础信息", "cells": {"AA64": 12.4, "AC64": 7.6}},
         )
         generated = build_day_ahead_clearing_text("2026-08-12", summary)
-        self.assertTrue(generated.startswith("8月12日分公司日前出清电量102万千瓦时。"))
+        self.assertTrue(generated.startswith("8月12日分公司日前出清电量112万千瓦时。"))
         self.assertIn("、清远（计划）2万千瓦时；", generated)
 
 
