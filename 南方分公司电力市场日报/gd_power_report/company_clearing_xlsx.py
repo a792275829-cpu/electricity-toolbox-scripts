@@ -955,7 +955,11 @@ def _operation_table(
     return {"dates": dates, "rows": rows}
 
 
-PLANT_SECTION_RE = re.compile(r"[ \t]*(?P<plant>汕头|海门|东莞)(?:电厂|厂)?[ \t]*[：:][ \t]*")
+# 序号可能写成「2.」「2、」「（2）」，也可能没有分隔符（如「2汕头厂：」）。
+ITEM_NUMBER = r"(?:[（(]?\d+[）)]?[ \t]*[.、]?[ \t]*)"
+PLANT_SECTION_RE = re.compile(
+    rf"[ \t]*{ITEM_NUMBER}?(?P<plant>汕头|海门|东莞)(?:电厂|厂)?[ \t]*[：:][ \t]*"
+)
 
 
 def _plant_sections(lines: list[str]) -> list[dict[str, str]]:
@@ -1008,7 +1012,7 @@ def _strategy_lines(value: Any) -> list[dict[str, str]]:
         return result
     matches = list(
         re.finditer(
-            r"(?m)^\s*(?:\d+\s*[.、]\s*)?(?P<lead>结合)?\s*"
+            rf"(?m)^\s*{ITEM_NUMBER}?(?P<lead>结合)?\s*"
             r"(?P<plant>汕头|海门|东莞)(?:电厂|厂)?\s*[:：]?\s*",
             text,
         )

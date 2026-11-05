@@ -71,6 +71,18 @@ class MarketReportFormatTests(unittest.TestCase):
         self.assertIn("-272万元", prepared[2]["profit_text"])
         self.assertIn("56万元", prepared[3]["profit_text"])
 
+    def test_glued_item_number_still_starts_the_plant_section(self):
+        # 「2汕头厂：」——序号和厂名之间没有点号，源表实际出现过这种写法。
+        text = (
+            "日前简析：\n1.运行日统调负荷需求小幅下行。\n"
+            "2汕头厂：海风出力上涨。日前偏差收益分别为：68万元、-105万元。\n"
+            "3.海门厂：延续低价欠发增收策略。\n4.东莞厂：动态调整报价策略。"
+        )
+        rows = _strategy_lines(text)
+        self.assertEqual([row["plant"] for row in rows], ["汕头厂", "海门厂", "东莞厂"])
+        self.assertTrue(rows[0]["text"].startswith("海风出力上涨"))
+        self.assertNotIn("统调", rows[0]["text"])
+
     def test_coal_uses_first_mode_and_gas_uses_1900_for_both_dates(self):
         current = thermal_payload([115] * 12 + [113] * 12, [90] + [30] * 18 + [55] + [40] * 3 + [80])
         previous = thermal_payload([114] * 24, [100] + [31] * 18 + [28] + [41] * 3 + [70])
