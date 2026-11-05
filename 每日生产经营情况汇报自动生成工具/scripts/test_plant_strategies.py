@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from docx import Document
 from openpyxl import Workbook
@@ -78,6 +79,29 @@ class LoadStrategyTests(unittest.TestCase):
             workbook.close()
             self.assertEqual(load_plant_strategies(path), {})
             self.assertEqual(load_plant_strategies(None), {})
+
+    def test_no_path_falls_back_to_report_date(self) -> None:
+        # 命令行未传 --day-ahead-workbook 时也应按报告日自动找到 D 日工作簿。
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "wb.xlsx"
+            workbook = Workbook()
+            workbook.active.title = "快报  (日前)"
+            workbook.active["A39"] = "\n".join(
+                ["日前简析：", "1.总述。", f"汕头厂：{SHANTOU}", f"海门厂：{HAIMEN}"]
+            )
+            workbook.save(path)
+            workbook.close()
+            with patch("generate_red_marked_report.find_clearing_workbook", return_value=path) as finder:
+                result = load_plant_strategies(None, date_text="2026-11-06")
+            finder.assert_called_once_with("2026-11-06")
+            self.assertEqual(set(result), {"汕头厂", "海门厂"})
+
+    def test_unresolvable_date_returns_empty(self) -> None:
+        with patch(
+            "generate_red_marked_report.find_clearing_workbook",
+            side_effect=FileNotFoundError("没有对应日期的工作簿"),
+        ):
+            self.assertEqual(load_plant_strategies(None, date_text="2026-11-06"), {})
 
 
 def _document() -> Document:

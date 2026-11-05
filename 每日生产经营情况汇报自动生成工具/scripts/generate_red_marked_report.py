@@ -230,13 +230,33 @@ def extract_plant_strategies(text: str | None) -> dict[str, str]:
     return {plant: body for plant, body in strategies.items() if body}
 
 
-def load_plant_strategies(workbook_path: Path | None) -> dict[str, str]:
-    """读取 D 日「快报（日前）」的日前简析（A39），解析三厂策略。"""
-    if not workbook_path:
+def resolve_day_ahead_workbook(workbook_path: Path | None,
+                               date_text: str | None) -> Path | None:
+    """显式路径优先；没有传路径时按报告日到下载目录自动定位 D 日工作簿。"""
+    if workbook_path:
+        return Path(workbook_path)
+    if date_text:
+        try:
+            return find_clearing_workbook(date_text)
+        except Exception as exc:
+            log(f"按日期未找到 D 日出清情况工作簿（{date_text}）：{exc}")
+    return None
+
+
+def load_plant_strategies(workbook_path: Path | None, *,
+                          date_text: str | None = None) -> dict[str, str]:
+    """读取 D 日「快报（日前）」的日前简析（A39），解析三厂策略。
+
+    未显式传工作簿时按报告日自动定位（与其他取数函数一致）；以前这里直接
+    return {}，导致命令行不传 --day-ahead-workbook 时明明 A39 有内容却报「找不到」。
+    """
+    source = resolve_day_ahead_workbook(workbook_path, date_text)
+    if source is None:
         return {}
     try:
-        workbook = load_workbook(workbook_path, read_only=True, data_only=True)
-    except Exception:
+        workbook = load_workbook(source, read_only=True, data_only=True)
+    except Exception as exc:
+        log(f"三厂策略：打不开工作簿 {source.name}：{exc}")
         return {}
     text: str | None = None
     try:
@@ -245,6 +265,7 @@ def load_plant_strategies(workbook_path: Path | None) -> dict[str, str]:
             None,
         )
         if sheet_name is None:
+            log(f"三厂策略：{source.name} 中没有「快报（日前）」工作表，保留模板原文")
             return {}
         sheet = workbook[sheet_name]
         for row in sheet.iter_rows(min_row=39, max_row=39, min_col=1, max_col=1, values_only=True):
@@ -259,6 +280,8 @@ def load_plant_strategies(workbook_path: Path | None) -> dict[str, str]:
                 if isinstance(value, str) and "日前简析" in value:
                     text = value
                     break
+        if not text:
+            log(f"三厂策略：{source.name}「快报（日前）」中未找到日前简析（A39），保留模板原文")
     finally:
         workbook.close()
     return extract_plant_strategies(text)
@@ -2027,15 +2050,20 @@ def generate(
     replace_paragraph(next_nonempty_paragraph(doc, strategy_heading), build_strategy_text(payload))
     # 粤东 500kV 线路信息不是每日固定内容，模板里带的那段直接删掉。
     remove_east_guangdong_section(doc)
+    plant_strategy_source = resolve_day_ahead_workbook(
+        day_ahead_workbook, plan["dayAheadDate"]
+    )
     try:
-        plant_strategies = load_plant_strategies(day_ahead_workbook)
+        plant_strategies = load_plant_strategies(
+            plant_strategy_source, date_text=plan["dayAheadDate"]
+        )
     except Exception as exc:
         plant_strategies = {}
         log(f"三厂策略取数失败，已保留模板原文：{exc}")
     filled_plants = fill_plant_strategies(doc, plant_strategies)
     missing_plants = [p for p in PLANT_STRATEGY_LABELS if p not in filled_plants]
     if missing_plants:
-        log("以下厂策略未在 D 日「快报（日前）」A39 中找到，保留模板原文：" + "、".join(missing_plants))
+        log("以下厂策略未从 D 日「快报（日前）」A39 解析出，保留模板原文：" + "、".join(missing_plants))
     table_title = find_paragraph(doc, lambda text: text.startswith("表1"))
     replace_paragraph(table_title, f"表1  {date_label(plan['dailyClearingDate'])}分公司日清分情况")
     # 两个表格各自从新页开始，避免标题与表格被分页切断。
@@ -2123,6 +2151,7 @@ def generate(
         "tablePageBreaks": paginated,
         "plantStrategiesFilled": filled_plants,
         "plantStrategiesMissing": missing_plants,
+        "plantStrategiesSource": str(plant_strategy_source) if plant_strategy_source else None,
         "onlineEnergyError": online_energy_error,
         "dailyClearingError": daily_clearing_error,
         "weatherError": weather_error,
