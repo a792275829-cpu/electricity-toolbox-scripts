@@ -22,7 +22,9 @@ class PrivateBatchUploadPage(ToolPage):
     tool_id = 'private-batch-upload'
     UNITS = (("海风", "海风"), ("鮀莲", "鮀莲"), ("归湖", "归湖"),
              ("东莞", "东莞"), ("汕头", "汕头"), ("海门", "海门"))
-    SUMMARY_TYPES = (("none", "不适用"), ("formal", "正式账单"), ("temporary", "临时账单"))
+    # 月度结算单是可选项：不勾选就不带 summaryType，勾选后才需要区分正式／临时。
+    MONTHLY_TYPES = (("formal", "正式账单"), ("temporary", "临时账单"))
+    NEW_ENERGY_UNITS = ("海风", "鮀莲", "归湖")
     # 网站“数据来源”下拉：只影响新能源单元的原始功率预测数据。
     POWER_SOURCES = (("不适用", "不适用"), ("北京东润环能", "东润"), ("国能日新", "日新"),
                      ("南瑞", "南瑞"), ("北京华软恒信", "华软"), ("其他", "其他"))
@@ -38,10 +40,13 @@ class PrivateBatchUploadPage(ToolPage):
         self._file_dialogs: FileDialogState | None = None
         self.selected_paths: list[Path] = []
         self.unit = tk.StringVar(master=self, value="海风")
+        self.monthly = tk.BooleanVar(master=self, value=False)
+        self.monthly_type = tk.StringVar(master=self, value="formal")
         self.summary_type = tk.StringVar(master=self, value="none")
         self.power_source = tk.StringVar(master=self, value="不适用")
         self.verify = tk.BooleanVar(master=self, value=True)
         self.selection_var = tk.StringVar(master=self, value="未选择文件")
+        self.source_hint = tk.StringVar(master=self, value="")
         self.summary_var = tk.StringVar(master=self, value="请选择要上传到该单元的文件。")
 
         form = ttk.LabelFrame(self.content, text="上传单元与文件", padding=12)
@@ -52,23 +57,31 @@ class PrivateBatchUploadPage(ToolPage):
         units = SegmentedGroup(form, variable=self.unit, choices=self.UNITS)
         units.grid(row=0, column=1, sticky="w", pady=(0, 8))
 
-        ttk.Label(form, text="月结算单").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 8))
-        summary_types = SegmentedGroup(form, variable=self.summary_type, choices=self.SUMMARY_TYPES)
-        summary_types.grid(row=1, column=1, sticky="w", pady=(0, 8))
-
-        ttk.Label(form, text="数据来源").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(0, 8))
-        power_sources = SegmentedGroup(form, variable=self.power_source, choices=self.POWER_SOURCES)
-        power_sources.grid(row=2, column=1, sticky="w", pady=(0, 8))
+        ttk.Label(form, text="账单类型").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 8))
+        billing = ttk.Frame(form)
+        billing.grid(row=1, column=1, sticky="w", pady=(0, 8))
+        SettingCheckbutton(billing, text="月度结算单", variable=self.monthly).pack(side="left")
+        monthly_types = SegmentedGroup(billing, variable=self.monthly_type, choices=self.MONTHLY_TYPES)
+        monthly_types.pack(side="left", padx=(12, 0))
         ttk.Label(
-            form, text="“数据来源”只用于新能源单元的原始功率预测数据；申报功率预测数据固定走调度OPS平台。",
+            form, text="不勾选则按普通私有数据上传；勾选后按月度结算单上传，并区分正式／临时。",
             style="Muted.TLabel", wraplength=680,
-        ).grid(row=3, column=1, sticky="w", pady=(0, 8))
+        ).grid(row=2, column=1, sticky="w", pady=(0, 8))
 
-        ttk.Label(form, textvariable=self.summary_var).grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Label(form, text="功率预测来源").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=(0, 8))
+        power_sources = SegmentedGroup(form, variable=self.power_source, choices=self.POWER_SOURCES)
+        power_sources.grid(row=3, column=1, sticky="w", pady=(0, 8))
+        ttk.Label(
+            form, textvariable=self.source_hint, style="Muted.TLabel", wraplength=680,
+        ).grid(row=4, column=1, sticky="w", pady=(0, 8))
+
+        ttk.Label(form, textvariable=self.summary_var).grid(row=5, column=0, columnspan=2, sticky="w")
         ttk.Label(
             form, textvariable=self.selection_var, justify="left", style="Muted.TLabel",
-        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
+        self.monthly_buttons = monthly_types.buttons
+        self.source_buttons = power_sources.buttons
         self.choose_button = FileSelectButton(self.actions, text="选择文件", command=self.choose_files)
         self.choose_button.pack(side="left")
         self.run_button = ttk.Button(self.actions, text="开始上传", command=self.confirm_upload)
@@ -76,8 +89,39 @@ class PrivateBatchUploadPage(ToolPage):
         SettingCheckbutton(self.actions, text="上传后回读数据状态", variable=self.verify).pack(side="right")
         self.register_busy_widgets(
             self.choose_button, self.run_button,
-            *units.buttons, *summary_types.buttons, *power_sources.buttons,
+            *units.buttons, *monthly_types.buttons, *power_sources.buttons,
         )
+        self.monthly.trace_add("write", lambda *_: self.sync_monthly())
+        self.monthly_type.trace_add("write", lambda *_: self.sync_monthly())
+        self.unit.trace_add("write", lambda *_: self.sync_source())
+        self.sync_monthly()
+        self.sync_source()
+
+    @staticmethod
+    def _toggle(buttons: list[ttk.Widget], enabled: bool) -> None:
+        for button in buttons:
+            button.state(["!disabled"] if enabled else ["disabled"])
+
+    def sync_monthly(self) -> None:
+        enabled = bool(self.monthly.get())
+        self._toggle(self.monthly_buttons, enabled)
+        self.summary_type.set(self.monthly_type.get() if enabled else "none")
+
+    def sync_source(self) -> None:
+        new_energy = self.unit.get() in self.NEW_ENERGY_UNITS
+        self._toggle(self.source_buttons, new_energy)
+        if new_energy:
+            self.source_hint.set("只有海风、鮀莲、归湖需要；申报功率预测数据固定走调度OPS平台。")
+        else:
+            self.power_source.set("不适用")
+            self.source_hint.set("当前是火电单元，不需要选择功率预测来源。")
+
+    def set_busy(self, busy: bool, status: str = "") -> None:
+        super().set_busy(busy, status)
+        if not busy:
+            # 忙碌结束会把按钮恢复成 normal，这里按当前选择再收敛一次。
+            self.sync_monthly()
+            self.sync_source()
 
     @property
     def file_dialogs(self) -> FileDialogState:
@@ -151,10 +195,15 @@ class PrivateBatchUploadPage(ToolPage):
         count = self.batch_count(self.selected_paths)
         source = self.power_source.get()
         source_line = f"\n原始功率预测数据来源：{source}" if source != "不适用" else ""
+        monthly_line = ""
+        if self.monthly.get():
+            label = dict(self.MONTHLY_TYPES)[self.monthly_type.get()]
+            monthly_line = f"\n按月度结算单上传：{label}"
         if not messagebox.askokcancel(
             "确认上传",
             f"确认把 {len(self.selected_paths)} 个文件上传到「{unit}」？\n\n"
             + "\n".join(path.name for path in self.selected_paths)
+            + monthly_line
             + source_line
             + f"\n\n将分 {count} 批调用批量上传接口。",
             parent=self,
