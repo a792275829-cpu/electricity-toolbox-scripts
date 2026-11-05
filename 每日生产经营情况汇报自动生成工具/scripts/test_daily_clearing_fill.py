@@ -113,6 +113,11 @@ def _build_workbook(path: Path) -> None:
 
     for name, low, high in (("汕头", 700, 765.49), ("海门", -60, 900), ("东莞", -50, 800)):
         sheet = workbook.create_sheet(name)
+        # 日前/实时两组标签分列不同行，值刻意不同：报告句取实时行，不能误取日前行。
+        sheet.cell(12, 3, "日前最低价")
+        sheet.cell(12, 4, low - 10)
+        sheet.cell(13, 3, "日前最高价")
+        sheet.cell(13, 4, high + 300)
         sheet.cell(14, 3, "实时最低价")
         sheet.cell(14, 4, low)
         sheet.cell(15, 3, "实时最高价")
@@ -167,6 +172,7 @@ class DailyClearingFillTests(unittest.TestCase):
     def test_spot_deviation_texts_use_company_sheet(self) -> None:
         spot = self.data["spot"]
         self.assertAlmostEqual(spot["loadRate"], 47.8, places=3)
+        # 节点电价取「实时最低价／实时最高价」两行；若误取日前行会是 -70／1200。
         self.assertEqual(spot["minPrice"], -60)
         self.assertEqual(spot["maxPrice"], 900)
         realtime, actual = build_spot_deviation_texts(spot)
