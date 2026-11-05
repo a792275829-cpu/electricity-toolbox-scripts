@@ -4,7 +4,8 @@ import unittest
 
 from generate_red_marked_report import (
     build_actual_market_text, build_day_ahead_market_text,
-    build_realtime_text, build_strategy_text, load_change_text, LOAD_SUBJECT_CODES,
+    build_realtime_text, build_strategy_text, delta_phrase, load_change_text,
+    load_trend_word, startup_change_text, UNIT_YUAN_PER_MWH, LOAD_SUBJECT_CODES,
 )
 
 
@@ -16,6 +17,25 @@ class ReportTextTests(unittest.TestCase):
         self.assertEqual(load_change_text(-4.9), "持平")
         self.assertEqual(load_change_text(1000), "上升100万千瓦")
         self.assertEqual(load_change_text(-1980), "下降198万千瓦")
+
+    def test_load_trend_word_has_no_number(self) -> None:
+        # 句首「统调负荷需求上升，全天最大…」只带方向，不带数值。
+        self.assertEqual(load_trend_word(0), "持平")
+        self.assertEqual(load_trend_word(4), "持平")
+        self.assertEqual(load_trend_word(1000), "上升")
+        self.assertEqual(load_trend_word(-1980), "下降")
+
+    def test_price_and_startup_deltas_use_flat_when_shown_as_zero(self) -> None:
+        # 均价保留两位小数、台数取整，展示值为 0 时同样写「持平」。
+        self.assertEqual(delta_phrase(0, unit=UNIT_YUAN_PER_MWH, digits=2), "持平")
+        self.assertEqual(delta_phrase(0.004, unit=UNIT_YUAN_PER_MWH, digits=2), "持平")
+        self.assertEqual(delta_phrase(-0.004, unit=UNIT_YUAN_PER_MWH, digits=2), "持平")
+        self.assertEqual(delta_phrase(11.35, unit=UNIT_YUAN_PER_MWH, digits=2), "上升11.35元/兆瓦时")
+        self.assertEqual(delta_phrase(-5.59, unit=UNIT_YUAN_PER_MWH, digits=2), "下降5.59元/兆瓦时")
+        self.assertEqual(startup_change_text(0), "持平")
+        self.assertEqual(startup_change_text(0.4), "持平")
+        self.assertEqual(startup_change_text(2), "增加2台")
+        self.assertEqual(startup_change_text(-3), "减少3台")
 
     def test_word_fetches_the_local_power_code_required_by_its_text(self) -> None:
         self.assertEqual(LOAD_SUBJECT_CODES, ["1", "6", "2", "3"])

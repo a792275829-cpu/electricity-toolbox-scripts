@@ -13,6 +13,7 @@ from generate_red_marked_report import (
     LOCAL_TEMPLATE_PATH,
     QINGYUAN_DAILY_CLEARING_VALUES,
     build_day_ahead_clearing_text,
+    clear_auto_section_red,
     ensure_daily_clearing_table_structure,
     ensure_qingyuan_template_content,
     ensure_qingyuan_online_energy_text,
@@ -125,6 +126,29 @@ class QingyuanTemplateTests(unittest.TestCase):
         }
         generated = build_day_ahead_clearing_text("2026-08-12", summary)
         self.assertIn("、清远（计划）0万千瓦时；", generated)
+
+    def test_auto_generated_sections_lose_red_heading(self) -> None:
+        def red_runs(paragraph) -> list[str]:
+            return [
+                run.text
+                for run in paragraph.runs
+                if run.font.color and run.font.color.rgb
+                and str(run.font.color.rgb).upper() == "FF0000"
+            ]
+
+        document = Document(LOCAL_TEMPLATE_PATH)
+        strategy = next(p for p in document.paragraphs if p.text.strip() == "三、现货交易策略")
+        bias = next(p for p in document.paragraphs if p.text.strip() == "3.现货偏差分析")
+        self.assertTrue(red_runs(strategy))
+        self.assertTrue(red_runs(bias))
+
+        # 现货偏差分析取数失败时保留红字，提示仍需人工补数。
+        clear_auto_section_red(document, spot_filled=False)
+        self.assertEqual(red_runs(strategy), [])
+        self.assertTrue(red_runs(bias))
+
+        clear_auto_section_red(document, spot_filled=True)
+        self.assertEqual(red_runs(bias), [])
 
     def test_qingyuan_day_ahead_energy_sums_basic_info_cells(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -195,12 +195,32 @@ def fmt_mw_as_10k_kw(value_mw: float | None) -> str:
     return fmt_number(value_mw / 10 if value_mw is not None else None)
 
 
+UNIT_YUAN_PER_MWH = "\u5143/\u5146\u74e6\u65f6"
+UNIT_TAI = "\u53f0"
+
+
+def delta_phrase(value: float | None, *, unit: str = "", scale: float = 1.0,
+                 digits: int = 0, up: str = "\u4e0a\u5347", down: str = "\u4e0b\u964d") -> str:
+    """环比措辞：变化量按展示精度取整后为 0 时统一写「持平」。"""
+    shown = round((value or 0.0) * scale, digits)
+    if abs(shown) < 0.5 * 10 ** (-digits):
+        return "\u6301\u5e73"
+    return f"{up if shown > 0 else down}{fmt_number(abs(shown), digits)}{unit}"
+
+
+def startup_change_text(diff: float | None) -> str:
+    """开机台数环比，台数为 0 时写「持平」。"""
+    return delta_phrase(diff, unit=UNIT_TAI, up="\u589e\u52a0", down="\u51cf\u5c11")
+
+
+def load_trend_word(diff_mw: float) -> str:
+    """负荷方向词：只输出「上升／下降／持平」，不带数值，供句首使用。"""
+    return "\u6301\u5e73" if mw_to_10k_kw(diff_mw) == 0 else trend_word(diff_mw)
+
+
 def load_change_text(diff_mw: float, unit: str = "\u4e07\u5343\u74e6") -> str:
     """负荷环比：变化量四舍五入为 0 时写「持平」，与人工报告一致。"""
-    delta = mw_to_10k_kw(diff_mw)
-    if delta == 0:
-        return "\u6301\u5e73"
-    return f"{trend_word(diff_mw)}{abs(delta)}{unit}"
+    return delta_phrase(diff_mw, unit=unit, scale=0.1)
 
 
 def weather_code_label(code: Any) -> str:
@@ -1191,6 +1211,17 @@ def clear_paragraph_red(paragraph) -> None:
             run.font.color.rgb = RGBColor(0, 0, 0)
 
 
+def clear_auto_section_red(document, *, spot_filled: bool) -> None:
+    """已自动生成的小节标题取消标红。
+
+    现货交易策略按接口数据自动生成，始终取消标红；现货偏差分析只有在 D-2 取数成功
+    时才取消，取数失败保留红字，提示需要人工补数。
+    """
+    clear_paragraph_red(find_exact_paragraph(document, "\u4e09\u3001\u73b0\u8d27\u4ea4\u6613\u7b56\u7565"))
+    if spot_filled:
+        clear_paragraph_red(find_exact_paragraph(document, "3.\u73b0\u8d27\u504f\u5dee\u5206\u6790"))
+
+
 def replace_leading_date(paragraph, date_text: str) -> None:
     text = paragraph.text
     updated = re.sub(r"^\d+月\d+日", date_label(date_text), text, count=1)
@@ -1249,7 +1280,7 @@ def build_strategy_text(payload: dict[str, Any]) -> str:
     a_avg = metric(a_power, "\u5e73\u5747\u503c(MW)")
     local_avg = metric(local, "\u5e73\u5747\u503c(MW)")
     return (
-        f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{trend_word(load_max['difference'])}\uff0c"
+        f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load_max['difference'])}\uff0c"
         f"\u5168\u5929\u6700\u5927{mw_to_10k_kw(load_max['selected'])}\u4e07\u5343\u74e6\uff0c"
         f"\u73af\u6bd4{load_change_text(load_max['difference'])}\uff0c"
         f"\u6700\u5c0f\u503c{mw_to_10k_kw(load_min['selected'])}\u4e07\u5343\u74e6\uff0c"
@@ -1258,9 +1289,9 @@ def build_strategy_text(payload: dict[str, Any]) -> str:
         f"\u5730\u65b9\u7535\u6e90\u51fa\u529b{change_word(local_avg['difference'])}\u3002"
         f"\u68c0\u4fee\u5bb9\u91cf{fmt_number(capacity)}\u4e07\u5343\u74e6\u3002"
         f"\u5e02\u573a\u5f00\u673a\u53f0\u6570{fmt_number(startup)}\u53f0\uff0c"
-        f"\u73af\u6bd4{change_word(startup_diff or 0)}{fmt_number(abs(startup_diff or 0))}\u53f0\uff0c"
+        f"\u73af\u6bd4{startup_change_text(startup_diff)}\uff0c"
         f"\u5168\u7701\u65e5\u524d\u51fa\u6e05\u5747\u4ef7{fmt_number(price['selectedDailyAvgPrice'], 2)}\u5143/\u5146\u74e6\u65f6\uff0c"
-        f"\u73af\u6bd4{trend_word(price['difference'] or 0)}{fmt_number(abs(price['difference'] or 0), 2)}\u5143/\u5146\u74e6\u65f6\u3002"
+        f"\u73af\u6bd4{delta_phrase(price['difference'], unit=UNIT_YUAN_PER_MWH, digits=2)}\u3002"
     )
 
 
@@ -1277,7 +1308,7 @@ def build_realtime_text(payload: dict[str, Any]) -> str:
     a_avg = metric(a_power, "\u5e73\u5747\u503c(MW)")
     local_avg = metric(local, "\u5e73\u5747\u503c(MW)")
     return (
-        f"\u5b9e\u65f6\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{trend_word(load_max['difference'])}\uff0c"
+        f"\u5b9e\u65f6\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load_max['difference'])}\uff0c"
         f"\u5168\u5929\u6700\u5927\u503c{mw_to_10k_kw(load_max['selected'])}\u4e07\u5343\u74e6\uff0c"
         f"\u6700\u5c0f\u503c{mw_to_10k_kw(load_min['selected'])}\u4e07\u5343\u74e6\uff0c"
         f"A\u7c7b\u7535\u51fa\u529b{change_word(a_avg['difference'])}\u3001"
@@ -1308,7 +1339,7 @@ def build_day_ahead_market_text(payload: dict[str, Any]) -> str:
     startup_diff = (public_data.get("startupCount") or {}).get("difference")
     selected = load["selected"]
     return (
-        f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{trend_word(load.get('maxDiff') or 0)}\uff0c"
+        f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load.get('maxDiff') or 0)}\uff0c"
         f"\u5168\u5929\u6700\u5927\u503c{fmt_mw_as_10k_kw(selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
         f"\u73af\u6bd4{load_change_text(load.get('maxDiff') or 0)}\uff0c"
         f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
@@ -1317,9 +1348,9 @@ def build_day_ahead_market_text(payload: dict[str, Any]) -> str:
         f"\u5730\u65b9\u7535\u51fa\u529b{change_word(local.get('avgDiff') or 0)}\uff0c"
         f"\u68c0\u4fee\u5bb9\u91cf{fmt_number(capacity)}\u4e07\u5343\u74e6\u3002"
         f"\u5e02\u573a\u5f00\u673a\u53f0\u6570{fmt_number(startup)}\u53f0\uff0c"
-        f"\u73af\u6bd4{change_word(startup_diff or 0)}{fmt_number(abs(startup_diff or 0))}\u53f0\uff0c"
+        f"\u73af\u6bd4{startup_change_text(startup_diff)}\uff0c"
         f"\u5168\u7701\u65e5\u524d\u51fa\u6e05\u5747\u4ef7{fmt_number(price['selectedDailyAvgPrice'], 2)}\u5143/\u5146\u74e6\u65f6\uff0c"
-        f"\u73af\u6bd4{trend_word(price['difference'] or 0)}{fmt_number(abs(price['difference'] or 0), 2)}\u5143/\u5146\u74e6\u65f6\u3002"
+        f"\u73af\u6bd4{delta_phrase(price['difference'], unit=UNIT_YUAN_PER_MWH, digits=2)}\u3002"
     )
 
 
@@ -1333,7 +1364,7 @@ def build_actual_market_text(payload: dict[str, Any]) -> str:
     selected = load["selected"]
     b_selected = b_space["selected"]
     return (
-        f"\u5b9e\u65f6\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{trend_word(load.get('maxDiff') or 0)}\uff0c"
+        f"\u5b9e\u65f6\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load.get('maxDiff') or 0)}\uff0c"
         f"\u5168\u5929\u6700\u5927\u503c{fmt_mw_as_10k_kw(selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
         f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
         f"A\u7c7b\u7535\u51fa\u529b{change_word(a_power.get('avgDiff') or 0)}\u3001"
@@ -1523,6 +1554,7 @@ def generate(
             spot_filled = fill_spot_deviation_analysis(
                 doc, build_spot_deviation_texts(daily_clearing["spot"])
             )
+    clear_auto_section_red(doc, spot_filled=spot_filled)
     day_ahead_heading = find_exact_paragraph(doc, "1.日前市场")
     replace_paragraph(next_nonempty_paragraph(doc, day_ahead_heading), build_day_ahead_market_text(payload))
     actual_heading = find_exact_paragraph(doc, "2.实时市场")
