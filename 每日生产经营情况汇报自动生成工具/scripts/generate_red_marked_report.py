@@ -334,10 +334,17 @@ def _read_clearing_values(path):
                 if row[column - 1] is not None:
                     values[(row_number, column)] = row[column - 1]
         basic = None
+        unit_rows: list[tuple] = []
         if "基础信息" in workbook.sheetnames:
             snapshots = read_cell_snapshots(workbook, [("基础信息", cell) for cell in ("AA64", "AC64")])
             basic = {cell: snapshots[("基础信息", cell)][0] for cell in ("AA64", "AC64")}
-        result = (sheet_name, values, labels, basic)
+            unit_rows = [
+                row
+                for row in workbook["基础信息"].iter_rows(
+                    min_col=1, max_col=7, max_row=80, values_only=True
+                )
+            ]
+        result = (sheet_name, values, labels, basic, unit_rows)
     finally:
         workbook.close()
     if cache is not None:
@@ -355,7 +362,7 @@ def _clearing_label_row(labels, wanted, sheet_name):
 def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None = None) -> dict[str, Any]:
     if workbook_path is None:
         workbook_path = find_clearing_workbook(date_text)
-    sheet_name, values, label_rows, basic = _read_clearing_values(workbook_path)
+    sheet_name, values, label_rows, basic, _unit_rows = _read_clearing_values(workbook_path)
     value = lambda row, column: values.get((row, column))
     qingyuan_raw_values = basic if basic is not None else {"AA64": 0, "AC64": 0}
     if basic is not None:
@@ -426,7 +433,7 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
 def load_online_price_summary(date_text: str, workbook_path: Path | None = None) -> dict[str, Any]:
     if workbook_path is None:
         workbook_path = find_clearing_workbook(date_text)
-    sheet_name, values, label_rows, basic = _read_clearing_values(workbook_path)
+    sheet_name, values, label_rows, basic, _unit_rows = _read_clearing_values(workbook_path)
     value = lambda row, column: values.get((row, column))
     renewable_rows = {
         "\u6d77\u4e0a\u98ce\u7535": _clearing_label_row(label_rows, ("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535"), sheet_name),
@@ -707,6 +714,148 @@ def load_daily_clearing_inputs(date_text: str,
         "rows": rows,
         "spot": spot,
     }
+
+
+UNIT_STATUS_PLANTS = ("汕头", "海门", "东莞", "清远")
+UNIT_STATUS_RANK = ("运行", "备用", "供热", "检修")
+UNIT_STATUS_WORDS = {"运行": "运行", "备用": "停备", "停备": "停备", "停机": "停备", "供热": "供热", "检修": "检修"}
+DONGGUAN_STATUS_WORDS = {"运行": "调峰", "备用": "备用", "停备": "停备", "供热": "供热", "检修": "检修"}
+CHINESE_DIGITS = {"1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "七", "8": "八"}
+SECTION_HEADING = re.compile(r"^[一二三四五六七八九十]+、")
+
+
+def _parse_unit_status(rows: list[tuple]) -> dict[str, list[tuple[str, str]]]:
+    """解析基础信息「机组状态」区块，返回 {厂名: [(机组号, 状态), ...]}。"""
+    start = None
+    for index, row in enumerate(rows):
+        if len(row) > 2 and isinstance(row[2], str) and row[2].strip() == "机组状态":
+            start = index + 1
+            break
+    if start is None:
+        return {}
+
+    parsed: dict[str, list[tuple[str, str]]] = {}
+    plant = None
+    for row in rows[start:]:
+        first = row[0].strip() if isinstance(row[0], str) else ""
+        second = row[1].strip() if len(row) > 1 and isinstance(row[1], str) else ""
+        status = row[2].strip() if len(row) > 2 and isinstance(row[2], str) else ""
+        if first and SECTION_HEADING.match(first):
+            break
+        if first in UNIT_STATUS_PLANTS:
+            plant = first
+        if plant is None or not second.startswith("#"):
+            continue
+        parsed.setdefault(plant, []).append((second[1:].strip(), status))
+    return parsed
+
+
+def _status_rank(status: str) -> int:
+    normalized = status if status in UNIT_STATUS_RANK else (
+        "备用" if status in ("停备", "停机") else status
+    )
+    try:
+        return UNIT_STATUS_RANK.index(normalized)
+    except ValueError:
+        return len(UNIT_STATUS_RANK)
+
+
+def _unit_label(plant: str, key: str) -> str:
+    if plant in ("东莞", "清远"):
+        # 东莞、清远按「套」分组：#1,2=一套、#3,4=二套、#5,6=三套、#7,8=四套。
+        head = key.split(",")[0].strip()
+        if not head.isdigit():
+            return head
+        suite = (int(head) + 1) // 2
+        return CHINESE_DIGITS.get(str(suite), str(suite))
+    return f"#{key}"
+
+
+def build_unit_status_text(plant: str, units: list[tuple[str, str]]) -> str | None:
+    """按厂内既有写法拼机组启停句子，返回不带「某某厂：」前缀的正文。"""
+    units = [(key, status) for key, status in units if status]
+    if not units:
+        return None
+
+    if plant == "清远":
+        clauses = [
+            f"{_unit_label(plant, key)}套机组{UNIT_STATUS_WORDS.get(status, status)}"
+            for key, status in units
+        ]
+        return "；".join(clauses) + "。"
+
+    grouped: dict[str, list[str]] = {}
+    for key, status in units:
+        grouped.setdefault(status, []).append(_unit_label(plant, key))
+
+    ordered = sorted(grouped.items(), key=lambda item: _status_rank(item[0]))
+    if plant == "东莞":
+        clauses = [
+            f"{'、'.join(labels)}套机组{DONGGUAN_STATUS_WORDS.get(status, status)}"
+            for status, labels in ordered
+        ]
+        return "，".join(clauses) + "。"
+    clauses = [
+        f"{'、'.join(labels)}机组{UNIT_STATUS_WORDS.get(status, status)}"
+        for status, labels in ordered
+    ]
+    return "；".join(clauses) + "。"
+
+
+def load_unit_status_texts(date_text: str,
+                           workbook_path: Path | None = None) -> dict[str, str]:
+    if workbook_path is None:
+        workbook_path = find_clearing_workbook(date_text)
+    rest = _read_clearing_values(workbook_path)
+    unit_rows = rest[-1]
+    return {
+        plant: text
+        for plant, units in _parse_unit_status(unit_rows).items()
+        if (text := build_unit_status_text(plant, units))
+    }
+
+
+def _startup_blocks(document) -> list[list]:
+    dates = startup_date_paragraphs(document)[:2]
+    if len(dates) < 2:
+        return []
+    heading = find_exact_paragraph(document, "二、分公司电量、电价完成情况")
+    blocks = []
+    for index, date_paragraph in enumerate(dates):
+        start = paragraph_index(document, date_paragraph) + 1
+        end = (
+            paragraph_index(document, dates[index + 1])
+            if index + 1 < len(dates)
+            else paragraph_index(document, heading)
+        )
+        blocks.append(document.paragraphs[start:end])
+    return blocks
+
+
+def fill_startup_status(document, current: dict[str, str],
+                        previous: dict[str, str]) -> int:
+    """填写两日机组启停；与前一日本地一致时写「与前一日运行方式一致」。"""
+    blocks = _startup_blocks(document)
+    if len(blocks) < 2:
+        return 0
+    filled = 0
+    for index, texts in ((0, previous), (1, current)):
+        for plant in UNIT_STATUS_PLANTS:
+            body = texts.get(plant)
+            if not body:
+                continue
+            target = next(
+                (paragraph for paragraph in blocks[index]
+                 if paragraph.text.strip().startswith(f"{plant}厂：")),
+                None,
+            )
+            if target is None:
+                continue
+            if index == 1 and previous.get(plant) == body:
+                body = "与前一日运行方式一致。"
+            replace_paragraph(target, f"{plant}厂：{body}")
+            filled += 1
+    return filled
 
 
 def _node_price_range(workbook, sheet_names: tuple[str, ...]) -> tuple[float | None, float | None]:
@@ -1320,6 +1469,16 @@ def generate(
     with clearing_input_cache():
         day_ahead_clearing = load_day_ahead_clearing_summary(plan["dayAheadDate"], day_ahead_workbook)
         online_prices = load_online_price_summary(plan["actualOnlineEnergyDate"], online_workbook)
+        unit_status_error = None
+        try:
+            previous_unit_status = load_unit_status_texts(
+                plan["actualOnlineEnergyDate"], online_workbook
+            )
+            current_unit_status = load_unit_status_texts(plan["dayAheadDate"], day_ahead_workbook)
+        except Exception as exc:
+            previous_unit_status, current_unit_status = {}, {}
+            unit_status_error = str(exc)
+            log(f"机组启停自动取数失败，已保留模板原文：{unit_status_error}")
     daily_clearing_error = None
     daily_filled_rows = 0
     spot_filled = False
@@ -1334,6 +1493,9 @@ def generate(
     startup_dates = startup_date_paragraphs(doc)
     replace_paragraph(startup_dates[0], f"{date_label(plan['actualOnlineEnergyDate'])}：")
     replace_paragraph(startup_dates[1], f"{date_label(report_date)}：")
+    startup_filled = 0
+    if previous_unit_status or current_unit_status:
+        startup_filled = fill_startup_status(doc, current_unit_status, previous_unit_status)
 
     recent_heading = find_exact_paragraph(doc, "1.近两日完成情况")
     online_paragraph = next_nonempty_paragraph(doc, recent_heading)
@@ -1403,6 +1565,12 @@ def generate(
         "dailyClearingWorkbook": str(daily_clearing_workbook) if daily_clearing_workbook else None,
         "dailyClearingSource": daily_clearing["workbook"] if daily_clearing else None,
         "dailyClearingRows": daily_filled_rows,
+        "startupStatusParagraphs": startup_filled,
+        "unitStatusSource": {
+            "previous": plan["actualOnlineEnergyDate"],
+            "current": plan["dayAheadDate"],
+        },
+        "unitStatusError": unit_status_error,
         "spotDeviationFilled": spot_filled,
         "dailyClearingError": daily_clearing_error,
         "weatherError": weather_error,
