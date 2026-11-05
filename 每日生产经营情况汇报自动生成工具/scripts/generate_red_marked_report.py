@@ -741,13 +741,20 @@ def load_daily_clearing_inputs(date_text: str,
         else:
             log("快报中未找到新能源区，新能源各行保留模板原值")
 
-        spot = _load_spot_deviation(workbook)
+        spot_skip_reason = None
+        try:
+            spot = _load_spot_deviation(workbook)
+        except SpotDataNotReady as exc:
+            spot = None
+            spot_skip_reason = str(exc)
+            log(f"现货偏差分析未取数，保留模板原文：{spot_skip_reason}")
     finally:
         workbook.close()
     return {
         "workbook": str(workbook_path),
         "rows": rows,
         "spot": spot,
+        "spotSkipReason": spot_skip_reason,
     }
 
 
@@ -919,15 +926,29 @@ def _node_price_range(workbook, sheet_names: tuple[str, ...]) -> tuple[float | N
     return (min(lows) if lows else None, max(highs) if highs else None)
 
 
+class SpotDataNotReady(ValueError):
+    """实时出清数据还没生成（典型是把报告日工作簿误当成 D-2 使用）。"""
+
+
 def _load_spot_deviation(workbook) -> dict[str, Any] | None:
     if "分公司" not in workbook.sheetnames:
         return None
     sheet = workbook["分公司"]
-    row = _locate_row(sheet, label="分公司火电")
+    row = _locate_row(sheet, label="\u5206\u516c\u53f8\u706b\u7535")
     capacity = _cell_number(sheet, row, 2)
     realtime_energy = _cell_number(sheet, row, 7)
     deviation = _cell_number(sheet, row, 11)
-    low, high = _node_price_range(workbook, ("汕头", "海门", "东莞"))
+    actual_deviation = _cell_number(sheet, row, 13)
+    income = _cell_number(sheet, row, 14)
+    # 实时尚未出清时 G/K/M/N 全为 0，照抄会输出「实时出清 0、偏差 0、增收 0」，
+    # 判定为数据未出，交给上层保留模板原文并提示人工补数。
+    if not any((realtime_energy, deviation, actual_deviation, income)):
+        raise SpotDataNotReady(
+            "\u300c\u5206\u516c\u53f8\u300d\u8868\u300c\u5206\u516c\u53f8\u706b\u7535\u300d\u884c\u7684\u5b9e\u65f6\u51fa\u6e05\u6570\u636e\u4e3a 0"
+            "\uff08\u5b9e\u65f6\u7535\u91cf\u3001\u504f\u5dee\u3001\u5b9e\u9645\u504f\u5dee\u3001\u6536\u76ca\u5168\u4e3a\u7a7a\uff09"
+            "\uff0c\u7591\u4f3c\u628a\u62a5\u544a\u65e5\u5f53\u5929\u7684\u5de5\u4f5c\u7c3f\u5f53\u6210\u4e86 D-2"
+        )
+    low, high = _node_price_range(workbook, ("\u6c55\u5934", "\u6d77\u95e8", "\u4e1c\u839e"))
     rate = None
     if capacity and realtime_energy is not None:
         rate = round(realtime_energy / (capacity * 24), 3) * 100
@@ -939,8 +960,8 @@ def _load_spot_deviation(workbook) -> dict[str, Any] | None:
         "maxPrice": high,
         "realtimePrice": _cell_number(sheet, row, 8),
         "dayAheadPrice": _cell_number(sheet, row, 6),
-        "actualDeviation": _cell_number(sheet, row, 13),
-        "income": _cell_number(sheet, row, 14),
+        "actualDeviation": actual_deviation,
+        "income": income,
     }
 
 
@@ -1617,6 +1638,7 @@ def generate(
         },
         "unitStatusError": unit_status_error,
         "spotDeviationFilled": spot_filled,
+        "spotDeviationSkipped": (daily_clearing or {}).get("spotSkipReason"),
         "dailyClearingError": daily_clearing_error,
         "weatherError": weather_error,
         "knownGaps": [

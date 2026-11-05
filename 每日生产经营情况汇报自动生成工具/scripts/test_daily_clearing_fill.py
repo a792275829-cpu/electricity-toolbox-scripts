@@ -183,6 +183,26 @@ class DailyClearingFillTests(unittest.TestCase):
         self.assertIn("加权均价为278.93元/MWh（日前：190.97元/MWh）", realtime)
         self.assertEqual(actual, "南方分公司火电机组实际上网偏差电量为-93万千瓦时，实现45万元增收。")
 
+    def test_realtime_not_cleared_skips_spot_section(self) -> None:
+        # 报告日当天的工作簿被误当 D-2：实时电量/偏差/实际偏差/收益全为 0，
+        # 应判定数据未出、不生成现货偏差段落，但表1 照常填。
+        from openpyxl import load_workbook
+
+        target = Path(self._directory.name) / "出清情况（分公司2026.11.5）.xlsx"
+        shutil.copy(self.workbook_path, target)
+        book = load_workbook(target)
+        sheet = book["分公司"]
+        for column in (7, 11, 13, 14):
+            sheet.cell(6, column, 0)
+        book.save(target)
+        book.close()
+
+        data = load_daily_clearing_inputs("2026-11-05", target)
+
+        self.assertIsNone(data["spot"])
+        self.assertIn("实时出清数据为 0", data["spotSkipReason"])
+        self.assertEqual(len(data["rows"]), 11)
+
     def test_table_and_spot_paragraphs_are_written_to_template(self) -> None:
         target = Path(self._directory.name) / "report.docx"
         shutil.copy(LOCAL_TEMPLATE_PATH, target)
