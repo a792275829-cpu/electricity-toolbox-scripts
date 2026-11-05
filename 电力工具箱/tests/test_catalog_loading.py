@@ -35,7 +35,9 @@ with tempfile.TemporaryDirectory() as folder:
         app.after(50, pulse)
     try:
         app.after(50, pulse)
-        app.after(700, app.quit)
+        # 慢速构建机上 700 ms 只够 4 次脉冲，放宽到 1.5 秒并用同一阈值判定，
+        # 仍能发现主线程被重依赖阻塞（那样只会有 1 次）。
+        app.after(1500, app.quit)
         app.mainloop()
         assert not errors, errors
         assert not attempts, attempts
@@ -48,7 +50,7 @@ with tempfile.TemporaryDirectory() as folder:
         result = subprocess.run(
             [sys.executable, "-c", script],
             cwd=Path(__file__).resolve().parents[1],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=30,
         )
         if "no display name" in result.stderr:
             self.skipTest("Tk display unavailable")
