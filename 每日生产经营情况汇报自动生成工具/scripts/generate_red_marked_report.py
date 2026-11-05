@@ -40,7 +40,7 @@ TEMPLATE_PATH = LOCAL_TEMPLATE_PATH if LOCAL_TEMPLATE_PATH.exists() else (
 )
 
 
-LOAD_SUBJECT_CODES = ["1", "6", "2", "18"]
+LOAD_SUBJECT_CODES = ["1", "6", "2", "3"]
 GUANGDONG_WEATHER_LATITUDE = 23.1291
 GUANGDONG_WEATHER_LONGITUDE = 113.2644
 QINGYUAN_DAILY_CLEARING_VALUES = [
@@ -623,7 +623,7 @@ def subject_by_code(payload: dict[str, Any], code: str) -> dict[str, Any]:
 def build_strategy_text(payload: dict[str, Any]) -> str:
     load = subject_by_code(payload, "1")
     a_power = subject_by_code(payload, "2")
-    local = subject_by_code(payload, "18")
+    local = subject_by_code(payload, "3")
     price = next(row for row in payload["priceBoard"]["rows"] if row["dataType"] == "PRE")
     public_data = payload.get("operationPublicData") or {}
     capacity = (public_data.get("capacity") or {}).get("selected", {}).get("capacityWanKw")
@@ -653,7 +653,7 @@ def build_realtime_text(payload: dict[str, Any]) -> str:
     load = subject_by_code(payload, "1")
     b_space = subject_by_code(payload, "6")
     a_power = subject_by_code(payload, "2")
-    local = subject_by_code(payload, "18")
+    local = subject_by_code(payload, "3")
     price = next(row for row in payload["priceBoard"]["rows"] if row["dataType"] == "RT")
     load_max = metric(load, "\u6700\u5927\u503c(MW)")
     load_min = metric(load, "\u6700\u5c0f\u503c(MW)")
@@ -685,7 +685,7 @@ def build_day_ahead_market_text(payload: dict[str, Any]) -> str:
     market_data = payload["marketAnalysisData"]
     load = load_info_item(market_data, "1", "dayAhead")
     a_power = load_info_item(market_data, "2", "dayAhead")
-    local = load_info_item(market_data, "18", "dayAhead")
+    local = load_info_item(market_data, "3", "dayAhead")
     price = market_price_item(market_data, "PRE")
     public_data = market_data.get("operationPublicData") or {}
     capacity = (public_data.get("capacity") or {}).get("selected", {}).get("capacityWanKw")
@@ -712,7 +712,7 @@ def build_actual_market_text(payload: dict[str, Any]) -> str:
     market_data = payload["marketAnalysisData"]
     load = load_info_item(market_data, "1", "actual")
     a_power = load_info_item(market_data, "2", "actual")
-    local = load_info_item(market_data, "18", "actual")
+    local = load_info_item(market_data, "3", "actual")
     b_space = load_info_item(market_data, "6", "actual")
     price = market_price_item(market_data, "RT")
     selected = load["selected"]

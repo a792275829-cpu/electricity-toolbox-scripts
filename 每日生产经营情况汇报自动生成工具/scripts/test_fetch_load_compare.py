@@ -29,6 +29,12 @@ class SubjectMapTests(unittest.TestCase):
         self.assertEqual(mapping, MODULE.DEFAULT_SUBJECT_MAP)
         self.assertIsNot(mapping, MODULE.DEFAULT_SUBJECT_MAP)
 
+    def test_current_website_codes_match_file_and_fallback(self):
+        expected = {"统调负荷": "1", "B类竞价空间": "6", "西电东送电力": "4",
+                    "A类电源出力": "2", "地方电源出力": "3", "发电总出力": "18", "粤港联络线": "5"}
+        self.assertEqual(MODULE.DEFAULT_SUBJECT_MAP, expected)
+        self.assertEqual(MODULE.load_subject_map(), expected)
+
     def test_file_overrides_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "map.json"
