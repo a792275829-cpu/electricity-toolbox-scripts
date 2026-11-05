@@ -1,4 +1,4 @@
-"""两个表格的标题与表格同页（过页开始）的测试。"""
+"""表格版面：过页开始、海风预测表压缩、红字段日期替换的测试。"""
 from __future__ import annotations
 
 import sys
@@ -9,7 +9,13 @@ from docx import Document
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from generate_red_marked_report import apply_table_page_breaks
+from docx.shared import Pt
+
+from generate_red_marked_report import (
+    apply_table_page_breaks,
+    compact_forecast_table,
+    replace_leading_month_day,
+)
 
 
 def _document(*paragraphs: str) -> Document:
@@ -52,6 +58,57 @@ class TablePageBreakTests(unittest.TestCase):
         self.assertEqual(len(apply_table_page_breaks(document)), 2)
         for paragraph in document.paragraphs:
             self.assertTrue(paragraph.paragraph_format.page_break_before)
+
+
+class ForecastTableCompactTests(unittest.TestCase):
+    def _table(self, rows: int = 26, cols: int = 6) -> Document:
+        document = Document()
+        table = document.add_table(rows=rows, cols=cols)
+        for index, row in enumerate(table.rows):
+            for cell in row.cells:
+                cell.paragraphs[0].add_run(f"{index}")
+                for run in cell.paragraphs[0].runs:
+                    run.font.size = Pt(12)
+        return document, table
+
+    def test_rows_and_fonts_are_shrunk(self) -> None:
+        document, table = self._table()
+        self.assertEqual(compact_forecast_table(table), 26)
+        for row in table.rows:
+            self.assertAlmostEqual(row.height.cm, 0.5, places=2)
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    self.assertEqual(paragraph.paragraph_format.space_before, Pt(0))
+                    self.assertEqual(paragraph.paragraph_format.space_after, Pt(0))
+                    for run in paragraph.runs:
+                        self.assertEqual(run.font.size, Pt(10))
+
+    def test_compact_keeps_table_within_one_page(self) -> None:
+        document, table = self._table()
+        compact_forecast_table(table)
+        section = document.sections[0]
+        available = section.page_height.cm - section.top_margin.cm - section.bottom_margin.cm
+        total = sum(row.height.cm for row in table.rows)
+        self.assertLess(total + 1.0, available)  # 预留标题行
+
+
+class LeadingDateTests(unittest.TestCase):
+    def test_replaces_leading_month_day_only(self) -> None:
+        text = "11月3日分公司上网电量6228万千瓦时，其中汕头1279万。"
+        self.assertEqual(
+            replace_leading_month_day(text, "11月5日"),
+            "11月5日分公司上网电量6228万千瓦时，其中汕头1279万。",
+        )
+
+    def test_leaves_text_without_leading_date(self) -> None:
+        text = "分公司上网电量6228万千瓦时。"
+        self.assertEqual(replace_leading_month_day(text, "11月5日"), text)
+
+    def test_does_not_touch_dates_inside_text(self) -> None:
+        text = "11月3日检修计划自11月7日起。"
+        self.assertEqual(
+            replace_leading_month_day(text, "11月5日"), "11月5日检修计划自11月7日起。"
+        )
 
 
 if __name__ == "__main__":

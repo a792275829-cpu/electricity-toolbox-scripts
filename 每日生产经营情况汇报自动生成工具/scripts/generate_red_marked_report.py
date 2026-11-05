@@ -18,8 +18,9 @@ from typing import Any
 
 from openpyxl import load_workbook
 from docx import Document
+from docx.enum.table import WD_ROW_HEIGHT_RULE
 from docx.oxml.ns import qn
-from docx.shared import RGBColor
+from docx.shared import Cm, Pt, RGBColor
 from docx.text.paragraph import Paragraph
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -139,6 +140,11 @@ def date_label(date_text: str) -> str:
     return f"{dt.month}\u6708{dt.day}\u65e5"
 
 
+def replace_leading_month_day(text: str, label: str) -> str:
+    """把段首的「X月X日」换个日期，其余内容不动（不含年份）。"""
+    return LEADING_MONTH_DAY_PATTERN.sub(label, text, count=1)
+
+
 def day_number(date_text: str) -> str:
     return str(datetime.strptime(date_text, "%Y-%m-%d").day)
 
@@ -174,6 +180,7 @@ PLANT_STRATEGY_PATTERN = re.compile(
 )
 NEGATIVE_TEXT_PATTERN = re.compile(r"^-\d+(?:\.\d+)?$")
 NEGATIVE_IN_TEXT_PATTERN = re.compile(r"(?<![0-9A-Za-z])-\d+(?:\.\d+)?")
+LEADING_MONTH_DAY_PATTERN = re.compile(r"^\s*\d{1,2}\u6708\d{1,2}\u65e5")
 
 
 def section_paragraphs(document, title: str) -> list:
@@ -1901,6 +1908,26 @@ def fill_forecast_table(table, forecast: dict[str, Any]) -> None:
             replace_cell_text(table.cell(hour + 2, col_idx), "" if value is None else str(int(round(value / 10))))
 
 
+FORECAST_TABLE_FONT_SIZE = 10  # pt
+FORECAST_TABLE_ROW_HEIGHT = Cm(0.5)
+
+
+def compact_forecast_table(table) -> int:
+    """收紧海风预测表的字号、行高与段距，让 26 行整表落在一页内。"""
+    for row in table.rows:
+        row.height = FORECAST_TABLE_ROW_HEIGHT
+        row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph_format = paragraph.paragraph_format
+                paragraph_format.space_before = Pt(0)
+                paragraph_format.space_after = Pt(0)
+                paragraph_format.line_spacing = 1.0
+                for run in paragraph.runs:
+                    run.font.size = Pt(FORECAST_TABLE_FONT_SIZE)
+    return len(table.rows)
+
+
 def generate(
     report_date: str,
     template_path: Path,
@@ -1993,6 +2020,14 @@ def generate(
                 "上网电量段保留模板原文"
             )
         log(f"上网电量未取数，整段保留模板原文：{online_energy_error}")
+        # 数字沿用模板（红字提示待补），但日期必须落到 D-1，避免看起来像前几天的量。
+        replace_paragraph(
+            online_paragraph,
+            replace_leading_month_day(
+                online_paragraph.text, date_label(plan["actualOnlineEnergyDate"])
+            ),
+            keep_red=True,
+        )
     replace_paragraph(day_ahead_paragraph, build_day_ahead_clearing_text(plan["dayAheadDate"], day_ahead_clearing))
 
     strategy_heading = find_exact_paragraph(doc, "三、现货交易策略")
@@ -2041,6 +2076,7 @@ def generate(
 
     if len(doc.tables) >= 2:
         fill_forecast_table(doc.tables[1], payload["rollingForecast"])
+        compact_forecast_table(doc.tables[1])
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / report_filename(report_date)
