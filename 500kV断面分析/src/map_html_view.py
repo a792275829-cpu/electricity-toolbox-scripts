@@ -433,18 +433,25 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       position:fixed; z-index:40; width:min(480px, calc(100vw - 24px));
       max-height:calc(100dvh - 112px); overflow:auto; padding:12px;
       border:1px solid rgba(100,130,160,.3); border-radius:12px;
-      background:rgba(255,255,255,.22); backdrop-filter:blur(3px);
+      background:rgba(255,255,255,.15); backdrop-filter:blur(3px);
       box-shadow:0 8px 32px rgba(30,50,70,.12);
     }}
     .analysis-mode #selectionDetails.analysis-float-hidden {{ display:none; }}
-    .analysis-mode #detailTitle {{ cursor:grab; touch-action:none; user-select:none; font-size:14px; padding:4px 0 8px; }}
+    .analysis-mode #detailTitle {{ cursor:grab; touch-action:none; user-select:none; font-size:14px; padding:2px 96px 2px 0; margin:0; }}
     .analysis-mode #detailTitle::before {{ content:'⠿'; color:var(--muted); margin-right:8px; }}
     .analysis-mode #detailTitle:active {{ cursor:grabbing; }}
     .analysis-mode #detailTitle:focus-visible {{ outline:2px solid var(--blue); outline-offset:2px; }}
     .analysis-mode .chart-wrap, .analysis-mode #priceChart {{ background:transparent; }}
     .analysis-mode .chart-wrap {{ padding:4px; margin-top:8px; }}
-    .analysis-mode .analysis-selection {{ max-height:72px; }}
-    .analysis-mode .analysis-legend {{ max-height:140px; }}
+    .analysis-mode #clearAnalysis {{ position:absolute; right:12px; top:10px; min-height:24px; padding:2px 7px; font-size:11px; }}
+    .analysis-mode .analysis-selection {{ max-height:52px; gap:4px; margin-top:6px; }}
+    .analysis-mode .analysis-selection button {{ min-height:24px; padding:2px 6px; font-size:11px; }}
+    .analysis-mode .analysis-legend {{ max-height:100px; margin-top:4px; }}
+    .analysis-mode .analysis-legend:not([hidden]) {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:12px; }}
+    .analysis-mode .analysis-legend-row {{ min-width:0; padding:2px 0; gap:4px; font-size:11px; }}
+    .analysis-mode .analysis-legend-row span {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+    .analysis-mode .analysis-legend-row i {{ width:12px; }}
+    .analysis-mode #sourceText {{ margin-top:4px; font-size:10px; line-height:1.3; }}
     .analysis-mode .side-header, .analysis-mode #sectionSearch,
     .analysis-mode #sectionList, .analysis-mode .detail-divider {{ display:none; }}
     .analysis-selection {{ display:flex; flex-wrap:wrap; gap:6px; max-height:120px; overflow:auto; margin-top:8px; }}
@@ -473,12 +480,6 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       font-weight: 600;
       margin-left: 6px;
     }}
-    #focusMode {{ display:inline-flex; align-items:center; justify-content:center; width:34px; padding:6px; }}
-    #focusMode .fullscreen-icon {{ display:block; width:20px; height:20px; min-height:0; background:transparent; border:0; border-radius:0; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }}
-    #focusMode .collapse-corners, #focusMode[aria-pressed="true"] .expand-corners {{ display:none; }}
-    #focusMode[aria-pressed="true"] .collapse-corners {{ display:block; }}
-    .focus-mode .app {{ grid-template-columns: 1fr; }}
-    .focus-mode .side {{ display:none; }}
     .pulse {{ animation:pulse 1.5s ease-in-out infinite; }}
     @keyframes pulse {{ 50% {{ filter:drop-shadow(0 0 9px var(--accent)); }} }}
     @media (prefers-reduced-motion: reduce) {{ *,*::before,*::after {{ animation:none!important; transition:none!important; }} }}
@@ -530,7 +531,6 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
           <button id="zoomIn" type="button" title="放大">+</button>
           <button id="zoomOut" type="button" title="缩小">−</button>
           <button id="zoomReset" type="button" title="重置">⌂</button>
-          <button class="icon-button" id="focusMode" type="button" aria-pressed="false" aria-label="全屏地图" title="全屏地图"><svg class="fullscreen-icon" viewBox="0 0 24 24" aria-hidden="true"><path class="expand-corners" d="M8 3H3V8 M16 3H21V8 M3 16V21H8 M21 16V21H16"/><path class="collapse-corners" d="M3 8H8V3 M21 8H16V3 M8 21V16H3 M16 21V16H21"/></svg></button>
         </div>
         <input class="node-search" id="nodeSearch" type="search" placeholder="搜索节点，回车或移开焦点定位" aria-label="搜索节点">
         </div>
@@ -1466,7 +1466,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       series.forEach(item => {{
         const row = document.createElement('div'); row.className = 'analysis-legend-row';
         const swatch = document.createElement('i'); swatch.style.borderColor = item.color;
-        const name = document.createElement('span'); name.textContent = item.name;
+        const name = document.createElement('span'); name.textContent = item.name; name.title = item.name;
         const value = document.createElement('b'); value.dataset.node = item.name;
         row.append(swatch, name, value); legend.appendChild(row);
       }});
@@ -1658,18 +1658,6 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       if (event.key !== 'Enter' || event.isComposing) return;
       event.preventDefault();
       commitNodeSearch(true);
-    }});
-    document.getElementById('focusMode').addEventListener('click', event => {{
-      const active = !document.body.classList.contains('focus-mode');
-      document.body.classList.toggle('focus-mode', active);
-      event.currentTarget.setAttribute('aria-pressed', String(active));
-      event.currentTarget.setAttribute('aria-label', active ? '退出全屏地图' : '全屏地图');
-      event.currentTarget.title = active ? '退出全屏地图' : '全屏地图';
-      autoFitMap = true;
-      requestAnimationFrame(fitMap);
-    }});
-    document.addEventListener('keydown', event => {{
-      if (event.key === 'Escape' && document.body.classList.contains('focus-mode')) document.getElementById('focusMode').click();
     }});
     renderSectionList();
 
