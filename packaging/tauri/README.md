@@ -7,6 +7,7 @@
 - 预测总表是**可选种子**：构建机上有总表时放入 `payload/defaults/广东电价预测/输出/广东电价数据总表.xlsx`，首次启动复制到用户 `data/`（升级不覆盖已有总表或配置）；没有则跳过，安装包不含总表。可用 `--forecast-workbook /绝对路径/总表.xlsx`、`FORECAST_MASTER_WORKBOOK` 或 `FORECAST_MASTER_URL`（配 `FORECAST_MASTER_SHA256` 摘要）显式指定；显式指定但文件不存在或表头不符时仍然失败，不会静默改用其他文件。副本逐字节保留，普通输出、实验模型和登录态仍不打包。
 - 总表属于本地业务数据，保持 Git 忽略。未内置时，首次运行 `train_d1_forecast.py` 检测到缺失会调用 `update_gdfire_data.update_master_workbook`，按模块配置的 `initialDate` 到当天从广电网接口一次性补齐并生成 `整合数据` 工作表；因此首次预测需要可登录的账号与网络，跨度过大时需自行调整 `initialDate`。本地源码迁移 ZIP 仍可附带经过校验的总表，需先初始化根目录 `.venv`。
 - Desktop checks 用显式生成的合成总表做资源包 smoke build，不上传安装包；正式发布不再要求安装包内必须带真实总表。本地发版若有真实总表，仍按上面的校验流程随包携带。
+- Desktop checks 与 Desktop release 在 GitHub 托管的 `macos-15`（Apple 芯片）运行器上构建；构建产物最低部署版本仍是 macOS 14。
 - 固定运行资源在 `REQUIRED_RUNTIME_ASSETS` 集中检查：500kV 拓扑／坐标／接线图、中文字体、日报 Word 模板与主体映射、市场日报 Jinja／CSS／JS 模板、PDF 识别脚本、WPS 默认配置和应用图标。
 - `prepare_tk.py`：从校验过的上游源码构建 Mac Tcl/Tk 8.6.18，保持原版控件／字体／交互，动态库最低部署版本 macOS 14。
 - `prepare_workspace.py`：安装／升级 `app/` 中的托管源码；初始配置仅写入 `data/`，更新记录与备份分别放入 `state/`、`backups/`。检测本地修改并在失败时回滚。
