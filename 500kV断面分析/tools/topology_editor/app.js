@@ -14,7 +14,7 @@ const node = id => data?.nodes.find(n => n.id === id);
 const key = e => [e.a, e.b].sort().join('|');
 const groupKey = n => JSON.stringify([n.station,n.voltage]);
 const dimensions = () => step!=='diagram'&&data?.base_map ? data.base_map : data.image;
-const anchor = n => n && (step!=='diagram'&&data?.base_map ? n.map_anchor : n.anchor);
+const anchor = n => n && (step!=='diagram'&&data?.base_map ? (n.map_anchor || (step==='map'?n.map_candidate?.point:null)) : n.anchor);
 const unmarked = n => data?.base_map ? !n.map_anchor : !n.anchor;
 const visible = n => anchor(n) && (!data.base_map||step!=='diagram'||n.present&&n.map_anchor) && $(n.voltage === 500 ? 'v500' : n.voltage === 220 ? 'v220' : 'vNone').checked;
 const point = event => { const r = svg.getBoundingClientRect(); return {x:event.clientX-r.left, y:event.clientY-r.top}; };
@@ -47,7 +47,7 @@ async function transaction(change) {
   catch(e){notice(e.message);return false;}finally{busy=false;renderButtons();}
 }
 function renderButtons() {
-  for(const id of ['save','apply','importPrices','importJson','reload','importMap','stepMap','stepReview','stepDiagram'])$(id).disabled=busy || !data;
+  for(const id of ['autoLabel','nextCandidate','acceptCandidate','rejectCandidate','save','apply','importPrices','importJson','reload','importMap','stepMap','stepReview','stepDiagram'])$(id).disabled=busy || !data;
   $('undo').disabled=busy || !undo.length;$('redo').disabled=busy || !redo.length;
   $('delete').disabled=busy || !(selected || edge);
   const currentEdge=data?.edges.find(e=>key(e)===edge);
@@ -61,6 +61,8 @@ function renderButtons() {
   $('apply').disabled=busy||!data||Boolean(data.base_map&&!data.schematic_generated);
   $('place').hidden=Boolean(data?.base_map);
   $('annotationTools').hidden=step!=='map';
+  $('autoLabel').disabled=busy||!data?.base_map;
+  $('nextCandidate').disabled=busy||!data?.nodes.some(n=>n.present&&n.map_candidate&&!n.map_anchor);
   $('skip').disabled=busy||!current;
   $('clearMark').disabled=busy||!current?.map_anchor;
   $('nextReview').hidden=step!=='review';
@@ -76,14 +78,14 @@ function renderList() {
   const list=$('nodeList');list.replaceChildren();const query=$('search').value.trim().toLowerCase(),filter=$('filter').value;
   for(const voltage of [500,220,null]) {
     const values=data.nodes.filter(n=>n.voltage===voltage && (n.name+n.station).toLowerCase().includes(query)
-      && (filter==='all'||filter==='unmarked'&&n.present&&unmarked(n)||filter==='marked'&&n.map_anchor||filter==='unplaced'&&!n.anchor||filter==='missing'&&!n.present||filter==='pending'&&(n.pending||n.voltage===null)));
+      && (filter==='all'||filter==='candidate'&&n.present&&n.map_candidate&&!n.map_anchor||filter==='unmarked'&&n.present&&unmarked(n)||filter==='marked'&&n.map_anchor||filter==='unplaced'&&!n.anchor||filter==='missing'&&!n.present||filter==='pending'&&(n.pending||n.voltage===null)));
     if(!values.length)continue;
     const group=document.createElement('details');group.open=true;
     const title=document.createElement('summary');title.textContent=`${voltage?voltage+'kV':'电压待确认'}（${values.length}）`;group.append(title);
     for(const n of values){const row=document.createElement('div');row.className='nodeRow'+(selected===n.id?' active':'')+(!n.present?' missing':'');
       const check=document.createElement('input');check.type='checkbox';check.hidden=Boolean(data.base_map);check.checked=checked.has(n.id);check.setAttribute('aria-label','勾选'+n.name);
       check.onchange=()=>{check.checked?checked.add(n.id):checked.delete(n.id);renderButtons();};
-      const b=button(label(n)+(n.pending?' [待对应]':data.base_map?(n.map_anchor?' [已标注]':' [未标注]'):!n.anchor?' [未入图]':''),()=>chooseNode(n.id));b.dataset.nodeId=n.id;b.ondblclick=locateSelection;
+      const b=button(label(n)+(n.pending?' [待对应]':data.base_map?(n.map_anchor?' [已标注]':n.map_candidate?' [待核对初标]':' [未标注]'):!n.anchor?' [未入图]':''),()=>chooseNode(n.id));b.dataset.nodeId=n.id;b.ondblclick=locateSelection;
       row.append(check,b);group.append(row);
     }list.append(group);
   }
@@ -92,6 +94,8 @@ function inspector() {
   const n=node(selected), e=data.edges.find(e=>key(e)===edge);
   $('nodeForm').hidden=!n;$('edgeForm').hidden=!e;
   $('selection').textContent=n?label(n):e?`${label(node(e.a))} ↔ ${label(node(e.b))}`:'选择节点或线路';
+  $('candidateForm').hidden=!(step==='map'&&n?.map_candidate&&!n.map_anchor);
+  if(n?.map_candidate){const c=n.map_candidate;$('candidateInfo').textContent=`OCR：${c.text} · ${c.ocr_engine} · 视觉复核：${c.vision_status}${c.warning?' · '+c.warning:''}`;}
   if(n){$('name').value=n.name;$('city').value=n.city||'';$('voltage').value=n.voltage||'';
     $('connections').replaceChildren();for(const item of data.edges.filter(e=>[e.a,e.b].includes(n.id))){const other=node(item.a===n.id?item.b:item.a);$('connections').append(button(label(other)+(data.base_map?(item.reviewed?' · 已确认':' · 待核对'):''),()=>chooseEdge(key(item))));}
     $('variant').hidden=!(n.present&&n.pending);$('oldNode').replaceChildren();
@@ -112,7 +116,7 @@ function render() {
   updateBasemap();
   renderList();inspector();renderButtons();draw();
   const stations=new Map(data.nodes.filter(n=>n.present).map(n=>[groupKey(n),n]));
-  $('progress').textContent=data.base_map?`已标注 ${[...stations.values()].filter(n=>!unmarked(n)).length}/${stations.size} 站 · 已核对 ${data.edges.filter(e=>e.reviewed).length}/${data.edges.length} 条`:'已有简图 · 导入底图后开始标注';
+  $('progress').textContent=data.base_map?`已标注 ${[...stations.values()].filter(n=>!unmarked(n)).length}/${stations.size} 站 · 待核对初标 ${[...stations.values()].filter(n=>n.map_candidate&&!n.map_anchor).length} 站 · 已核对 ${data.edges.filter(e=>e.reviewed).length}/${data.edges.length} 条`:'已有简图 · 导入底图后开始标注';
   const count=v=>data.nodes.filter(n=>n.voltage===v&&n.present).length;
   $('summary').textContent=`${dirty?'有未保存修改 · ':''}${data.source} | 500kV ${count(500)} · 220kV ${count(220)} · 待确认 ${count(null)} · 缺失 ${data.nodes.filter(n=>!n.present).length} · 连接 ${data.edges.length}`;
 }
@@ -142,9 +146,9 @@ function draw() {
   const activeEdge=data.edges.find(e=>key(e)===edge),activeIds=[selected,source,pending?.b,activeEdge?.a,activeEdge?.b];
   const placed=values.map(n=>{const p={x:anchor(n).x*view.k+view.x,y:anchor(n).y*view.k+view.y};return {id:n.id,box:[p.x-radius-2,p.y-radius-2,p.x+radius+2,p.y+radius+2]};}),occupied=[];
   values.sort((a,b)=>Number(!activeIds.includes(a.id))-Number(!activeIds.includes(b.id)));
-  for(const n of values){const g=sEl('g',{class:'node'+(activeIds.includes(n.id)?' active':''),'data-node':n.id,tabindex:0,role:'button','aria-label':label(n)});
+  for(const n of values){const g=sEl('g',{class:'node'+(step==='map'&&!n.map_anchor&&n.map_candidate?' candidate':'')+(activeIds.includes(n.id)?' active':''),'data-node':n.id,tabindex:0,role:'button','aria-label':label(n)});
     const title=sEl('title',{});title.textContent=label(n);g.append(title);
-    g.append(sEl('circle',{cx:anchor(n).x*view.k,cy:anchor(n).y*view.k,r:radius,fill:!n.present?'#aebac4':n.pending?'#d99a32':n.voltage===500?'#b54b6c':'#268c82',stroke:'white','stroke-width':2*size}));
+    g.append(sEl('circle',{cx:anchor(n).x*view.k,cy:anchor(n).y*view.k,r:radius,fill:step==='map'&&!n.map_anchor&&n.map_candidate?'#d99a32':!n.present?'#aebac4':n.pending?'#d99a32':n.voltage===500?'#b54b6c':'#268c82',stroke:'white','stroke-width':2*size}));
     const variants=data.nodes.filter(o=>o.station===n.station&&o.voltage===n.voltage&&o.present);
     const textName=n.name+(step==='diagram'&&variants.length>1?'〔'+(variants.indexOf(n)+1)+'〕':'');
     const x=anchor(n).x*view.k+view.x,y=anchor(n).y*view.k+view.y,w=measure.measureText(textName).width*size,h=22*size;
@@ -198,10 +202,14 @@ svg.addEventListener('gesturechange',event=>{event.preventDefault();if(!gesture|
 svg.addEventListener('gestureend',event=>{event.preventDefault();gesture=null;},{passive:false});
 svg.addEventListener('pointerdown',event=>{if(!data||busy)return;drag={type:'pan',start:point(event),offset:{x:view.x,y:view.y},moved:false};svg.setPointerCapture(event.pointerId);});
 svg.addEventListener('pointermove',event=>{lastPoint=point(event);if(!drag)return;const p=lastPoint;if(Math.hypot(p.x-drag.start.x,p.y-drag.start.y)>3)drag.moved=true;if(!drag.moved)return;autoFit=false;
-  if(drag.type==='pan'){view.x=drag.offset.x+p.x-drag.start.x;view.y=drag.offset.y+p.y-drag.start.y;}else node(drag.id)[step==='diagram'?'anchor':'map_anchor']=world(p);scheduleDraw();});
+  if(drag.type==='pan'){view.x=drag.offset.x+p.x-drag.start.x;view.y=drag.offset.y+p.y-drag.start.y;}else if(step==='map'&&!node(drag.id).map_anchor&&node(drag.id).map_candidate)node(drag.id).map_candidate.point=world(p);else node(drag.id)[step==='diagram'?'anchor':'map_anchor']=world(p);scheduleDraw();});
 svg.addEventListener('pointerup',async event=>{
   if(!drag)return;const finished=drag;drag=null;if(svg.hasPointerCapture(event.pointerId))svg.releasePointerCapture(event.pointerId);
   if(finished.type==='node'&&finished.moved){
+    if(step==='map'&&!node(finished.id).map_anchor&&node(finished.id).map_candidate){
+      const after=clone(node(finished.id).map_candidate.point);node(finished.id).map_candidate.point=finished.before;
+      await transaction(d=>{for(const n of d.nodes.filter(n=>groupKey(n)===groupKey(node(finished.id))))if(n.map_candidate)n.map_candidate.point=clone(after);});return;
+    }
     const field=step==='diagram'?'anchor':'map_anchor',after=clone(node(finished.id)[field]);node(finished.id)[field]=finished.before;
     await transaction(d=>{if(field==='map_anchor')markStation(d,finished.id,after);else{const n=d.nodes.find(n=>n.id===finished.id);n.anchor=after;n.diagram_manual=true;}});
   }else if(finished.type==='pan'&&!finished.moved&&step==='map'&&mode==='mark'&&selected){
@@ -214,7 +222,7 @@ svg.addEventListener('pointerup',async event=>{
     }
   }
 });
-svg.addEventListener('pointercancel',()=>{if(drag?.type==='node')node(drag.id)[step==='diagram'?'anchor':'map_anchor']=drag.before;drag=null;draw();});
+svg.addEventListener('pointercancel',()=>{if(drag?.type==='node'){const n=node(drag.id);if(step==='map'&&!n.map_anchor&&n.map_candidate)n.map_candidate.point=drag.before;else n[step==='diagram'?'anchor':'map_anchor']=drag.before;}drag=null;draw();});
 let previousSize;
 new ResizeObserver(()=>{const size={w:svg.clientWidth,h:svg.clientHeight};if(autoFit)fit();else if(previousSize){view.x+=(size.w-previousSize.w)/2;view.y+=(size.h-previousSize.h)/2;draw();}previousSize=size;}).observe(svg);
 $('fit').onclick=fit;$('zoomIn').onclick=()=>zoom(1.3);$('zoomOut').onclick=()=>zoom(1/1.3);
@@ -289,7 +297,7 @@ $('jsonFile').onchange=async()=>{const file=$('jsonFile').files[0];if(!file)retu
 
 function markStation(d,id,point){
   const current=d.nodes.find(n=>n.id===id);
-  for(const n of d.nodes.filter(n=>groupKey(n)===groupKey(current)))n.map_anchor=point?clone(point):null;
+  for(const n of d.nodes.filter(n=>groupKey(n)===groupKey(current))){n.map_anchor=point?clone(point):null;delete n.map_candidate;}
   d.schematic_generated=false;
 }
 function nextStation(previous,skip=false){
@@ -341,7 +349,7 @@ $('mapFile').onchange=async()=>{
     const metadata=await api('read-map',file,true,file.name);
     if(data.base_map&&data.base_map.id!==metadata.id&&!confirm('更换底图会清除原底图标注，保留节点、连接和简图布局；可撤销。继续吗？')){notice('已取消更换底图，原标注保留。');return;}
     const proposed=clone(data);
-    if(proposed.base_map?.id!==metadata.id){for(const n of proposed.nodes)delete n.map_anchor;for(const e of proposed.edges)e.reviewed=false;proposed.schematic_generated=false;}
+    if(proposed.base_map?.id!==metadata.id){for(const n of proposed.nodes){delete n.map_anchor;delete n.map_candidate;}for(const e of proposed.edges)e.reviewed=false;proposed.schematic_generated=false;}
     proposed.base_map=metadata;await api('validate',{data:proposed});remember();data=proposed;selected=null;edge=null;step='map';mode='select';skipped.clear();$('filter').value='unmarked';mapIdentity=null;markDirty();render();fit();notice('底图已载入；请选择左侧站名，再在图中点选位置。');
   }catch(e){notice(e.message);}finally{busy=false;$('mapFile').value='';renderButtons();}
 };
@@ -350,3 +358,12 @@ $('reload').onclick=()=>{if(!dirty||confirm('放弃未保存修改并重新加�
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
 window.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('connectionDialog').open)cancelConnect();if(/INPUT|SELECT|TEXTAREA/.test(event.target.tagName))return;if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='s'){event.preventDefault();save();}if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='z'){event.preventDefault();$(event.shiftKey?'redo':'undo').click();}});
 load().catch(e=>notice(e.message));
+
+$('nextCandidate').onclick=()=>{const values=data.nodes.filter(n=>n.present&&n.map_candidate&&!n.map_anchor),i=values.findIndex(n=>n.id===selected),n=values[(i+1)%values.length];if(n){step='map';$('filter').value='candidate';$('search').value='';chooseNode(n.id);locateSelection();}};
+$('acceptCandidate').onclick=async()=>{const n=node(selected);if(n?.map_candidate){const id=n.id;if(await transaction(d=>markStation(d,id,n.map_candidate.point))){notice('初标已接受，请保存草稿；线路仍需核对。');$('nextCandidate').click();}}};
+$('rejectCandidate').onclick=async()=>{const n=node(selected);if(n&&await transaction(d=>{for(const o of d.nodes.filter(o=>groupKey(o)===groupKey(n)))delete o.map_candidate;})){notice('初标已拒绝，可撤销；可继续人工标注。');$('nextCandidate').click();}};
+$('autoLabel').onclick=async()=>{
+  if(busy||!await commitNode())return;busy=true;renderButtons();notice('正在按原始清晰度分块识别，并生成30站小样；请等待完成…');
+  try{const result=await api('auto-label',{data,engine:$('ocrEngine').value,provider:$('visionProvider').value});remember();data=result.data;step='map';$('filter').value='candidate';selected=null;edge=null;markDirty();render();fit();const r=result.report;notice(`小样完成：${r.sampled}站，站名匹配${r.matched}，初标${r.candidates}，未定位${r.sampled-r.candidates}，视觉复核${r.vision_reviewed}；匹配数不代表准确率。逐站接受、拖动或拒绝后保存草稿。`);}
+  catch(e){notice(e.message);}finally{busy=false;renderButtons();}
+};

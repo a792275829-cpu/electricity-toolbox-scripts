@@ -32,6 +32,9 @@ class TopologyPackagingTests(unittest.TestCase):
             self.assertNotIn("电力工具箱/toolbox/topology_editor.py", files)
             for resource in ('toolbox_shared/section_schema.py', 'toolbox_shared/section_topology.py',
                              'toolbox_shared/topology_web.py', 'toolbox_shared/section_basemap.py',
+                             'toolbox_shared/section_prelabel.py', 'toolbox_shared/section_annotation_geometry.py',
+                             'toolbox_shared/section_vision_review.py',
+                             '500kV断面分析/tools/layer_review_vision.swift',
                              '500kV断面分析/tools/topology_editor/index.html',
                              '500kV断面分析/tools/topology_editor/app.js',
                              '500kV断面分析/tools/topology_editor/style.css'):
@@ -56,6 +59,7 @@ class TopologyPackagingTests(unittest.TestCase):
                 "edges, duplicates = parse_topology_edges(path); "
                 "from toolbox_shared.section_topology import seed_catalog, validate_catalog; "
                 "from toolbox_shared.topology_web import BrowserEditor; from toolbox_shared.section_basemap import store_image; "
+                "from toolbox_shared.section_prelabel import prelabel; from toolbox_shared.section_vision_review import configured_reviewer; "
                 "validate_catalog(seed_catalog()); "
                 "assert edges; print(f'{len(edges)} edges, {len(duplicates)} duplicates')",
             ], cwd=installed, capture_output=True, text=True, check=True)

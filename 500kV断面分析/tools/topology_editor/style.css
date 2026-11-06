@@ -21,3 +21,6 @@ main.hasSelection{grid-template-columns:clamp(340px,27vw,460px) minmax(300px,1fr
 @media(max-width:900px){main,main.hasSelection{grid-template-columns:300px minmax(260px,1fr)}main.hasSelection #inspector{grid-column:1 / -1;max-height:40vh}#drawing,#library{min-height:360px}.steps #progress{margin-left:0}}
 @media(max-width:600px){main,main.hasSelection{grid-template-columns:minmax(0,1fr)}main.hasSelection #inspector{grid-column:auto}#drawing{min-height:420px}}
 .edge.unreviewed{stroke:#b47719;stroke-dasharray:6 5}.edge.unreviewed.active{stroke:#176dc4}
+
+.node.candidate circle {stroke:#925400;stroke-dasharray:4 3;fill-opacity:.55}
+#candidateForm{padding:10px;border:2px dashed #ad760d;border-radius:8px} #candidateInfo{overflow-wrap:anywhere}

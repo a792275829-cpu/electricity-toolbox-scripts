@@ -296,6 +296,19 @@ def validate_catalog(data: dict) -> None:
                 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
                        or not 0 <= v <= base['width' if k == 'x' else 'height'] for k, v in point.items())):
             raise ValueError('底图标注坐标无效')
+        candidate = n.get('map_candidate')
+        if candidate is not None:
+            if (not isinstance(candidate, dict) or not isinstance(candidate.get('text'), str)
+                    or candidate.get('ocr_engine') not in ('macos-vision', 'ppocrv6')
+                    or candidate.get('vision_status') not in ('未配置', '已复核', '不一致')):
+                raise ValueError('待核对初标信息无效')
+            if 'warning' in candidate and (not isinstance(candidate['warning'], str) or len(candidate['warning']) > 300):
+                raise ValueError('待核对初标警示无效')
+            point = candidate.get('point')
+            if (not base or not isinstance(point, dict) or set(point) != {'x', 'y'}
+                    or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                           or not 0 <= v <= base['width' if k == 'x' else 'height'] for k, v in point.items())):
+                raise ValueError('待核对初标坐标无效')
         if 'diagram_manual' in n and not isinstance(n['diagram_manual'], bool):
             raise ValueError('简图布局状态无效')
         anchor = n.get('anchor')

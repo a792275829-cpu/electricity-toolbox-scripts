@@ -72,6 +72,11 @@ class BrowserEditor:
         if name == 'import-backup':
             return dict(data=basemap.import_backup(data))
         model.validate_catalog(data)
+        if name == 'auto-label':
+            from toolbox_shared.section_prelabel import prelabel
+            from toolbox_shared.section_vision_review import configured_reviewer
+            return prelabel(data, limit=30, engine=body.get('engine', 'macos-vision'),
+                            reviewer=configured_reviewer(body.get('provider', 'none')))
         if name == 'backup':
             return dict(data=basemap.export_backup(data))
         if name == 'generate':
