@@ -37,6 +37,47 @@ class Deduplicate500kVPricesTest(unittest.TestCase):
         self.assertEqual(normalize_node_name("其他海门电厂500kV4M"), "其他海门电厂500kV")
         self.assertEqual(normalize_node_name("其他500kV水城变500kV"), "其他500kV水城变500kV")
 
+    def test_dongguan_matching_rejects_lower_voltage_buses(self):
+        from src.deduplicate_500kv_prices import _indexed_topology_matcher
+        nodes = ["东莞变"]
+        for match in (lambda name: match_topology_node(name, nodes), _indexed_topology_matcher(nodes)):
+            for name in ("其他东莞变220_KV#1", "其他东莞变220-kV#2", "其他东莞变220 k v#3",
+                         "其他500kV东莞变220kV#1", "其他东莞变110kV#1"):
+                with self.subTest(name=name):
+                    self.assertIsNone(match(name))
+            self.assertEqual(match("其他东莞变500kV#1M"), "东莞变")
+            self.assertEqual(match("东莞变"), "东莞变")
+
+    def test_dongguan_average_excludes_220kv_across_sheets(self):
+        for use_topology in (True, False):
+            with self.subTest(topology=use_topology), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source, output, topology = root / "raw.xlsx", root / "cleaned.xlsx", root / "topology.md"
+                topology.write_text("## 2. 接线\n### 测试\n东莞变-横沥站\n## 3. 约定\n", encoding="utf-8")
+                book = Workbook()
+                sheet = book.active
+                sheet.append(["节点名称", "数据项", "00:00", "00:15"])
+                sheet.append(["其他东莞变220_KV#1", "电价(元/MWh)", 900, 1000])
+                sheet.append(["其他东莞变500kV#1M", "电价(元/MWh)", 100, 200])
+                sheet = book.create_sheet("第二张")
+                sheet.append(["节点名称", "数据项", "00:00", "00:15"])
+                sheet.append(["其他500kV东莞变220kV#2", "电价(元/MWh)", 800, 900])
+                sheet.append(["其他东莞变500kV#2M", "电价(元/MWh)", 300, 400])
+                book.save(source)
+                book.close()
+                result = process_workbook(source, output, topology if use_topology else None)
+                cleaned = load_workbook(output, data_only=True)
+                try:
+                    rows = [row for ws in cleaned for row in list(ws.values)[1:]]
+                finally:
+                    cleaned.close()
+                if use_topology:
+                    self.assertEqual(rows, [("东莞变", "电价(元/MWh)", 200, 300)])
+                    self.assertEqual((result.kept_rows, result.removed_rows), (1, 3))
+                else:
+                    self.assertEqual([row[2:] for row in rows], [(100, 200), (300, 400)])
+                    self.assertEqual((result.kept_rows, result.removed_rows), (2, 2))
+
     def test_process_workbook_keeps_only_unique_500kv_price_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             input_path = Path(tmp) / "实时节点电价查询(2026-06-22).xlsx"

@@ -10,13 +10,12 @@ from typing import Iterable
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from src.analyze_500kv_section_gaps import normalize_price_node_name
+from src.analyze_500kv_section_gaps import normalize_price_node_name, price_node_voltage
 from src.price_xlsx_backend import open_price_workbooks
 from src.classify_500kv_nodes import topology_inventory
 
 
 TIME_HEADER_RE = re.compile(r"^\d{2}:\d{2}$")
-KV_500_RE = re.compile(r"500\s*[_-]?\s*k\s*v", re.IGNORECASE)
 TRAILING_HASH_BRANCH_RE = re.compile(r"\s*#\d+[A-Za-z]?\s*$")
 TRAILING_KV_BRANCH_RE = re.compile(r"((?:500|220)\s*[_-]?\s*k\s*v)\d+[A-Za-z]?\s*$", re.IGNORECASE)
 KV_TEXT_RE = re.compile(r"(?P<voltage>500|220)\s*[_-]?\s*k\s*v", re.IGNORECASE)
@@ -49,6 +48,8 @@ def load_topology_nodes(topology_path: Path) -> list[str]:
 
 
 def match_topology_node(node_name: object, topology_nodes: Iterable[str]) -> str | None:
+    if price_node_voltage(node_name) not in (None, 500):
+        return None
     raw_name = "" if node_name is None else str(node_name).strip()
     normalized_name = normalize_price_node_name(node_name)
     topology_nodes = tuple(topology_nodes)
@@ -89,6 +90,9 @@ def _indexed_topology_matcher(nodes):
     def match(name):
         raw = "" if name is None else str(name).strip()
         if raw not in cache:
+            if price_node_voltage(name) not in (None, 500):
+                cache[raw] = None
+                return None
             normalized = normalize_price_node_name(name)
             cache[raw] = exact.get(normalized) or next((node for node in ordered if node in raw), None)
         return cache[raw]
@@ -237,7 +241,7 @@ def _column_map(header: tuple[object, ...]) -> dict[str, object] | None:
 
 
 def _is_500kv_node(value: object) -> bool:
-    return bool(KV_500_RE.search("" if value is None else str(value)))
+    return price_node_voltage(value) == 500
 
 
 def _cell(row: tuple[object, ...], index: int) -> object:

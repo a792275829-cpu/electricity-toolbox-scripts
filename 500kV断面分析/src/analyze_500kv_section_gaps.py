@@ -10,6 +10,7 @@ from openpyxl import Workbook, load_workbook
 
 
 TIME_HEADER_RE = re.compile(r"^\d{2}:\d{2}$")
+NODE_VOLTAGE_RE = re.compile(r"(?<!\d)(\d+)\s*[_-]?\s*k\s*v", re.IGNORECASE)
 SECTION_2_RE = re.compile(r"^##\s+2\.")
 SECTION_NEXT_RE = re.compile(r"^##\s+3\.")
 MIN_SECTION_INTERVALS = 4
@@ -226,6 +227,7 @@ def read_price_workbook(workbook_path: Path) -> tuple[list[str], list[dict[str, 
 
 
 def match_price_rows(topology_nodes: Iterable[str], price_rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    price_rows = [row for row in price_rows if price_node_voltage(row["raw_name"]) in (None, 500)]
     by_normalized_name: dict[str, list[dict[str, object]]] = {}
     for row in price_rows:
         by_normalized_name.setdefault(row["normalized_name"], []).append(row)
@@ -239,6 +241,12 @@ def match_price_rows(topology_nodes: Iterable[str], price_rows: list[dict[str, o
 
         matched[node] = min(candidates, key=lambda row: _price_row_priority(str(row["raw_name"])))
     return matched
+
+
+def price_node_voltage(name: object) -> int | None:
+    """Use the final voltage label (the earlier label may describe the station)."""
+    labels = NODE_VOLTAGE_RE.findall("" if name is None else str(name))
+    return int(labels[-1]) if labels else None
 
 
 def normalize_price_node_name(name: object) -> str:

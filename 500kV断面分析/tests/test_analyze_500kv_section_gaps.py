@@ -8,6 +8,14 @@ from src.analyze_500kv_section_gaps import analyze_section_gaps, match_price_row
 
 
 class Analyze500kVSectionGapsTest(unittest.TestCase):
+    def test_direct_matching_never_falls_back_to_220kv(self):
+        from src.analyze_500kv_section_gaps import normalize_price_node_name
+        names = ["其他东莞变220_KV#1", "其他500kV东莞变220kV#2", "其他东莞变500kV#1M"]
+        rows = [{"raw_name": name, "normalized_name": normalize_price_node_name(name),
+                 "prices": {"00:00": price}} for name, price in zip(names, (900, 800, 100))]
+        self.assertEqual(match_price_rows(["东莞变"], rows)["东莞变"]["prices"]["00:00"], 100)
+        self.assertEqual(match_price_rows(["东莞变"], rows[:2]), {})
+
     def test_indexed_matching_preserves_duplicate_priority_and_fallback(self):
         rows = [
             {"raw_name": "其他甲站500kV", "normalized_name": "甲"},
