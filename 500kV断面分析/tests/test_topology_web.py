@@ -50,7 +50,7 @@ class ServiceTests(unittest.TestCase):
         with urlopen(request, timeout=5) as response:
             return json.load(response)
 
-    def test_initial_snapshot_and_save_readback_share_native_store(self):
+    def test_initial_snapshot_and_save_readback(self):
         self.assertEqual(self.request('state')['data'], self.data)
         saved = self.request('save', {'data': self.data})['data']
         self.assertEqual(model.load_catalog(), saved)
@@ -233,6 +233,56 @@ class BrowserTests(unittest.TestCase):
         with self.page.expect_download() as offline_download:
             self.page.get_by_role('button', name='导出备份', exact=True).click()
         self.assertEqual(offline_download.value.suggested_filename, '500和220kV拓扑.json')
+
+    def test_missing_cleanup_confirms_counts_and_undo_restores_edges(self):
+        backup = deepcopy(self.data)
+        backup['nodes'][0]['present'] = False
+        path = Path(self.temp.name)/'missing.json'
+        path.write_text(json.dumps(backup))
+        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.page.locator('#jsonFile').set_input_files(str(path))
+        self.page.locator('#notice').filter(has_text='备份已导入').wait_for()
+        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.page.locator('#cleanMissing').click()
+        self.assertEqual(self.page.locator('.node').count(), 3)
+        messages = []
+        def accept(dialog):
+            messages.append(dialog.message)
+            dialog.accept()
+        self.page.once('dialog', accept)
+        self.page.locator('#cleanMissing').click()
+        self.page.locator('#notice').filter(has_text='已清理').wait_for()
+        self.assertIn('1个缺失节点及其1条关联线路', messages[0])
+        self.assertEqual(self.page.locator('.node').count(), 2)
+        self.assertEqual(self.page.locator('.edgeHit').count(), 0)
+        self.page.locator('#undo').click()
+        self.assertEqual(self.page.locator('.node').count(), 3)
+        self.assertEqual(self.page.locator('.edgeHit').count(), 1)
+        self.page.locator('#save').click()
+        self.page.locator('#notice').filter(has_text='草稿已保存').wait_for()
+        self.assertEqual(model.load_catalog()['nodes'], backup['nodes'])
+        self.assertEqual(model.load_catalog()['edges'], backup['edges'])
+
+    def test_price_comparison_aligns_headers_and_marks_different_values(self):
+        backup = deepcopy(self.data)
+        a, b, c = backup['nodes']
+        b.update(station=a['station'], curve=[20, 11], curve_headers=['00:15', '00:00'])
+        c.update(station=a['station'], curve=[None, 20], curve_headers=['00:00', '00:15'])
+        path = Path(self.temp.name)/'prices.json'
+        path.write_text(json.dumps(backup))
+        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.page.locator('#jsonFile').set_input_files(str(path))
+        self.page.locator('#notice').filter(has_text='备份已导入').wait_for()
+        self.choose(0)
+        self.page.locator('#comparePrices').click()
+        self.page.locator('#pricesDialog[open]').wait_for()
+        rows = self.page.locator('#pricesTable tr')
+        self.assertEqual(rows.count(), 3)
+        self.assertEqual(rows.nth(1).locator('td').all_text_contents(), ['10', '11', '—'])
+        self.assertEqual(rows.nth(2).locator('td').all_text_contents(), ['20', '20', '20'])
+        self.assertEqual(self.page.locator('.priceDifference').count(), 1)
+        self.page.get_by_role('button', name='关闭', exact=True).click()
+        self.assertEqual(self.page.locator('.edgeHit').count(), 1)
 
     def test_node_drag_can_be_undone_without_changing_connections(self):
         target = self.page.locator(f'.node[data-node="{self.data["nodes"][2]["id"]}"] circle').bounding_box()

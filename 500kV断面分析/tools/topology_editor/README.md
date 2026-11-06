@@ -3,3 +3,5 @@
 状态：当前使用。入口为工具箱“500kV断面分析 → 浏览器编辑”。
 
 `index.html`、`style.css`和`app.js`由`toolbox_shared/topology_web.py`提供本机HTTP服务，不能直接以file://打开。节点库、Excel解析、同步、校验和保存复用`toolbox_shared/section_topology.py`。用户操作说明见模块README的“浏览器版与触摸板缩放”。
+
+浏览器是工具箱唯一的编辑入口。节点库与分析适配复用共享模型；同站价格对比按时点对齐并标出差异，缺失节点批量清理须确认节点及关联线路数量，支持撤销。

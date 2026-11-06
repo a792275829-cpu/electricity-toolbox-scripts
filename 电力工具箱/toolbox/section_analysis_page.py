@@ -51,8 +51,6 @@ class SectionAnalysisPage(ToolPage):
         self.remove_button.pack(side="left", padx=(8, 0))
         self.clear_button = ttk.Button(self.actions, text="清空列表", command=self.clear_files)
         self.clear_button.pack(side="left", padx=(8, 0))
-        self.editor_button = ttk.Button(self.actions, text="拓扑编辑", command=self.open_topology_editor)
-        self.editor_button.pack(side="left", padx=(8, 0))
         self.browser_editor_button = ttk.Button(self.actions, text="浏览器编辑", command=self.open_browser_editor)
         self.browser_editor_button.pack(side="left", padx=(8, 0))
         self.run_button = ttk.Button(self.actions, text="开始分析", command=self.start_analysis)
@@ -98,31 +96,13 @@ class SectionAnalysisPage(ToolPage):
             self.remove_button,
             self.clear_button,
             self.run_button,
-            self.editor_button,
             self.browser_editor_button,
             topology_button,
             output_button,
         )
         self.append_log("请添加日前或实时节点电价 Excel 后开始分析。")
 
-    def open_topology_editor(self) -> None:
-        from .topology_editor import TopologyEditor
-        editor = getattr(self, '_topology_editor', None)
-        if editor is not None and editor.winfo_exists():
-            editor.lift()
-            return
-        try:
-            self._topology_editor = TopologyEditor(
-                self, input_path=self.files[0] if len(self.files) == 1 else None,
-                on_apply=lambda path: self.topology_path.set(str(path)),
-            )
-        except (ValueError, OSError) as exc:
-            messagebox.showerror('拓扑编辑', str(exc), parent=self)
-
     def confirm_close(self) -> bool:
-        editor = getattr(self, '_topology_editor', None)
-        if editor is not None and editor.winfo_exists() and not editor.close():
-            return False
         browser = getattr(self, '_browser_editor', None)
         if browser is not None and browser.dirty:
             return messagebox.askyesno('浏览器编辑尚未保存',
@@ -134,10 +114,8 @@ class SectionAnalysisPage(ToolPage):
         browser = getattr(self, '_browser_editor', None)
         try:
             if browser is None or browser.closed:
-                native = getattr(self, '_topology_editor', None)
-                initial = native.data if native is not None and native.winfo_exists() else None
                 browser = self._browser_editor = BrowserEditor(
-                    input_path=self.files[0] if len(self.files) == 1 else None, initial_data=initial)
+                    input_path=self.files[0] if len(self.files) == 1 else None)
                 self._browser_poll_id = self.after(250, self._poll_browser_editor)
             if not webbrowser.open_new_tab(browser.url):
                 messagebox.showerror('浏览器编辑', '无法打开默认浏览器，请检查系统默认浏览器设置。', parent=self)

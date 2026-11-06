@@ -45,6 +45,9 @@ function renderButtons() {
   $('undo').disabled=busy || !undo.length;$('redo').disabled=busy || !redo.length;
   $('delete').disabled=busy || !(selected || edge);
   $('place').disabled=busy || !data || !data.nodes.some(n=>(checked.has(n.id)||n.id===selected)&&!n.anchor);
+  $('cleanMissing').disabled=busy || !data?.nodes.some(n=>!n.present);
+  const current=node(selected);
+  $('comparePrices').disabled=busy || !current || !data.nodes.some(n=>n.station===current.station&&n.voltage===current.voltage&&n.curve.length);
   $('locate').disabled=!node(selected)?.anchor;
   $('startConnection').disabled=busy || !node(selected)?.anchor;
   $('cancelMode').disabled=mode!=='connect';
@@ -167,6 +170,29 @@ $('save').onclick=()=>save();$('apply').onclick=()=>save(true);
 $('undo').onclick=()=>{if(!undo.length||busy)return;const revision=data.revision;redo.push(clone(data));data=undo.pop();data.revision=revision;markDirty();selected=null;edge=null;cancelConnect();render();notice('已撤销。');};
 $('redo').onclick=()=>{if(!redo.length||busy)return;const revision=data.revision;undo.push(clone(data));data=redo.pop();data.revision=revision;markDirty();selected=null;edge=null;render();notice('已重做。');};
 $('delete').onclick=async()=>{if(!confirm('删除所选节点及其相连线路，或删除所选线路？可以撤销。'))return;const id=selected,value=edge;await transaction(d=>{if(id){d.nodes=d.nodes.filter(n=>n.id!==id);d.edges=d.edges.filter(e=>e.a!==id&&e.b!==id);}else d.edges=d.edges.filter(e=>key(e)!==value);});selected=null;edge=null;render();};
+$('cleanMissing').onclick=async()=>{
+  const ids=new Set(data.nodes.filter(n=>!n.present).map(n=>n.id));
+  const edges=data.edges.filter(e=>ids.has(e.a)||ids.has(e.b)).length;
+  if(!ids.size||!confirm(`清理${ids.size}个缺失节点及其${edges}条关联线路？可撤销；重新导入时作为新增节点处理。`))return;
+  if(await transaction(d=>{d.nodes=d.nodes.filter(n=>!ids.has(n.id));d.edges=d.edges.filter(e=>!ids.has(e.a)&&!ids.has(e.b));})){
+    for(const id of ids)checked.delete(id);if(ids.has(selected))selected=null;edge=null;cancelConnect();render();notice('缺失节点及关联线路已清理，可撤销。');
+  }
+};
+$('comparePrices').onclick=()=>{
+  const current=node(selected);if(!current)return;
+  const nodes=data.nodes.filter(n=>n.station===current.station&&n.voltage===current.voltage);
+  const headers=[...new Set(nodes.flatMap(n=>n.curve_headers||data.headers))],table=$('pricesTable');table.replaceChildren();
+  const add=(parent,tag,text)=>{const cell=document.createElement(tag);cell.textContent=text;parent.append(cell);return cell;};
+  const head=document.createElement('tr');add(head,'th','时点');
+  for(const n of nodes)add(head,'th',label(n)+(n.present?'':' [缺失]')+(n.pending?' [待对应]':''));
+  table.append(head);
+  for(const header of headers){
+    const values=nodes.map(n=>{const i=(n.curve_headers||data.headers).indexOf(header);return i<0?null:n.curve[i]??null;});
+    const row=document.createElement('tr');if(new Set(values).size>1)row.className='priceDifference';add(row,'th',header);
+    for(const value of values)add(row,'td',value===null?'—':String(value));table.append(row);
+  }
+  $('pricesDialog').showModal();
+};
 $('place').onclick=()=>{const ids=data.nodes.filter(n=>!n.anchor&&(checked.has(n.id)||n.id===selected)).map(n=>n.id);const cols=Math.ceil(Math.sqrt(ids.length*data.image.width/data.image.height)),rows=Math.ceil(ids.length/cols);transaction(d=>{ids.forEach((id,i)=>{d.nodes.find(n=>n.id===id).anchor={x:(i%cols+1)*d.image.width/(cols+1),y:(Math.floor(i/cols)+1)*d.image.height/(rows+1)};});});};
 async function resolve(old){if(!selected||busy)return;busy=true;renderButtons();try{const result=await api('resolve',{data,candidate:selected,old});remember();data=result.data;selected=result.selected;markDirty();render();notice('价格节点已确认。');}catch(e){notice(e.message);}finally{busy=false;renderButtons();}}
 $('resolveOld').onclick=()=>resolve($('oldNode').value);$('resolveNew').onclick=()=>resolve(null);

@@ -29,8 +29,9 @@ class TopologyPackagingTests(unittest.TestCase):
             files = {p.relative_to(source).as_posix(): prepare_workspace.digest(p)
                      for p in source.rglob("*") if p.is_file()}
             self.assertIn(TOPOLOGY.as_posix(), files)
+            self.assertNotIn("电力工具箱/toolbox/topology_editor.py", files)
             for resource in ('toolbox_shared/section_schema.py', 'toolbox_shared/section_topology.py',
-                             '电力工具箱/toolbox/topology_editor.py', 'toolbox_shared/topology_web.py',
+                             'toolbox_shared/topology_web.py',
                              '500kV断面分析/tools/topology_editor/index.html',
                              '500kV断面分析/tools/topology_editor/app.js',
                              '500kV断面分析/tools/topology_editor/style.css'):
@@ -54,7 +55,7 @@ class TopologyPackagingTests(unittest.TestCase):
                 "path = ToolPaths(Path.cwd()).section_analysis_topology; "
                 "edges, duplicates = parse_topology_edges(path); "
                 "from toolbox_shared.section_topology import seed_catalog, validate_catalog; "
-                "from toolbox.topology_editor import TopologyEditor; "
+                "from toolbox_shared.topology_web import BrowserEditor; "
                 "validate_catalog(seed_catalog()); "
                 "assert edges; print(f'{len(edges)} edges, {len(duplicates)} duplicates')",
             ], cwd=installed, capture_output=True, text=True, check=True)
