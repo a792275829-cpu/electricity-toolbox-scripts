@@ -36,7 +36,7 @@ def ensure_master_workbook(paths, input_path=None, *, run_date=None, config_path
     exists = target.is_file()
     if exists and not update:
         return target
-    if input_path is not None and not exists:
+    if input_path is not None and not exists and not update:
         raise FileNotFoundError(f"指定的预测输入工作簿不存在：{target}")
     import sys
     if str(SCRIPT_DIR) not in sys.path:

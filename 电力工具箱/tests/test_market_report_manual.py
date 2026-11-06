@@ -8,6 +8,7 @@ import tempfile
 import time
 import tkinter as tk
 import unittest
+import unicodedata
 from contextlib import ExitStack, nullcontext
 from datetime import date, timedelta
 from pathlib import Path
@@ -358,7 +359,9 @@ class ManualPdfTests(unittest.TestCase):
             _, phone, printing = pipeline._render_concise_outputs(Path(directory), report, lambda _: None)
             self.assertEqual(len(PdfReader(phone).pages), 1)
             for output in (phone, printing):
-                text = "".join(page.extract_text() for page in PdfReader(output).pages)
+                text = unicodedata.normalize(
+                    "NFKC", "".join(page.extract_text() for page in PdfReader(output).pages)
+                )
                 self.assertIn("汕头厂", text)
                 self.assertNotIn("粤东区域", text)
                 self.assertIn("-50", text)

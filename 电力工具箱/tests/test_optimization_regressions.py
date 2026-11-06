@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class OptimizationRegressionTests(unittest.TestCase):
-    def test_streamed_summary_preserves_formats_and_last_hour_value(self):
+    def test_streamed_summary_preserves_formats_and_hour_values(self):
         module = load_module(
             "summary_stream_regression",
             ROOT / "电力工具脚本/电量汇总工具/summarize_511_excel.py",
@@ -33,7 +33,8 @@ class OptimizationRegressionTests(unittest.TestCase):
             sheet["B2"].number_format = "0.00"
             sheet["C2"].number_format = "0.0000"
             sheet.append([None, None, None])
-            sheet.append(["01:00", 2, 200])
+            # 非时段说明行应跳过；重复整点由完整性测试拒绝。
+            sheet.append(["说明", 2, 200])
             sheet.append(["01:00", 3, 250])
             for hour in range(2, 24):
                 sheet.append([f"{hour:02d}:00", 0, 0])

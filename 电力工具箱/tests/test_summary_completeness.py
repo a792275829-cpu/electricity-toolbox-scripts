@@ -48,6 +48,15 @@ class SummaryCompletenessTests(unittest.TestCase):
                     self.module.run_summary(self.root, self.output)
         self.assertFalse(self.output.exists())
 
+    def test_duplicate_normalized_hour_preserves_existing_output(self):
+        for duplicate in (["00:00", 999, 888], ["0:00", 0, -12.345]):
+            with self.subTest(duplicate=duplicate):
+                self.write_source([*self.complete_rows(), duplicate])
+                self.output.write_bytes(b"previous report")
+                with self.assertRaisesRegex(ValueError, "归湖#1.*时段重复 00:00"):
+                    self.module.run_summary(self.root, self.output)
+                self.assertEqual(self.output.read_bytes(), b"previous report")
+
     def test_valid_zero_negative_and_missing_market_readback(self):
         self.write_source(self.complete_rows())
         self.module.run_summary(self.root, self.output)

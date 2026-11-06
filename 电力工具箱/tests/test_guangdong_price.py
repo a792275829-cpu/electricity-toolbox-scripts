@@ -533,6 +533,33 @@ class ForecastMasterBootstrapTests(unittest.TestCase):
             self.assertEqual(master, result)
             stub.update_master_workbook.assert_not_called()
 
+    def test_gui_prediction_creates_missing_selected_master_before_training(self) -> None:
+        from toolbox import workflows
+        from toolbox.runtime import ToolPaths
+
+        with tempfile.TemporaryDirectory() as folder:
+            master = (Path(folder) / "new/总表.xlsx").resolve()
+            values = workflows.validate(ToolPaths(ROOT), "guangdong-price", "predict", {
+                "run_date": "2026-11-06", "master_workbook": str(master),
+                "prediction_output_dir": folder,
+            })
+            ((command, _),) = workflows.plan(ToolPaths(ROOT), "guangdong-price", "predict", values)
+            def create_master(**options):
+                self.assertEqual(options, {"master_workbook": master, "run_date": "2026-11-06"})
+                master.write_bytes(b"generated")
+                return {"master": master}
+
+            stub = mock.Mock(update_master_workbook=mock.Mock(side_effect=create_master))
+            with (
+                mock.patch.dict(sys.modules, {"update_gdfire_data": stub}),
+                mock.patch.object(sys, "argv", command[1:]),
+                mock.patch.object(self.train, "run_pipeline", return_value={}) as pipeline,
+            ):
+                self.train.main()
+            stub.update_master_workbook.assert_called_once()
+            self.assertEqual(pipeline.call_args.args[0], master)
+            self.assertEqual(master.read_bytes(), b"generated")
+
     def test_prediction_refreshes_selected_master_with_exact_run_date_and_config(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             master = Path(folder) / '总表.xlsx'

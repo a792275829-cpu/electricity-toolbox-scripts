@@ -97,6 +97,8 @@ def plan(paths, tool_id, action, p):
         topology = required_path(p, "topology_path")
         output = required_path(p, "output_root", exists=False)
         threshold = number(p["threshold"], "价差阈值")
+        from toolbox_shared.trade_batch import plan_batch_outputs
+        plan_batch_outputs(files, output, suffix="_500kV分析.html")
         return [(commands.section_analysis(paths, files, output, topology, threshold), paths.section_analysis_dir)]
     if tool_id == "trade-analysis":
         sources = selected_files(p)

@@ -212,6 +212,8 @@ def parse_workbook(file_path: Path) -> list[tuple[str, list[NumericCell], list[N
                 slot = normalize_time(row[time_col - 1].value)
                 if slot not in TIME_SLOTS:
                     continue
+                if slot in energy_by_hour:
+                    raise ValueError(f"{file_path.name} / {worksheet.title}：时段重复 {slot}，停止汇总")
                 try:
                     energy_by_hour[slot] = read_numeric_cell(row[energy_col - 1])
                     price_by_hour[slot] = read_numeric_cell(row[price_col - 1])

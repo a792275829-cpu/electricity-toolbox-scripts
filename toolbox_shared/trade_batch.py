@@ -5,13 +5,13 @@ import unicodedata
 from .native_excel import excel_session
 
 
-def plan_batch_outputs(xlsx_paths, output_dir):
+def plan_batch_outputs(xlsx_paths, output_dir, *, suffix="_分析报告.html"):
     """Validate the complete batch before creating any output."""
     output_dir = Path(output_dir)
     targets, planned = {}, []
     for source in xlsx_paths:
         source = Path(source)
-        output = output_dir / f"{source.stem}_分析报告.html"
+        output = output_dir / f"{source.stem}{suffix}"
         key = unicodedata.normalize("NFC", output.name).casefold()
         previous = targets.get(key)
         if previous is not None and previous.resolve() != source.resolve():

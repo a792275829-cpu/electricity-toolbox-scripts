@@ -567,11 +567,13 @@ def find_first_column_row(sheet, labels: tuple[str, ...]) -> int:
 def find_clearing_workbook(date_text: str, workbook_dir: Path = CLEARING_WORKBOOK_DIR) -> Path:
     dt = datetime.strptime(date_text, "%Y-%m-%d")
     date_token = f"{dt.year}.{dt.month}.{dt.day}"
+    date_pattern = re.compile(r"(?<!\d)(\d{4})\.(\d{1,2})\.(\d{1,2})(?!\d)")
     candidates = [
         path
         for path in workbook_dir.glob("*.xlsx")
         if not path.name.startswith("~$")
-        and date_token in path.name
+        and any(tuple(map(int, match.groups())) == (dt.year, dt.month, dt.day)
+                for match in date_pattern.finditer(path.stem))
         and "\u51fa\u6e05\u60c5\u51b5" in path.name
     ]
     if not candidates:
@@ -1957,6 +1959,7 @@ def generate(
     from fetch_daily_data import build_report_date_plan, run_daily_data
 
     plan = build_report_date_plan(report_date)
+    day_ahead_workbook = resolve_day_ahead_workbook(day_ahead_workbook, plan["dayAheadDate"])
     workbook_date_warnings = check_workbook_dates(
         plan,
         online_workbook=online_workbook,
@@ -2050,13 +2053,9 @@ def generate(
     replace_paragraph(next_nonempty_paragraph(doc, strategy_heading), build_strategy_text(payload))
     # 粤东 500kV 线路信息不是每日固定内容，模板里带的那段直接删掉。
     remove_east_guangdong_section(doc)
-    plant_strategy_source = resolve_day_ahead_workbook(
-        day_ahead_workbook, plan["dayAheadDate"]
-    )
+    plant_strategy_source = day_ahead_workbook
     try:
-        plant_strategies = load_plant_strategies(
-            plant_strategy_source, date_text=plan["dayAheadDate"]
-        )
+        plant_strategies = load_plant_strategies(plant_strategy_source)
     except Exception as exc:
         plant_strategies = {}
         log(f"三厂策略取数失败，已保留模板原文：{exc}")

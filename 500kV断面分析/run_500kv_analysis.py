@@ -10,6 +10,7 @@ if str(MODULE_ROOT) not in sys.path:
     sys.path.insert(0, str(MODULE_ROOT))
 
 from src.generate_500kv_blockage_map import generate_blockage_map
+from toolbox_shared.trade_batch import plan_batch_outputs
 
 
 DEFAULT_TOPOLOGY = MODULE_ROOT / "500kV节点拓扑.md"
@@ -35,22 +36,25 @@ def run_many(
     if not raw_price_paths:
         raise ValueError("至少需要一个节点电价 Excel")
 
-    output_root.mkdir(parents=True, exist_ok=True)
-    html_paths: list[Path] = []
-    for index, raw_price_path in enumerate(raw_price_paths, start=1):
+    planned = plan_batch_outputs(raw_price_paths, output_root, suffix="_500kV分析.html")
+    for raw_price_path, _ in planned:
         raw_price_path = Path(raw_price_path).resolve()
         if not raw_price_path.is_file():
             raise FileNotFoundError(f"输入文件不存在：{raw_price_path}")
         if raw_price_path.suffix.lower() != ".xlsx":
             raise ValueError(f"仅支持 .xlsx 文件：{raw_price_path}")
 
+    output_root.mkdir(parents=True, exist_ok=True)
+    html_paths: list[Path] = []
+    for index, (raw_price_path, output_path) in enumerate(planned, start=1):
+        raw_price_path = raw_price_path.resolve()
         print(f"[{index}/{len(raw_price_paths)}] 开始处理：{raw_price_path.name}", flush=True)
         result = generate_blockage_map(
             topology_path=topology_path,
             raw_price_path=raw_price_path,
             output_dir=output_root,
             threshold=threshold,
-            html_name=result_html_name(raw_price_path),
+            html_name=output_path.name,
         )
         html_paths.append(result.html_path)
         print(

@@ -6,12 +6,14 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from openpyxl import Workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from generate_red_marked_report import check_workbook_dates, read_workbook_run_date
+import generate_red_marked_report as report
 
 PLAN = {
     "actualOnlineEnergyDate": "2026-11-05",
@@ -71,6 +73,35 @@ class WorkbookDateTests(unittest.TestCase):
 
     def test_absent_workbook_is_skipped(self) -> None:
         self.assertEqual(check_workbook_dates(PLAN, online_workbook=None), [])
+
+    def test_filename_date_is_complete_and_supports_zero_padding(self) -> None:
+        import os
+
+        selected = _make_workbook(self.tmp / "2026.11.01出清情况.xlsx", datetime(2026, 11, 1))
+        other = _make_workbook(self.tmp / "2026.11.10出清情况.xlsx", datetime(2026, 11, 10))
+        os.utime(selected, (1000, 1000))
+        os.utime(other, (2000, 2000))
+        self.assertEqual(report.find_clearing_workbook("2026-11-01", self.tmp), selected)
+        selected.unlink()
+        with self.assertRaises(FileNotFoundError):
+            report.find_clearing_workbook("2026-11-01", self.tmp)
+
+    def test_auto_selected_day_ahead_date_is_checked_before_fetch(self) -> None:
+        source = _make_workbook(self.tmp / "2026.11.6出清情况.xlsx", datetime(2026, 11, 5))
+        class StopBeforeFetch(Exception):
+            pass
+
+        with (
+            patch.object(report, "find_clearing_workbook", return_value=source) as finder,
+            patch.object(report, "check_workbook_dates", wraps=check_workbook_dates) as check,
+            patch.object(report, "log") as logger,
+            patch.object(report, "resolve_template_path", side_effect=StopBeforeFetch),
+            self.assertRaises(StopBeforeFetch),
+        ):
+            report.generate("2026-11-06", self.tmp / "template.docx", self.tmp)
+        finder.assert_called_once_with("2026-11-06")
+        self.assertEqual(check.call_args.kwargs["day_ahead_workbook"], source)
+        self.assertTrue(any("实际运行日 2026-11-05" in call.args[0] for call in logger.call_args_list))
 
     def test_text_date_and_missing_sheet(self) -> None:
         text_path = self.tmp / "text.xlsx"
