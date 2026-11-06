@@ -153,7 +153,7 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.page.evaluate('window.devicePixelRatio'), 1)
         self.assertEqual(self.page.locator('body').evaluate('(e)=>getComputedStyle(e).zoom'), '1')
 
-    def test_zoom_preserves_node_text_and_line_sizes_and_model_coordinates(self):
+    def test_zoom_enlarges_node_text_and_line_sizes_without_changing_model(self):
         def sizes():
             return self.page.locator('#canvas').evaluate("""svg=>{
                 const circle=svg.querySelector('.node circle'), text=svg.querySelector('.node text');
@@ -168,22 +168,38 @@ class BrowserTests(unittest.TestCase):
         self.wheel(0, -35, True)
         after = sizes()
         self.assertGreater(after['distance'], before['distance'])
-        for field in ('diameter', 'font', 'textScale', 'width', 'lineScale'):
-            self.assertAlmostEqual(after[field], before[field], places=4, msg=field)
-        self.assertAlmostEqual(after['diameter'], 14)
-        self.assertAlmostEqual(after['font'], 12)
-        self.assertAlmostEqual(after['width'], 2)
+        ratio = after['distance']/before['distance']
+        for field in ('diameter', 'font', 'width'):
+            self.assertGreater(after[field], before[field], msg=field)
+            self.assertAlmostEqual(after[field]/before[field], ratio, places=4, msg=field)
+        self.assertAlmostEqual(before['diameter'], 16)
+        self.assertAlmostEqual(before['font'], 18)
+        self.assertAlmostEqual(before['width'], 2)
         self.page.locator('#canvas').dispatch_event('gesturestart', {'scale': 1})
         self.page.locator('#canvas').evaluate("e=>{const v=new Event('gesturechange',{cancelable:true});v.scale=.8;e.dispatchEvent(v);}")
         self.page.evaluate('()=>new Promise(requestAnimationFrame)')
         self.page.locator('#canvas').dispatch_event('gestureend')
-        for field in ('diameter', 'font', 'textScale', 'width', 'lineScale'):
-            self.assertAlmostEqual(sizes()[field], before[field], places=4, msg=field)
+        for field in ('diameter', 'font', 'width'):
+            self.assertAlmostEqual(sizes()[field], after[field]*.8, places=4, msg=field)
         self.page.locator('#save').click()
         self.page.locator('#notice').filter(has_text='草稿已保存').wait_for()
         saved = model.load_catalog()
         self.assertEqual(saved['nodes'], self.data['nodes'])
         self.assertEqual(saved['edges'], self.data['edges'])
+
+    def test_readable_layout_prioritizes_library_and_larger_type(self):
+        metrics = self.page.evaluate("""()=>{
+            const box=id=>document.getElementById(id).getBoundingClientRect();
+            return {library:box('library').width, drawing:box('drawing').width,
+                    font:parseFloat(getComputedStyle(document.body).fontSize),
+                    rowFont:parseFloat(getComputedStyle(document.querySelector('.nodeRow button')).fontSize),
+                    overflow:document.documentElement.scrollWidth>innerWidth};
+        }""")
+        self.assertGreaterEqual(metrics['library'], 340)
+        self.assertLess(metrics['drawing'], 750)
+        self.assertGreaterEqual(metrics['font'], 17)
+        self.assertGreaterEqual(metrics['rowFont'], 17)
+        self.assertFalse(metrics['overflow'])
 
     def test_two_finger_scroll_pans_without_zoom_and_full_map_resets(self):
         before = self.matrix(); self.wheel(37, 55); after = self.matrix()

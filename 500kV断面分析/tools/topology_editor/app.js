@@ -6,7 +6,7 @@ let data, selected = null, edge = null, source = null, pending = null, mode = 's
 let dirty = false, busy = false, undo = [], redo = [], drag = null, gesture = null;
 let view = {x: 0, y: 0, k: .12}, fitScale = .12, autoFit = true, drawQueued = false, lastPoint;
 const checked = new Set(), measure = document.createElement('canvas').getContext('2d');
-measure.font = '12px sans-serif';
+measure.font = '18px sans-serif';
 const clone = value => structuredClone(value);
 const node = id => data?.nodes.find(n => n.id === id);
 const key = e => [e.a, e.b].sort().join('|');
@@ -88,29 +88,30 @@ function render() {
 }
 function draw() {
   if(!data)return;
-  // Project positions into screen pixels; glyphs and strokes never inherit camera scale.
+  // Scale glyphs with the diagram, using readable sizes at the full-map view.
+  const size=view.k/fitScale, radius=8*size, font=18*size, gap=13*size;
   $('view').setAttribute('transform',`translate(${view.x} ${view.y})`);
   svg.dataset.viewScale=view.k;
   $('zoomValue').textContent=Math.round(view.k/fitScale*100)+'%';
   $('edges').replaceChildren();$('nodes').replaceChildren();$('preview').replaceChildren();
   for(const e of data.edges){const a=node(e.a),b=node(e.b);if(!visible(a)||!visible(b))continue;
     const group=sEl('g',{'data-edge':key(e)}),attrs={x1:a.anchor.x*view.k,y1:a.anchor.y*view.k,x2:b.anchor.x*view.k,y2:b.anchor.y*view.k};
-    group.append(sEl('line',{...attrs,class:'edgeHit'}),sEl('line',{...attrs,class:'edge'+(edge===key(e)?' active':'')+(e.kind==='transformer'?' transformer':'')}));
+    group.append(sEl('line',{...attrs,class:'edgeHit'}),sEl('line',{...attrs,'stroke-width':(edge===key(e)?3:2)*size,class:'edge'+(edge===key(e)?' active':'')+(e.kind==='transformer'?' transformer':'')}));
     group.addEventListener('pointerdown',event=>{event.stopPropagation();if(mode==='select')chooseEdge(key(e));});$('edges').append(group);
   }
-  const values=data.nodes.filter(visible),placed=values.map(n=>{const p={x:n.anchor.x*view.k+view.x,y:n.anchor.y*view.k+view.y};return {id:n.id,box:[p.x-8,p.y-8,p.x+8,p.y+8]};}),occupied=[];
+  const values=data.nodes.filter(visible),placed=values.map(n=>{const p={x:n.anchor.x*view.k+view.x,y:n.anchor.y*view.k+view.y};return {id:n.id,box:[p.x-radius-2,p.y-radius-2,p.x+radius+2,p.y+radius+2]};}),occupied=[];
   values.sort((a,b)=>Number(![selected,source,pending?.b].includes(a.id))-Number(![selected,source,pending?.b].includes(b.id)));
   for(const n of values){const g=sEl('g',{class:'node'+([selected,source,pending?.b].includes(n.id)?' active':''),'data-node':n.id,tabindex:0,role:'button','aria-label':label(n)});
     const title=sEl('title',{});title.textContent=label(n);g.append(title);
-    g.append(sEl('circle',{cx:n.anchor.x*view.k,cy:n.anchor.y*view.k,r:7,fill:!n.present?'#aebac4':n.pending?'#d99a32':n.voltage===500?'#b54b6c':'#268c82',stroke:'white','stroke-width':2}));
-    const x=n.anchor.x*view.k+view.x,y=n.anchor.y*view.k+view.y,w=measure.measureText(n.name).width,h=15;
-    const candidates=[[x+11,y-h-3,x+11+w,y-3],[x+11,y+5,x+11+w,y+5+h],[x-11-w,y-h-3,x-11,y-3],[x-11-w,y+5,x-11,y+5+h]];
+    g.append(sEl('circle',{cx:n.anchor.x*view.k,cy:n.anchor.y*view.k,r:radius,fill:!n.present?'#aebac4':n.pending?'#d99a32':n.voltage===500?'#b54b6c':'#268c82',stroke:'white','stroke-width':2*size}));
+    const x=n.anchor.x*view.k+view.x,y=n.anchor.y*view.k+view.y,w=measure.measureText(n.name).width*size,h=22*size;
+    const candidates=[[x+gap,y-h-3*size,x+gap+w,y-3*size],[x+gap,y+5*size,x+gap+w,y+5*size+h],[x-gap-w,y-h-3*size,x-gap,y-3*size],[x-gap-w,y+5*size,x-gap,y+5*size+h]];
     const box=candidates.find(b=>b[0]>2&&b[2]<svg.clientWidth-2&&b[1]>2&&b[3]<svg.clientHeight-2&&!occupied.some(o=>overlaps(b,o))&&!placed.some(o=>o.id!==n.id&&overlaps(b,o.box)));
-    if(box){occupied.push(box);const text=sEl('text',{x:box[0]-view.x,y:box[1]+12-view.y,'font-size':12,'stroke-width':4});text.textContent=n.name;g.append(text);}
+    if(box){occupied.push(box);const text=sEl('text',{x:box[0]-view.x,y:box[1]+font-view.y,'font-size':font,'stroke-width':4*size});text.textContent=n.name;g.append(text);}
     g.addEventListener('pointerdown',event=>{event.stopPropagation();if(busy)return;const p=point(event);chooseNode(n.id);if(mode==='select'){drag={type:'node',id:n.id,start:p,before:clone(n.anchor),moved:false};svg.setPointerCapture(event.pointerId);}});
     g.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();chooseNode(n.id);}});$('nodes').append(g);
   }
-  if(source&&pending){const a=node(source),b=node(pending.b);$('preview').append(sEl('line',{x1:a.anchor.x*view.k,y1:a.anchor.y*view.k,x2:b.anchor.x*view.k,y2:b.anchor.y*view.k,class:'preview'}));}
+  if(source&&pending){const a=node(source),b=node(pending.b);$('preview').append(sEl('line',{x1:a.anchor.x*view.k,y1:a.anchor.y*view.k,x2:b.anchor.x*view.k,y2:b.anchor.y*view.k,class:'preview','stroke-width':3*size}));}
 }
 function fit() {
   if(!data||svg.clientWidth<20||svg.clientHeight<20)return;
