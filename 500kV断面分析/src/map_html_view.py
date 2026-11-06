@@ -63,7 +63,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     .app {{
       min-height:100dvh;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 380px;
+      grid-template-columns: minmax(0, 1fr) var(--side-width, 380px);
     }}
     .map-pane {{
       padding:0 2px 2px;
@@ -365,7 +365,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       border-left: 1px solid var(--line);
       padding:12px;
       overflow:auto;
-      width:380px;
+      width:var(--side-width, 380px);
       height:100dvh;
       max-height:100dvh;
       display:flex;
@@ -424,7 +424,9 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       aspect-ratio:360 / 280;
       touch-action:pan-y;
     }}
-    .analysis-hint {{ font-size:12px; color:var(--muted); line-height:1.6; }}
+    .analysis-mode {{ --side-width:clamp(480px, 38vw, 720px); }}
+    .analysis-mode .side-header, .analysis-mode #sectionSearch,
+    .analysis-mode #sectionList, .analysis-mode .detail-divider {{ display:none; }}
     .analysis-selection {{ display:flex; flex-wrap:wrap; gap:6px; max-height:120px; overflow:auto; margin-top:8px; }}
     .analysis-selection button, #clearAnalysis {{ min-height:32px; font-size:12px; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--soft); color:var(--ink); cursor:pointer; }}
     .analysis-legend {{ max-height:200px; overflow:auto; margin-top:8px; font-size:12px; }}
@@ -538,7 +540,6 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       <section id="selectionDetails" hidden aria-label="所选节点或线路电价">
       <p class="panel-title" id="detailTitle"></p>
       <div id="analysisControls" hidden>
-        <p class="analysis-hint">点击节点或线路加入对比，再次点击取消；线路显示两端节点电价，共用节点只显示一次。</p>
         <button id="clearAnalysis" type="button">清空已选</button>
         <div id="analysisSelection" class="analysis-selection" aria-label="已选节点和线路"></div>
       </div>
@@ -1285,7 +1286,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       const right = Math.max(...DATA.nodes.map(n => n.x + 12), ...boxes.map(b => b.x + b.width));
       const top = Math.min(...DATA.nodes.map(n => n.y - 12), ...boxes.map(b => b.y));
       const bottom = Math.max(...DATA.nodes.map(n => n.y + 12), ...boxes.map(b => b.y + b.height));
-      const padding = 12;
+      const padding = analysisMode ? 6 : 12;
       const scale = Math.min(mapCanvas.width / Math.max(1, right - left + padding * 2), mapCanvas.height / Math.max(1, bottom - top + padding * 2));
       view = {{scale, x:mapCanvas.width / 2 - (left + right) / 2 * scale, y:mapCanvas.height / 2 - (top + bottom) / 2 * scale}};
       applyView();
@@ -1416,13 +1417,12 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       const legend = document.getElementById('analysisLegend');
       choices.replaceChildren(); legend.replaceChildren();
       const names = new Set();
-      let edgeCount = 0, nodeCount = 0;
       analysisSelections.forEach(({{kind, item}}, key) => {{
         const name = kind === 'edge' ? item.edge : item.name;
         if (kind === 'edge') {{
-          edgeCount++; names.add(item.a); names.add(item.b);
+          names.add(item.a); names.add(item.b);
           edgeLines.get(item.edge)?.classList.add('active');
-        }} else {{ nodeCount++; names.add(item.name); }}
+        }} else {{ names.add(item.name); }}
         const button = document.createElement('button');
         button.type = 'button'; button.textContent = name + ' ×';
         button.setAttribute('aria-label', '取消选择' + name);
@@ -1432,9 +1432,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       document.querySelectorAll('.section-item').forEach(item =>
         item.classList.toggle('active', analysisSelections.has('edge:' + item.dataset.edge)));
       document.getElementById('clearAnalysis').disabled = !analysisSelections.size;
-      document.getElementById('detailTitle').textContent = analysisSelections.size
-        ? `对比分析 · ${{edgeCount}}条线路 / ${{nodeCount}}个节点`
-        : '对比分析 · 请选择节点或线路';
+      document.getElementById('detailTitle').textContent = '对比分析';
       const palette = ['#1261d1','#d42b35','#087c62','#9650bd','#b96800','#007e9e','#a83e80','#657024'];
       const series = [...names].map(name => {{
         nodeGroups.get(name)?.classList.add('active');
@@ -1461,6 +1459,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       const previousEdge = DATA.edges.find(edge => edge.edge === selectedEdgeName);
       const previousNode = nodeByName.get(selectedNodeName);
       analysisMode = !analysisMode;
+      document.body.classList.toggle('analysis-mode', analysisMode);
       event.currentTarget.setAttribute('aria-pressed', String(analysisMode));
       clearSelection();
       if (analysisMode && previousEdge) toggleAnalysisItem('edge', previousEdge);

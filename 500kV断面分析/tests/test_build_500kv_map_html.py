@@ -193,7 +193,7 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertNotIn('灰蓝线为完整拓扑边', html)
             self.assertNotIn('class="summary-grid"', html)
             self.assertNotIn('id="summaryMaxGap"', html)
-            self.assertIn('grid-template-columns: minmax(0, 1fr) 380px;', html)
+            self.assertIn('grid-template-columns: minmax(0, 1fr) var(--side-width, 380px);', html)
             self.assertIn('height: calc(100vh - 139px);', html)
             self.assertIn('function renderSectionList()', html)
             self.assertNotIn('id="gapRange"', html)

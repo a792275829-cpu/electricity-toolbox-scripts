@@ -115,6 +115,22 @@ class MapComparisonTests(unittest.TestCase):
         self.assertEqual(self.series(), ['丙', '丁'])
         self.assertEqual(self.page.locator('#analysisLegend [data-node="丁"]').inner_text(), '暂无数据')
 
+    def test_analysis_layout_hides_navigation_and_widens_chart(self):
+        from playwright.sync_api import expect
+        side = self.page.locator('.side')
+        original_width = side.bounding_box()['width']
+        self.page.locator('#toggleAnalysis').click()
+        self.node('甲')
+        expect(self.page.locator('#detailTitle')).to_have_text('对比分析')
+        self.assertEqual(self.page.locator('.analysis-hint').count(), 0)
+        for selector in ('.side-header', '#sectionSearch', '#sectionList', '.detail-divider'):
+            self.assertTrue(self.page.locator(selector).is_hidden())
+        self.assertGreater(side.bounding_box()['width'], original_width + 100)
+        self.assertLessEqual(self.page.evaluate('document.documentElement.scrollWidth'), 1440)
+        self.page.locator('#toggleAnalysis').click()
+        self.assertTrue(self.page.locator('.side-header').is_visible())
+        self.assertAlmostEqual(side.bounding_box()['width'], original_width, delta=1)
+
     def test_narrow_screen_and_chart_pointer_readout(self):
         self.page.set_viewport_size({'width': 390, 'height': 844})
         self.page.locator('#toggleAnalysis').click()
