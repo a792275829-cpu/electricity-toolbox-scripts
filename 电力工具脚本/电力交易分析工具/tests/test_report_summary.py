@@ -14,6 +14,17 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 
+def label_brief(sheet):
+    for row, label, unit in (
+        (7, "分公司", None), (8, "汕头", "合计"), (9, None, "#1机组"),
+        (10, None, "#2机组"), (11, None, "#3机组"), (13, "海门", "合计"),
+        (14, None, "#1机组"), (15, None, "#2机组"), (16, None, "#3机组"),
+        (17, None, "#4机组"), (19, "东莞", "合计"),
+    ):
+        sheet.cell(row, 1, label)
+        sheet.cell(row, 2, unit)
+
+
 class ReportSummaryTests(unittest.TestCase):
     def test_renewable_values_and_full_price_use_bounded_read(self):
         workbook = Workbook()
@@ -93,6 +104,7 @@ class ReportSummaryTests(unittest.TestCase):
         summary = workbook.active
         summary.title = "新"
         brief = workbook.create_sheet("快报")
+        label_brief(brief)
         summary.cell(8, 1, "火电")
         summary.cell(8, 4, "中长期")
         summary.cell(8, 7, "日前出清")
@@ -105,6 +117,8 @@ class ReportSummaryTests(unittest.TestCase):
         summary.cell(10, 11, 12.3)
         brief.cell(7, 3, 576.76)
         brief.cell(7, 11, 0.8624)
+        brief.cell(19, 3, 55.125)
+        brief.cell(19, 11, 0.75)
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "new_summary.xlsx"
@@ -117,6 +131,20 @@ class ReportSummaryTests(unittest.TestCase):
                     builder._parse_summary()
             finally:
                 builder.wb.close()
+
+            original_summary = dict(builder.summary)
+            brief.insert_rows(18, 2)
+            brief["B18"], brief["B19"] = "#5机组", "#6机组"
+            brief["C19"], brief["K19"] = 9999, 99
+            workbook.save(path)
+            builder.wb = load_workbook(path, read_only=True, data_only=True)
+            try:
+                builder._parse_summary()
+            finally:
+                builder.wb.close()
+            self.assertEqual(builder.summary, original_summary)
+            self.assertEqual(builder.summary["东莞"]["capacity_10mw"], 55.125)
+            self.assertEqual(builder.summary["东莞"]["load_rate"], 0.75)
 
         parsed = builder.summary["分公司火电"]
         self.assertEqual(576.76, parsed["capacity_10mw"])
@@ -141,6 +169,7 @@ class ReportSummaryTests(unittest.TestCase):
         summary = workbook.active
         summary.title = "新"
         brief = workbook.create_sheet("快报")
+        label_brief(brief)
         summary["A8"] = "南方分公司"
         summary["D8"] = "中长期"
         summary["G8"] = "日前出清"

@@ -9,6 +9,7 @@ from itertools import islice
 
 from .native_excel import load_value_workbook
 from .trade_batch import iter_batch_reports
+from .clearing_layout import brief_row_index
 
 THERMAL_COMPANIES = ["汕头", "海门", "东莞"]
 RENEWABLE_UNITS = ["海风", "鮀莲", "归湖"]
@@ -213,19 +214,20 @@ class ReportBuilder:
             raise ValueError("新版交易汇总页需要配套的‘快报’工作表。")
 
         ws_brief = self.wb["快报"]
-        brief_value = read_cell_values(ws_brief, 19, 11)
+        brief_value = read_cell_values(ws_brief, 80, 11)
+        brief_rows = brief_row_index([(brief_value(row, 1), brief_value(row, 2)) for row in range(1, 81)])
         summary_rows = {
-            "分公司火电": (10, 7),
-            "汕头": (11, 8),
-            "汕头#1机组": (12, 9),
-            "汕头#2机组": (13, 10),
-            "汕头#3机组": (14, 11),
-            "海门": (15, 13),
-            "海门#1机组": (16, 14),
-            "海门#2机组": (17, 15),
-            "海门#3机组": (18, 16),
-            "海门#4机组": (19, 17),
-            "东莞": (20, 19),
+            "分公司火电": 10,
+            "汕头": 11,
+            "汕头#1机组": 12,
+            "汕头#2机组": 13,
+            "汕头#3机组": 14,
+            "海门": 15,
+            "海门#1机组": 16,
+            "海门#2机组": 17,
+            "海门#3机组": 18,
+            "海门#4机组": 19,
+            "东莞": 20,
         }
         if cell_value(8, 1) == "南方分公司":
             found = {}
@@ -250,9 +252,11 @@ class ReportBuilder:
             missing = set(summary_rows) - found.keys()
             if missing:
                 raise ValueError(f"新版交易汇总页缺少标签：{'、'.join(sorted(missing))}")
-            summary_rows = {name: (found[name], brief_row)
-                            for name, (_, brief_row) in summary_rows.items()}
-        for name, (summary_row, brief_row) in summary_rows.items():
+            summary_rows = {name: found[name] for name in summary_rows}
+        for name, summary_row in summary_rows.items():
+            if name not in brief_rows:
+                raise ValueError(f"快报汇总区缺少标签：{name}")
+            brief_row = brief_rows[name]
             self.summary[name] = {
                 "capacity_10mw": num(brief_value(brief_row, 3), None),
                 "cost": cell_value(summary_row, 3),

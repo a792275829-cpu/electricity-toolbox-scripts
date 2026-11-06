@@ -22,7 +22,9 @@ def _build_workbook(path: Path, *, fire: tuple[float, float, float], qingyuan: f
     shantou, haimen, dongguan = fire
     total = shantou + haimen + dongguan + qingyuan
     for row, energy in ((7, total), (8, shantou), (13, haimen), (19, dongguan), (25, qingyuan)):
-        brief.cell(row, 1, "x" if row != 7 else "分公司")
+        brief.cell(row, 1, {7: "分公司", 8: "汕头", 13: "海门", 19: "东莞", 25: "清远"}[row])
+        if row != 7:
+            brief.cell(row, 2, "合计")
         brief.cell(row, 10, energy)
     brief.cell(28, 1, "新能源")
     for row, label, energy in (
@@ -35,6 +37,8 @@ def _build_workbook(path: Path, *, fire: tuple[float, float, float], qingyuan: f
         brief.cell(row, 11, energy)
 
     day_ahead = workbook.create_sheet("快报  (日前)")
+    for row, label in ((7, "分公司"), (8, "汕头"), (13, "海门"), (19, "东莞")):
+        day_ahead.cell(row, 1, label)
     day_ahead.cell(7, 7, 300)
     for row, price in ((8, prices[0]), (13, prices[1]), (19, prices[2])):
         day_ahead.cell(row, 7, price)

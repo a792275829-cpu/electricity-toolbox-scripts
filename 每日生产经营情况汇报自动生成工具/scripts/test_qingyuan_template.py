@@ -151,7 +151,13 @@ class QingyuanTemplateTests(unittest.TestCase):
             basic_info.title = "基础信息"
             basic_info["AA64"] = 0
             basic_info["AC64"] = 2300
+            basic_info["Z37"] = "清远上网电量（MWh）"
+            basic_info["Z39"] = "时刻"
+            basic_info["AA39"] = basic_info["AC39"] = "计划\n发电量"
+            basic_info["Z64"] = "合计"
             day_ahead = workbook.create_sheet("快报  (日前)")
+            for row, label in ((7, "分公司"), (8, "汕头"), (13, "海门"), (19, "东莞")):
+                day_ahead.cell(row, 1, label)
             for row, energy, price in ((7, 6034.8139, 236), (8, 1636, 539)):
                 day_ahead.cell(row, 6, energy)
                 day_ahead.cell(row, 7, price)
@@ -183,7 +189,13 @@ class QingyuanTemplateTests(unittest.TestCase):
             basic_info.title = "基础信息"
             basic_info["AA64"] = 12.4
             basic_info["AC64"] = 7.6
+            basic_info["Z37"] = "清远上网电量（MWh）"
+            basic_info["Z39"] = "时刻"
+            basic_info["AA39"] = basic_info["AC39"] = "计划\n发电量"
+            basic_info["Z64"] = "合计"
             day_ahead = workbook.create_sheet("快报  (日前)")
+            for row, label in ((7, "分公司"), (8, "汕头"), (13, "海门"), (19, "东莞")):
+                day_ahead.cell(row, 1, label)
             for row, energy, price in (
                 (7, 100, 400),
                 (8, 20, 410),

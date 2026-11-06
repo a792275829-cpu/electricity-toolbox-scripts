@@ -28,9 +28,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 APP_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name in {"scripts", "\u811a\u672c"} else SCRIPT_DIR
 if str(APP_ROOT.parent) not in sys.path:
     sys.path.insert(0, str(APP_ROOT.parent))
-from toolbox_shared.excel_read import read_cell_snapshots
 from toolbox_shared.dates import normalize_date_input
 from toolbox_shared.storage import data_path
+from toolbox_shared.clearing_layout import brief_row_index, qingyuan_plan_values
 
 OUTPUT_DIR = data_path(APP_ROOT / "\u8f93\u51fa")
 CLEARING_WORKBOOK_DIR = Path.home() / "Downloads"
@@ -609,25 +609,18 @@ def _read_clearing_values(path):
         sheet_name = next((name for name in workbook.sheetnames if "快报" in name and "日前" in name), None)
         if sheet_name is None:
             raise KeyError(f"{path} 中未找到快报（日前）工作表")
-        values, labels = {}, {}
+        values, label_cells = {}, []
         for row_number, row in enumerate(workbook[sheet_name].iter_rows(min_col=1, max_col=8, values_only=True), 1):
-            if isinstance(row[0], str):
-                labels.setdefault(row[0].strip(), row_number)
+            label_cells.append(row[:2])
             for column in (6, 7, 8):
                 if row[column - 1] is not None:
                     values[(row_number, column)] = row[column - 1]
         basic = None
         unit_rows: list[tuple] = []
         if "基础信息" in workbook.sheetnames:
-            snapshots = read_cell_snapshots(workbook, [("基础信息", cell) for cell in ("AA64", "AC64")])
-            basic = {cell: snapshots[("基础信息", cell)][0] for cell in ("AA64", "AC64")}
-            unit_rows = [
-                row
-                for row in workbook["基础信息"].iter_rows(
-                    min_col=1, max_col=7, max_row=80, values_only=True
-                )
-            ]
-        result = (sheet_name, values, labels, basic, unit_rows)
+            basic = list(workbook["基础信息"].iter_rows(min_col=1, max_col=30, values_only=True))
+            unit_rows = [row[:7] for row in basic]
+        result = (sheet_name, values, brief_row_index(label_cells), basic, unit_rows)
     finally:
         workbook.close()
     if cache is not None:
@@ -647,9 +640,9 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
         workbook_path = find_clearing_workbook(date_text)
     sheet_name, values, label_rows, basic, _unit_rows = _read_clearing_values(workbook_path)
     value = lambda row, column: values.get((row, column))
-    qingyuan_raw_values = basic if basic is not None else {"AA64": 0, "AC64": 0}
+    qingyuan_raw_values = qingyuan_plan_values(basic) if basic is not None else {}
     if basic is not None:
-        missing_qingyuan_cells = [cell for cell, number in basic.items() if number is None]
+        missing_qingyuan_cells = [cell for cell, number in qingyuan_raw_values.items() if number is None]
         if missing_qingyuan_cells:
             raise ValueError(
                 f"{workbook_path} 的基础信息!{'/'.join(missing_qingyuan_cells)}没有可用计算结果，"
@@ -662,16 +655,16 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
     qingyuan_energy = sum(qingyuan_components.values()) / 10
 
     rows = {
-        "company": 7,
-        "\u6c55\u5934": 8,
-        "\u6d77\u95e8": 13,
-        "\u4e1c\u839e": 19,
+        "company": _clearing_label_row(label_rows, ("分公司火电",), sheet_name),
+        "\u6c55\u5934": _clearing_label_row(label_rows, ("汕头",), sheet_name),
+        "\u6d77\u95e8": _clearing_label_row(label_rows, ("海门",), sheet_name),
+        "\u4e1c\u839e": _clearing_label_row(label_rows, ("东莞",), sheet_name),
         "\u6d77\u4e0a\u98ce\u7535": _clearing_label_row(label_rows, ("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535"), sheet_name),
         "\u9b80\u83b2": _clearing_label_row(label_rows, ("\u9b80\u83b2\u5149\u4f0f", "\u9b80\u83b2"), sheet_name),
         "\u5f52\u6e56": _clearing_label_row(label_rows, ("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56"), sheet_name),
     }
     base_total_energy = parse_float(value(rows["company"], 6))
-    # 分公司口径 F7 只含火电三厂，新能源在下方独立区块（G 列为电量），
+    # 分公司火电合计的 F 列只含火电三厂，新能源独立区块的 G 列为电量，
     # 报告要求「所有单元相加」，因此总数＝火电 + 新能源 + 清远计划。
     renewable_energy = sum(
         parse_float(value(rows[label], 7))
@@ -733,11 +726,11 @@ def load_online_price_summary(date_text: str, workbook_path: Path | None = None)
     return {
         "workbook": str(workbook_path),
         "sheet": sheet_name,
-        "averagePrice": parse_float(value(7, 7)),
+        "averagePrice": parse_float(value(_clearing_label_row(label_rows, ("分公司火电",), sheet_name), 7)),
         "companies": {
-            "\u6c55\u5934": parse_float(value(8, 7)),
-            "\u6d77\u95e8": parse_float(value(13, 7)),
-            "\u4e1c\u839e": parse_float(value(19, 7)),
+            "\u6c55\u5934": parse_float(value(_clearing_label_row(label_rows, ("汕头",), sheet_name), 7)),
+            "\u6d77\u95e8": parse_float(value(_clearing_label_row(label_rows, ("海门",), sheet_name), 7)),
+            "\u4e1c\u839e": parse_float(value(_clearing_label_row(label_rows, ("东莞",), sheet_name), 7)),
             "\u6d77\u4e0a\u98ce\u7535": parse_float(value(renewable_rows["\u6d77\u4e0a\u98ce\u7535"], 8)),
             "\u9b80\u83b2": parse_float(value(renewable_rows["\u9b80\u83b2"], 8)),
             "\u5f52\u6e56": parse_float(value(renewable_rows["\u5f52\u6e56"], 8)),
@@ -753,15 +746,14 @@ def load_online_energy_summary(date_text: str, workbook_path: Path | None = None
     if workbook_path is None:
         workbook_path = find_clearing_workbook(date_text)
     numbers: dict[tuple[int, int], float] = {}
-    labels: dict[str, int] = {}
+    label_cells: list[tuple] = []
     workbook = load_workbook(workbook_path, read_only=True, data_only=True)
     try:
         sheet_name = next((name for name in workbook.sheetnames if name.strip() == "快报"), None)
         if sheet_name is None:
             raise KeyError(f"{workbook_path} 中未找到快报工作表")
         for row_number, row in enumerate(workbook[sheet_name].iter_rows(min_col=1, max_col=11, values_only=True), 1):
-            if isinstance(row[0], str) and row[0].strip():
-                labels.setdefault(row[0].strip(), row_number)
+            label_cells.append(row[:2])
             for column in (10, 11):
                 cell = row[column - 1]
                 if isinstance(cell, (int, float)) and not isinstance(cell, bool):
@@ -769,6 +761,7 @@ def load_online_energy_summary(date_text: str, workbook_path: Path | None = None
     finally:
         workbook.close()
 
+    labels = brief_row_index(label_cells)
     def value(row: int, column: int) -> float:
         return numbers.get((row, column), 0.0)
 
@@ -778,10 +771,10 @@ def load_online_energy_summary(date_text: str, workbook_path: Path | None = None
                 return labels[name]
         raise KeyError(f"{sheet_name} 中未找到行：{'/'.join(wanted)}")
 
-    shantou = value(8, 10)
-    haimen = value(13, 10)
-    dongguan = value(19, 10)
-    total_fire = value(7, 10)
+    shantou = value(label_row(("汕头",)), 10)
+    haimen = value(label_row(("海门",)), 10)
+    dongguan = value(label_row(("东莞",)), 10)
+    total_fire = value(label_row(("分公司火电",)), 10)
     offshore = value(label_row(("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535")), 11)
     tuolian = value(label_row(("\u9b80\u83b2\u5149\u4f0f", "\u9b80\u83b2")), 11)
     guihu = value(label_row(("\u5f52\u6e56\u5149\u4f0f", "\u5f52\u6e56")), 11)
@@ -2156,7 +2149,7 @@ def generate(
         "weatherError": weather_error,
         "knownGaps": [
             "上网电量取 D-1 出清情况工作簿「快报」表：火电三厂与清远取 J 列，新能源取 K 列，总数为 J7＋新能源合计；D-1 尚未出数（全为 0）时整段保留模板原文并保持红字。",
-            "P14 日前出清电量和日前价格来自报告日出清情况 Excel；火电取快报（日前）F/G，新能源按表头取 G/H，清远计划电量取基础信息!AA64+AC64 后除以10，并计入分公司总电量。",
+            "P14 日前出清电量和日前价格来自报告日出清情况 Excel；火电按厂名定位取快报（日前）F/G，新能源取 G/H，清远计划电量按基础信息清远上网电量区的合计行取 AA+AC 后除以10，并计入分公司总电量。",
             "P29 未来三天最高负荷来源尚未确认，暂不替换。",
             "日清分表取 D-2 日出清情况工作簿「快报」表；分公司现货偏差收益按各厂合计（汕头/东莞取现货偏差合计边际贡献，海门取三项偏差边际贡献之和）。",
             "现货偏差分析取 D-2 日出清情况工作簿「分公司」表，节点电价按各厂「实时最低价/实时最高价」跨厂取极值。",

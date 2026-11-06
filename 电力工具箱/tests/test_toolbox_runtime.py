@@ -288,6 +288,8 @@ print('192 slots verified; dependency identity preserved')
             workbook = Workbook()
             sheet = workbook.active
             sheet.title = "快报  (日前)"
+            for row, label in ((7, "分公司"), (8, "汕头"), (13, "海门"), (19, "东莞")):
+                sheet.cell(row, 1, label)
             for cell, value in {
                 "F7": 10116.2898,
                 "G7": 422.0653,
