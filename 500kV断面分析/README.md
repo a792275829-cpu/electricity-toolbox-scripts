@@ -116,6 +116,18 @@ cd "500kV断面分析"
 
 双击 `校对500和220kV节点.command` 打开本机校对页面。左侧可搜索原图名称、候选电价名称和分片；右侧可修改规范名称、电压、逐行填写电价原始名称、标记映射状态并填写备注。滚轮缩放、拖动平移、点击底图选择坐标，检查后选择坐标状态并点击“保存本项”。切换节点前请保存。来源的强／弱匹配、线路名称和分片仅为线索，均须人工核验；确认映射时必须明确电压和原始名称。坐标为空的节点仍可搜索编辑。
 
+带位置线索的 HTML 可筛选“有位置候选”，选择节点时自动放大到候选点；无候选时跳到名称所属图块，多个图块可切换。位置候选分别注明原 500kV 锚点、原校对标记和 OCR 文字框；橙圈／框是查找线索，红圈是准备保存的坐标。OCR 文字框不允许直接当节点坐标，请在底图上点击实际节点并确认。来源标记与所属图块不一致时有提示，必须对照原图核验。修改后点“保存本项”，定期导出 JSON；新页面可导入旧版导出结果，已有编辑字段不会被位置候选覆盖。
+
+需重建候选时，原工作包的 `work/tiles` 包含 30 张 1500×1250 切块，`work/platform_items.json` 含原校对标记。macOS 安装 Xcode Command Line Tools 后可执行：
+
+```bash
+.venv/bin/python "500kV断面分析/tools/run_layer_review_ocr.py" /path/to/work/tiles --output /path/to/vision_ocr.json
+.venv/bin/python "500kV断面分析/tools/prepare_layer_candidates.py" --pins /path/to/work/platform_items.json --vision /path/to/vision_ocr.json --output /path/to/candidates.json
+.venv/bin/python "500kV断面分析/tools/build_layer_review_html.py" --data /path/to/candidates.json --output ~/Downloads/节点校对_新.html
+```
+
+工具仅把候选附加到校对副本，不修改已有坐标及确认状态；OCR 结果、数据和 HTML 均为本地产物。
+
 校对结果保存在 `local_data/分层拓扑校对/review.json`（桌面开发环境遵循 `TOOLBOX_DATA_ROOT`）；请备份该文件。首次在其他工作区使用时，先从来源工作包导入 `过程数据/mapping2.json`：
 
 ```bash
