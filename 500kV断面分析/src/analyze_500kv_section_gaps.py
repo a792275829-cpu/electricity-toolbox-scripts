@@ -347,7 +347,7 @@ def _column_map(header: tuple[object, ...]) -> dict[str, object] | None:
 
 
 def _price_row_priority(raw_name: str) -> tuple[int, str]:
-    is_500kv_not_220kv = "500kv" in raw_name.lower() and "220kv" not in raw_name.lower()
+    is_500kv_not_220kv = price_node_voltage(raw_name) == 500
     return (0 if is_500kv_not_220kv else 1, raw_name)
 
 

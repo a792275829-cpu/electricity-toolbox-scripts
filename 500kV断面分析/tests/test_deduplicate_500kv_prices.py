@@ -48,6 +48,31 @@ class Deduplicate500kVPricesTest(unittest.TestCase):
             self.assertEqual(match("其他东莞变500kV#1M"), "东莞变")
             self.assertEqual(match("东莞变"), "东莞变")
 
+    def test_explicit_500kv_supersedes_unlabelled_aliases_in_any_sheet_order(self):
+        from itertools import permutations
+        records = [("其他回隆变M21", 900), ("其他回隆变500kV1M", 100),
+                   ("其他回隆变500_KV2M", 300)]
+        for order in permutations(records):
+            with self.subTest(order=order), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                topology, raw, output = root / "topology.md", root / "raw.xlsx", root / "out.xlsx"
+                topology.write_text("## 2. 接线\n### 测试\n回隆变-电白站\n## 3. 约定\n", encoding="utf-8")
+                book = Workbook()
+                book.remove(book.active)
+                for i, (name, price) in enumerate(order):
+                    sheet = book.create_sheet(str(i))
+                    sheet.append(["节点名称", "数据项", "00:00", "00:15"])
+                    sheet.append([name, "电价(元/MWh)", price, 900 if name == "其他回隆变M21" else None])
+                book.save(raw)
+                book.close()
+                result = process_workbook(raw, output, topology)
+                cleaned = load_workbook(output, data_only=True)
+                try:
+                    self.assertEqual(list(cleaned.active.values)[1], ("回隆变", "电价(元/MWh)", 200, None))
+                finally:
+                    cleaned.close()
+                self.assertEqual((result.kept_rows, result.removed_rows), (1, 2))
+
     def test_dongguan_average_excludes_220kv_across_sheets(self):
         for use_topology in (True, False):
             with self.subTest(topology=use_topology), tempfile.TemporaryDirectory() as tmp:

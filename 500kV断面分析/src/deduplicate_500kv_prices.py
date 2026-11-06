@@ -165,10 +165,16 @@ def process_workbook(
                             "node": topology_node,
                             "data_item": data_item,
                             "price_rows": [price_values],
+                            "has_500kv": price_node_voltage(node_name) == 500,
                         }
                         kept_rows += 1
                     else:
-                        group["price_rows"].append(price_values)
+                        is_500kv = price_node_voltage(node_name) == 500
+                        if is_500kv and not group["has_500kv"]:
+                            group["price_rows"] = [price_values]
+                            group["has_500kv"] = True
+                        elif is_500kv == group["has_500kv"]:
+                            group["price_rows"].append(price_values)
                         removed_rows += 1
                     continue
 

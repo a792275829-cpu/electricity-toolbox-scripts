@@ -16,6 +16,11 @@ class Analyze500kVSectionGapsTest(unittest.TestCase):
         self.assertEqual(match_price_rows(["东莞变"], rows)["东莞变"]["prices"]["00:00"], 100)
         self.assertEqual(match_price_rows(["东莞变"], rows[:2]), {})
 
+    def test_explicit_voltage_priority_accepts_separator_variants(self):
+        rows = [{"raw_name": "回隆变M21", "normalized_name": "回隆", "prices": {"00:00": 900}},
+                {"raw_name": "其他回隆变500_KV1M", "normalized_name": "其他", "prices": {"00:00": 100}}]
+        self.assertEqual(match_price_rows(["回隆变"], rows)["回隆变"]["prices"]["00:00"], 100)
+
     def test_indexed_matching_preserves_duplicate_priority_and_fallback(self):
         rows = [
             {"raw_name": "其他甲站500kV", "normalized_name": "甲"},
