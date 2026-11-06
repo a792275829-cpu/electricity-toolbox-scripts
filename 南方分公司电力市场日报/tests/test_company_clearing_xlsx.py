@@ -135,6 +135,23 @@ class SheetSelectionTests(unittest.TestCase):
             sheet["Q4"] = "占位"
         self.assertEqual(MODULE._select_report_sheet(workbook).title, "快报 (10)")
 
+    def test_blank_day_narrative_requires_dated_recap_and_realtime_section(self):
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "新"
+        sheet["A6"] = date(2026, 11, 7)
+        sheet["A10"] = "火电机组合计"
+        sheet["Q10"] = 123
+        sheet["A71"] = "二、实时市场简析"
+        self.assertEqual(MODULE._select_report_sheet(workbook).title, "新")
+        for coordinate in ("A6", "A10", "A71"):
+            with self.subTest(missing=coordinate):
+                original = sheet[coordinate].value
+                sheet[coordinate] = None
+                with self.assertRaisesRegex(ValueError, "缺少可识别的日报工作表"):
+                    MODULE._select_report_sheet(workbook)
+                sheet[coordinate] = original
+
     def test_fallback_ignores_sheets_without_the_report_shape(self):
         workbook = openpyxl.Workbook()
         workbook.active.title = "说明"
@@ -145,6 +162,35 @@ class SheetSelectionTests(unittest.TestCase):
 
 
 class WorkbookFileTests(unittest.TestCase):
+    def test_blank_narrative_alias_reads_dates_metrics_and_appendix(self):
+        with tempfile.TemporaryDirectory() as folder:
+            workbook = openpyxl.Workbook()
+            sheet = workbook.active
+            sheet.title = "新"
+            sheet["A6"] = date(2026, 11, 7)
+            sheet["B8"] = "日前出清"
+            sheet.merge_cells("B8:C8")
+            sheet["B9"] = "电量"
+            sheet["C9"] = "电价"
+            sheet["A10"] = "火电机组合计"
+            sheet["B10"] = 1234.5
+            sheet["C10"] = 456.7
+            sheet["Q10"] = 1
+            sheet["A71"] = "二、实时市场简析"
+            sheet["A72"] = date(2026, 11, 5)
+            path = Path(folder) / "收益表.xlsx"
+            workbook.save(path)
+            workbook.close()
+            self.assertEqual(MODULE.validate_report_workbook(path), path.resolve())
+            self.assertEqual(MODULE.infer_report_date(path), date(2026, 11, 7))
+            parsed = MODULE.parse_daily_report_workbook(path)
+            self.assertEqual(parsed["source_sheet"], "新")
+            self.assertEqual(parsed["report_date"], "2026-11-07")
+            self.assertEqual(parsed["realtime_date"], "2026-11-05")
+            cards = {card["label"]: card["value"] for card in parsed["day_ahead"]["cards"]}
+            self.assertEqual(cards["日前出清电量"], 1234.5)
+            self.assertEqual(cards["日前加权均价"], 456.7)
+
     def test_report_date_comes_from_a6_then_a2_then_filename(self):
         with tempfile.TemporaryDirectory() as folder:
             base = Path(folder)

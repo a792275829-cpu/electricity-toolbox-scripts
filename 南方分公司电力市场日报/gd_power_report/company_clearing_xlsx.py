@@ -33,7 +33,18 @@ WORKBOOK_DATE_RE = re.compile(r"分公司(?P<year>\d{4})\.(?P<month>\d{1,2})\.(?
 
 def _looks_like_report_sheet(sheet: Any) -> bool:
     day_text = str(sheet["A4"].value or "")
-    if "日前市场简析" not in day_text or int(sheet.max_column or 0) < 17:
+    if int(sheet.max_column or 0) < 17:
+        return False
+    # The current “新” template can leave the day-ahead narrative blank.
+    # Require dated recap data instead, so a missing paragraph does not reject
+    # the workbook and an unrelated summary sheet still cannot pass by name.
+    dated_recap = (
+        sheet.title in REPORT_SHEET_ALIASES
+        and not day_text.strip()
+        and _as_date(sheet["A6"].value) is not None
+        and _find_company_summary_row(sheet) is not None
+    )
+    if "日前市场简析" not in day_text and not dated_recap:
         return False
     return any(
         isinstance(sheet.cell(row, 1).value, str)
