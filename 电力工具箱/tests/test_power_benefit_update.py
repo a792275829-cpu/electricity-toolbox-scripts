@@ -101,6 +101,64 @@ class PowerBenefitTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "模板缺少日期"):
                     self.module.inspect_workbook(path, start_date=date(2026,10,1), end_date=end)
 
+    def test_unused_blank_months_do_not_block_selected_range(self):
+        for mode in ("stream", "full"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as folder:
+                path = self.make_template(folder)
+                book = openpyxl.load_workbook(path)
+                for name in ("9月", "11月份"):
+                    sheet = book.create_sheet(name)
+                    sheet["A1"] = "预留月份，尚未填写表头"
+                book.save(path)
+                book.close()
+                before = path.read_bytes()
+                with patch.dict("os.environ", TOOLBOX_BENEFIT_INSPECT_BACKEND=mode):
+                    plan = self.module.inspect_workbook(
+                        path, start_date=date(2026,10,2), end_date=date(2026,10,2)
+                    )
+                    self.assertEqual(len(plan.cells), 144)
+                    self.assertEqual({cell.sheet for cell in plan.cells}, {"10月"})
+                    self.assertEqual(
+                        len(self.module.inspect_workbook(path, end_date=date(2026,10,2)).cells),
+                        24 * 6 * 2 - 3,
+                    )
+                    with self.assertRaisesRegex(ValueError, "模板内未找到指定日期范围"):
+                        self.module.inspect_workbook(
+                            path, start_date=date(2026,11,1), end_date=date(2026,11,1)
+                        )
+                self.assertEqual(path.read_bytes(), before)
+
+    def test_used_month_still_requires_input_headers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.make_template(folder)
+            book = openpyxl.load_workbook(path)
+            book["10月"]["C2"] = None
+            book.save(path)
+            book.close()
+            with self.assertRaisesRegex(ValueError, "目标列模板表头不匹配"):
+                self.module.inspect_workbook(
+                    path, start_date=date(2026,10,2), end_date=date(2026,10,2)
+                )
+
+    def test_selected_months_across_year_end(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.make_template(folder)
+            book = openpyxl.load_workbook(path)
+            december = book.copy_worksheet(book["10月"])
+            december.title = "12月"
+            december["A4"] = date(2025,12,31)
+            january = book.copy_worksheet(book["10月"])
+            january.title = "1月份"
+            january["A4"] = date(2026,1,1)
+            book.create_sheet("2月")
+            book.save(path)
+            book.close()
+            plan = self.module.inspect_workbook(
+                path, start_date=date(2025,12,31), end_date=date(2026,1,1)
+            )
+            self.assertEqual({cell.sheet for cell in plan.cells}, {"12月", "1月份"})
+            self.assertEqual({cell.run_date for cell in plan.cells}, {date(2025,12,31), date(2026,1,1)})
+
     def test_out_of_month_placeholder_is_ignored(self):
         with tempfile.TemporaryDirectory() as folder:
             path = self.make_template(folder)

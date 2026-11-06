@@ -135,16 +135,20 @@ class SheetSelectionTests(unittest.TestCase):
             sheet["Q4"] = "占位"
         self.assertEqual(MODULE._select_report_sheet(workbook).title, "快报 (10)")
 
-    def test_blank_day_narrative_requires_dated_recap_and_realtime_section(self):
+    def test_blank_narratives_require_dated_recap_and_metric_headers(self):
         workbook = openpyxl.Workbook()
         sheet = workbook.active
         sheet.title = "新"
         sheet["A6"] = date(2026, 11, 7)
         sheet["A10"] = "火电机组合计"
-        sheet["Q10"] = 123
-        sheet["A71"] = "二、实时市场简析"
+        sheet["B8"] = "日前出清"
+        sheet.merge_cells("B8:C8")
+        sheet["B9"] = "电量"
+        sheet["C9"] = "电价"
+        sheet["B10"] = 0
+        self.assertEqual(sheet.max_column, 3)
         self.assertEqual(MODULE._select_report_sheet(workbook).title, "新")
-        for coordinate in ("A6", "A10", "A71"):
+        for coordinate in ("A6", "A10", "B8", "B9", "C9"):
             with self.subTest(missing=coordinate):
                 original = sheet[coordinate].value
                 sheet[coordinate] = None
@@ -175,8 +179,6 @@ class WorkbookFileTests(unittest.TestCase):
             sheet["A10"] = "火电机组合计"
             sheet["B10"] = 1234.5
             sheet["C10"] = 456.7
-            sheet["Q10"] = 1
-            sheet["A71"] = "二、实时市场简析"
             sheet["A72"] = date(2026, 11, 5)
             path = Path(folder) / "收益表.xlsx"
             workbook.save(path)

@@ -193,6 +193,13 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
         raise ValueError("海风覆盖更新必须指定开始日期，避免覆盖未选定的历史数据。")
     layout = column_layout(station)
     headers = HAIFENG_HEADERS if station == "海风" else HEADERS
+    requested_months = (
+        {month % 12 + 1 for month in range(
+            start_date.year * 12 + start_date.month - 1,
+            end_date.year * 12 + end_date.month,
+        )}
+        if start_date is not None else None
+    )
     target_columns = tuple(openpyxl.utils.column_index_from_string(col) for col in layout)
     before = fingerprint(path)
     mode = os.environ.get("TOOLBOX_BENEFIT_INSPECT_BACKEND", "auto")
@@ -221,14 +228,14 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
             month_match = re.fullmatch(r"(\d{1,2})月(?:份)?", sheet.title)
             if not month_match:
                 continue
+            if requested_months is not None and int(month_match[1]) not in requested_months:
+                continue
             header_row = next((r for r in range(1, min(sheet.max_row, 20) + 1)
                                if all(re.sub(r"\s+", "", str(sheet[f"{col}{r}"].value or "")) == label
                                       for col, label in headers.items())), None)
-            if header_row is None:
-                raise ValueError(f"{path.name}/{sheet.title} 目标列模板表头不匹配。")
             groups: dict[date, dict[int, int]] = {}
             current: date | None = None
-            for row in range(header_row + 1, sheet.max_row + 1):
+            for row in range((header_row or 0) + 1, sheet.max_row + 1):
                 if sheet.cell(row, 1).value is not None:
                     current = date_at(sheet, cached[sheet.title], row, workbook.epoch)
                 hour = hour_of(sheet.cell(row, 2).value)
@@ -241,6 +248,10 @@ def inspect_workbook(path: Path, *, end_date: date, start_date: date | None = No
                 if hour in hours:
                     raise ValueError(f"{path.name}/{sheet.title} {current} {hour}:00 重复。")
                 hours[hour] = row
+            if not groups:
+                continue
+            if header_row is None:
+                raise ValueError(f"{path.name}/{sheet.title} 目标列模板表头不匹配。")
             for day, hours in sorted(groups.items()):
                 if set(hours) != set(range(24)) or day in seen_days:
                     raise ValueError(f"{path.name} {day} 日期重复或不是完整的0–23点。")

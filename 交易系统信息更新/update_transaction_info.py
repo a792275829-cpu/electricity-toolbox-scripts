@@ -15,7 +15,7 @@ from typing import Any, Iterable
 from xml.etree import ElementTree
 
 import openpyxl
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.utils.datetime import from_excel, to_excel
 from playwright.sync_api import sync_playwright
 
@@ -474,7 +474,16 @@ def _replace_numeric_cell(row_xml: str, cell_ref: str, value: int | float) -> st
     pattern = _cell_pattern(cell_ref)
     match = pattern.search(row_xml)
     if match is None:
-        raise RuntimeError(f"模板行缺少单元格 {cell_ref}。")
+        # Excel omits unstyled empty cells from XML. Insert only the requested
+        # input in column order, preserving the row and all its other cells.
+        column = column_index_from_string(re.match(r"[A-Z]+", cell_ref)[0])
+        insertion = row_xml.rfind("</row>")
+        for existing in re.finditer(r'<c\b[^>]*\br="([A-Z]+)\d+"', row_xml):
+            if column_index_from_string(existing[1]) > column:
+                insertion = existing.start()
+                break
+        replacement = f'<c r="{cell_ref}"><v>{format(float(value), ".15g")}</v></c>'
+        return row_xml[:insertion] + replacement + row_xml[insertion:]
     style_match = re.search(r'\bs="([^"]+)"', match.group(0))
     style = f' s="{style_match.group(1)}"' if style_match else ""
     replacement = f'<c r="{cell_ref}"{style}><v>{format(float(value), ".15g")}</v></c>'

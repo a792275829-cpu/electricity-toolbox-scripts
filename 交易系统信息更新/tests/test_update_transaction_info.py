@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import math
+import re
 import sys
 import tempfile
 import unittest
@@ -302,9 +303,15 @@ class RowXmlTests(unittest.TestCase):
         self.assertIn('<c r="C7" s="3"><v>12.5</v></c>', replaced)
         self.assertIn('r="D7"', replaced)
 
-    def test_missing_cell_is_reported(self):
-        with self.assertRaisesRegex(RuntimeError, "缺少单元格 E7"):
-            MODULE._replace_numeric_cell(MODULE._row_xml(self.XML, 7), "E7", 1)
+    def test_omitted_blank_cell_is_inserted_in_column_order(self):
+        row = MODULE._row_xml(self.XML, 7)
+        for coordinate in ("B7", "E7"):
+            with self.subTest(coordinate=coordinate):
+                updated = MODULE._replace_numeric_cell(row, coordinate, 1)
+                self.assertIn(f'<c r="{coordinate}"><v>1</v></c>', updated)
+                self.assertEqual(updated.replace(f'<c r="{coordinate}"><v>1</v></c>', ''), row)
+                columns = re.findall(r'<c r="([A-Z]+)7"', updated)
+                self.assertEqual(columns, sorted(columns))
 
 
 if __name__ == "__main__":

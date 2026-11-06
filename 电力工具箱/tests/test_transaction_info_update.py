@@ -14,6 +14,40 @@ from toolbox.runtime import ToolPaths, load_module
 
 
 class TransactionInfoUpdateTests(unittest.TestCase):
+    def test_omitted_blank_inputs_are_inserted_and_read_back(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "transaction.xlsx"
+            self._build_fixture(path)
+            book = openpyxl.load_workbook(path)
+            sheet = book["Sheet1"]
+            for coordinate in ("E1", "G1", "O6"):
+                sheet[coordinate].value = None
+                sheet[coordinate]._style = None
+            sheet["P1"] = "=1+1"
+            book.save(path)
+            book.close()
+            before = path.read_bytes()
+            day = date(2026,9,10)
+            pair = self.module.build_daily_load_pair(
+                day, self._payload(day), self._payload(day - timedelta(days=3))
+            )
+            item = self.module.prepare_workbook(path, (pair,))
+            self.assertEqual(path.read_bytes(), before)
+            self.module.commit_prepared_workbook(item, create_backup=False)
+            book = openpyxl.load_workbook(path)
+            try:
+                sheet = book["Sheet1"]
+                self.assertEqual(sheet["E1"].value, 1000)
+                self.assertEqual(sheet["G1"].value, 500.125)
+                self.assertEqual(sheet["O6"].value, 72018)
+                self.assertEqual(sheet["E1"].number_format, "General")
+                self.assertEqual(sheet["F1"].value, 16)
+                self.assertEqual(sheet["F1"].number_format, "0.0000")
+                self.assertEqual(sheet["P1"].value, "=1+1")
+                self.assertEqual(book["保留工作表"]["A1"].value, "不应改动")
+            finally:
+                book.close()
+
     def test_append_reuses_styled_blank_rows_without_duplicate_rows(self):
         import zipfile
         from xml.etree import ElementTree as ET
