@@ -42,7 +42,6 @@ class SectionAnalysisPage(ToolPage):
             master=self,
             value=str(paths.section_analysis_topology),
         )
-        self.threshold = tk.StringVar(master=self, value="80")
 
         self.add_button = FileSelectButton(self.actions, text="添加电价文件", command=self.add_files)
         self.add_button.pack(side="left")
@@ -88,18 +87,12 @@ class SectionAnalysisPage(ToolPage):
             command=self.choose_output_root,
             button_text="选择目录",
         )
-        ttk.Label(settings, text="价差阈值").grid(row=2, column=0, sticky="w", pady=5)
-        ttk.Entry(settings, textvariable=self.threshold, width=12).grid(
-            row=2, column=1, sticky="w", pady=5
-        )
-        ttk.Label(settings, text="元/MWh（严格大于）", style="Muted.TLabel").grid(
-            row=2, column=1, sticky="w", padx=(105, 0), pady=5
-        )
-        rules = ttk.LabelFrame(self.content, text="当前判定规则", padding=10)
+        rules = ttk.LabelFrame(self.content, text="判定规则", padding=10)
         rules.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        self.rule_summary = tk.StringVar(master=self)
-        self._sync_rule_summary()
-        self.threshold.trace_add("write", self._sync_rule_summary)
+        self.rule_summary = tk.StringVar(
+            master=self,
+            value="相邻节点一涨一跌  ＋  价差超过阈值  ＋  全天累计至少4个时点\n阈值在结果网页内调整，初始值为80元/MWh。",
+        )
         ttk.Label(
             rules,
             textvariable=self.rule_summary,
@@ -114,12 +107,6 @@ class SectionAnalysisPage(ToolPage):
             output_button,
         )
         self.append_log("请添加日前或实时节点电价 Excel 后开始分析。")
-
-    def _sync_rule_summary(self, *_args) -> None:
-        threshold = self.threshold.get().strip() or "80"
-        self.rule_summary.set(
-            f"相邻节点一涨一跌  ＋  价差 > {threshold}元/MWh  ＋  全天累计至少4个时点"
-        )
 
     def set_files(self, paths: list[Path]) -> None:
         self.files = list(paths)
@@ -183,7 +170,7 @@ class SectionAnalysisPage(ToolPage):
         files: list[Path],
         output_root: Path,
         topology_path: Path,
-        threshold: float,
+        threshold: float = 80.0,
     ) -> list[str]:
         return commands.section_analysis(self.paths, files, output_root, topology_path, threshold)
 
@@ -195,14 +182,6 @@ class SectionAnalysisPage(ToolPage):
         if not topology_path.is_file():
             messagebox.showerror("拓扑文件不存在", str(topology_path), parent=self)
             return
-        try:
-            threshold = float(self.threshold.get().strip())
-            if threshold < 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("阈值错误", "价差阈值必须是大于或等于0的数字。", parent=self)
-            return
-
         output_root = Path(self.output_root.get().strip()).expanduser()
         output_root.mkdir(parents=True, exist_ok=True)
         selected_files = list(self.files)
@@ -211,7 +190,6 @@ class SectionAnalysisPage(ToolPage):
             selected_files,
             output_root,
             topology_path,
-            threshold,
         )
 
         def on_success(_code: int) -> None:

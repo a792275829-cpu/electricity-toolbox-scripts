@@ -107,13 +107,13 @@ class SectionAnalysisPageTests(unittest.TestCase):
             [Path("/tmp/prices.xlsx")],
             Path("/tmp/results"),
             self.paths.section_analysis_topology,
-            80.0,
         )
 
         actions = [widget.cget("text") for widget in page.actions.winfo_children()]
         self.assertEqual(actions[-2:], ["开始分析", "打开结果目录"])
         self.assertFalse(hasattr(page, "open_latest_button"))
-        self.assertEqual(page.threshold.get(), "80")
+        self.assertFalse(hasattr(page, "threshold"))
+        self.assertIn("阈值在结果网页内调整", page.rule_summary.get())
         self.assertIn("全天累计至少4个时点", page.rule_summary.get())
         self.assertEqual(Path(page.output_root.get()), Path.home() / "Downloads")
         self.assertEqual(Path(command[1]), self.paths.section_analysis_runner)
