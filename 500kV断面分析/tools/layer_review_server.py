@@ -89,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 self.respond(200, json.loads(DATA.read_text(encoding='utf-8')))
             return
-        files = {'/': WEB / 'index.html', '/app.js': WEB / 'app.js', '/styles.css': WEB / 'styles.css', '/image.png': IMAGE}
+        files = {'/': WEB / 'index.html', '/app.js': WEB / 'app.js', '/store.js': WEB / 'store.js', '/styles.css': WEB / 'styles.css', '/image.png': IMAGE}
         target = files.get(path)
         if not target:
             self.send_error(404)
