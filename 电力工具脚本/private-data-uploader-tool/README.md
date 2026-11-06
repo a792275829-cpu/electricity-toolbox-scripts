@@ -12,6 +12,19 @@ node scripts/upload-private-data.mjs --plan --source "$HOME/Desktop/复盘/5-12"
 
 确认预览后可使用 `--execute` 执行真实上传；`--login` 用于重新登录。
 
+## 首次配置与登录
+
+在仓库根目录复制示例配置：
+
+```sh
+cp "电力工具脚本/private-data-uploader-tool/upload.config.example.json" \
+   "电力工具脚本/private-data-uploader-tool/upload.config.json"
+```
+
+按示例填写上传地址、匹配规则和浏览器配置；如需显式指定 macOS Chrome，路径为 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`。
+
+账号由工具箱右侧“清能网站账号”统一配置，上传工具只共享账号密码。首次执行“预览”或“开始上传”时自动建立自己的登录态；两种上传模式的独立目录见下文。网络不可达时检查内网、VPN、代理和 `baseUrl`。
+
 ## 批量上传模式
 
 ```sh
