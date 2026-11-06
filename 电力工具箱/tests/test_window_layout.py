@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from toolbox.app import MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, PAGE_NAMES, ToolboxApp
+from tests.screen_layout import skip_if_window_does_not_fit
 
 
 class MinimumWindowLayoutTests(unittest.TestCase):
@@ -29,6 +30,7 @@ class MinimumWindowLayoutTests(unittest.TestCase):
 
     def test_all_real_pages_keep_their_full_form_size_at_minimum_window(self):
         app = self.app
+        skip_if_window_does_not_fit(self, app)
         self.assertEqual(app.minsize(), (MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT))
         for name in PAGE_NAMES:
             with self.subTest(page=name):
@@ -55,6 +57,7 @@ class MinimumWindowLayoutTests(unittest.TestCase):
 
     def test_tab_focus_reveals_bottom_controls_and_navigation_resets_scroll(self):
         app = self.app
+        skip_if_window_does_not_fit(self, app)
         page = app.pages[app.current_page]
         form = ttk.Frame(page, width=1050, height=1100)
         form.grid(row=10, column=0)

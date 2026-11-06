@@ -154,6 +154,8 @@ class WorkbenchTests(unittest.TestCase):
         )
         self.root = app
         app.update_idletasks()
+        from tests.screen_layout import skip_if_window_does_not_fit
+        skip_if_window_does_not_fit(self, app)
 
         last_button = app.nav_buttons[PAGE_NAMES[-1]]
         navigation_bottom = last_button.winfo_rooty() + last_button.winfo_height()

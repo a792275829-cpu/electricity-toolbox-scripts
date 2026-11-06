@@ -229,6 +229,8 @@ class CredentialsPanelTests(unittest.TestCase):
             app = ToolboxApp(workspace=Path(directory), page_factories={name: lambda parent, _paths, _registry: tk.Frame(parent) for name in PAGE_NAMES}, lazy_pages=True)
             self.root = app
             app.update()
+            from tests.screen_layout import skip_if_window_does_not_fit
+            skip_if_window_does_not_fit(self, app)
             panel = app.credentials_panel
             self.assertEqual(panel.master, app.task_center.master)
             self.assertLess(int(app.task_center.grid_info()["row"]), int(panel.grid_info()["row"]))

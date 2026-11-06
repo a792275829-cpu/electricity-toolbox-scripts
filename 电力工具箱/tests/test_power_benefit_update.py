@@ -319,6 +319,8 @@ class PowerBenefitPageTests(unittest.TestCase):
         try:
             app.geometry("1360x820")
             app.update()
+            from tests.screen_layout import skip_if_window_does_not_fit
+            skip_if_window_does_not_fit(self, app, 1360, 820)
             app.show_page("功率调整收益统计表更新")
             app.update()
             page=app.pages["功率调整收益统计表更新"]
