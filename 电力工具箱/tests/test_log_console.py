@@ -161,6 +161,11 @@ class LogConsoleTests(unittest.TestCase):
             self.console.finish("执行失败", "测试错误", "检查输入")
             self.console.notice.set("已复制")
             self.root.update()
+            labels = [widget for widget in self.console.header.winfo_children()
+                      if isinstance(widget, ttk.Label)]
+            self.assertEqual(["运行日志"], [str(widget.cget("text")) for widget in labels])
+            self.assertTrue(all(not widget.cget("textvariable") for widget in labels))
+            self.assertIn(self.console.status.get(), self.console.text.get("1.0", "end"))
             self.assertTrue(self.console.summary_label.winfo_ismapped())
             self.assertTrue(self.console.notice_label.winfo_ismapped())
             self.console.begin()

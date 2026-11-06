@@ -122,8 +122,9 @@ class LogConsole(ttk.Frame):
         self.header.grid(row=0, column=0, sticky="ew", pady=(0, 4))
         self.header.columnconfigure(1, weight=1)
         ttk.Label(self.header, text="运行日志", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
+        # Keep status for lifecycle/copy consumers; the terminal record is
+        # displayed in the log body, without a second copy in the header.
         self.status = tk.StringVar(self, "")
-        ttk.Label(self.header, textvariable=self.status).grid(row=0, column=1, sticky="w", padx=12)
         self.copy_button = ttk.Button(self.header, text="复制错误", command=self.copy_error, style="Primary.TButton")
         self.copy_button.grid(row=0, column=2, padx=(0, 6))
         self.expand_button = ttk.Button(self.header, text="展开", command=self.expand)
