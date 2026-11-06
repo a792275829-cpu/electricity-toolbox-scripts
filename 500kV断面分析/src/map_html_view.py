@@ -433,7 +433,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       position:fixed; z-index:40; width:min(480px, calc(100vw - 24px));
       max-height:calc(100dvh - 112px); overflow:auto; padding:12px;
       border:1px solid rgba(100,130,160,.3); border-radius:12px;
-      background:rgba(255,255,255,.15); backdrop-filter:blur(3px);
+      background:rgba(255,255,255,.05); backdrop-filter:blur(3px);
       box-shadow:0 8px 32px rgba(30,50,70,.12);
     }}
     .analysis-mode #selectionDetails.analysis-float-hidden {{ display:none; }}
@@ -446,17 +446,18 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     .analysis-mode #clearAnalysis {{ position:absolute; right:12px; top:10px; min-height:24px; padding:2px 7px; font-size:11px; }}
     .analysis-mode .analysis-selection {{ max-height:52px; gap:4px; margin-top:6px; }}
     .analysis-mode .analysis-selection button {{ min-height:24px; padding:2px 6px; font-size:11px; }}
-    .analysis-mode .analysis-legend {{ max-height:100px; margin-top:4px; }}
-    .analysis-mode .analysis-legend:not([hidden]) {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:12px; }}
-    .analysis-mode .analysis-legend-row {{ min-width:0; padding:2px 0; gap:4px; font-size:11px; }}
-    .analysis-mode .analysis-legend-row span {{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
-    .analysis-mode .analysis-legend-row i {{ width:12px; }}
-    .analysis-mode #sourceText {{ margin-top:4px; font-size:10px; line-height:1.3; }}
+    .analysis-mode #sourceText {{ display:none; }}
     .analysis-mode .side-header, .analysis-mode #sectionSearch,
     .analysis-mode #sectionList, .analysis-mode .detail-divider {{ display:none; }}
     .analysis-selection {{ display:flex; flex-wrap:wrap; gap:6px; max-height:120px; overflow:auto; margin-top:8px; }}
     .analysis-selection button, #clearAnalysis {{ min-height:32px; font-size:12px; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--soft); color:var(--ink); cursor:pointer; }}
-    .analysis-legend {{ max-height:200px; overflow:auto; margin-top:8px; font-size:12px; }}
+    .analysis-legend {{
+      position:fixed; z-index:100; min-width:180px; max-width:min(340px, calc(100vw - 24px));
+      max-height:calc(100dvh - 24px); overflow:auto; margin:0; padding:8px 10px;
+      background:rgba(255,255,255,.92); border:1px solid var(--line); border-radius:8px;
+      box-shadow:0 4px 16px rgba(30,50,70,.12); font-size:12px; pointer-events:none;
+    }}
+    #analysisTooltipTime {{ font-weight:700; margin-bottom:4px; color:var(--muted); }}
     .analysis-legend-row {{ display:flex; align-items:center; gap:6px; padding:5px 0; }}
     .analysis-legend-row i {{ width:18px; border-top:3px solid; flex-shrink:0; }}
     .analysis-legend-row span {{ flex:1; overflow-wrap:anywhere; }}
@@ -566,7 +567,6 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       <div class="chart-wrap">
         <svg id="priceChart" viewBox="0 0 360 280" role="img" aria-label="所选节点24小时电价曲线"></svg>
       </div>
-      <div id="analysisLegend" class="analysis-legend" aria-label="对比曲线及逐时电价" hidden></div>
       <div class="source" id="sourceText"></div>
       <hr class="detail-divider">
       </section>
@@ -580,6 +580,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       <div class="section-list" id="sectionList"></div>
     </aside>
   </div>
+  <div id="analysisLegend" class="analysis-legend" role="tooltip" aria-label="对比曲线逐时电价" hidden></div>
   <div id="nodePriceTooltip" class="curve-tooltip" role="tooltip" hidden>
     <b id="nodePriceValue"></b>
   </div>
@@ -1439,9 +1440,36 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         const value = nodeByName.get(label.dataset.node)?.prices[index];
         label.textContent = isPriceValue(value) ? value.toFixed(2) : '暂无数据';
       }});
-      document.getElementById('sourceText').textContent =
-        `${{DATA.time_headers[index] || ''}} · 电价（元/MWh）`;
+      const time = document.getElementById('analysisTooltipTime');
+      if (time) time.textContent = `${{DATA.time_headers[index] || ''}} · 电价（元/MWh）`;
     }}
+
+    function hideAnalysisTooltip() {{
+      document.getElementById('analysisLegend').hidden = true;
+    }}
+    function showAnalysisTooltip(event, index) {{
+      if (!analysisMode || !analysisSelections.size) return;
+      hideNodePriceTooltip();
+      updateAnalysisReadout(index);
+      const tooltip = document.getElementById('analysisLegend');
+      tooltip.hidden = false;
+      const box = tooltip.getBoundingClientRect();
+      const left = event.clientX + 14 + box.width <= innerWidth - 8
+        ? event.clientX + 14 : event.clientX - box.width - 14;
+      const top = event.clientY + 14 + box.height <= innerHeight - 8
+        ? event.clientY + 14 : event.clientY - box.height - 14;
+      tooltip.style.left = Math.max(8, Math.min(innerWidth - box.width - 8, left)) + 'px';
+      tooltip.style.top = Math.max(8, Math.min(innerHeight - box.height - 8, top)) + 'px';
+    }}
+    window.addEventListener('blur', hideAnalysisTooltip);
+    window.addEventListener('resize', hideAnalysisTooltip);
+    document.addEventListener('analysisviewchange', hideAnalysisTooltip);
+    document.addEventListener('scroll', event => {{
+      if (event.target !== document.getElementById('analysisLegend')) hideAnalysisTooltip();
+    }}, true);
+    document.addEventListener('pointerdown', event => {{
+      if (!event.target.closest?.('#priceChart')) hideAnalysisTooltip();
+    }});
 
     function renderAnalysisSelection() {{
       clearSelection(true);
@@ -1450,6 +1478,8 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       const choices = document.getElementById('analysisSelection');
       const legend = document.getElementById('analysisLegend');
       choices.replaceChildren(); legend.replaceChildren();
+      const time = document.createElement('div'); time.id = 'analysisTooltipTime';
+      legend.appendChild(time);
       const names = new Set();
       analysisSelections.forEach(({{kind, item}}, key) => {{
         const name = kind === 'edge' ? item.edge : item.name;
@@ -1484,7 +1514,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         const value = document.createElement('b'); value.dataset.node = item.name;
         row.append(swatch, name, value); legend.appendChild(row);
       }});
-      legend.hidden = false;
+      legend.hidden = true;
       drawChart(null, null, null, series);
       updateAnalysisReadout(topologyTimeIndices[topologyTimeSlot]);
       placeAnalysisFloat();
@@ -1958,7 +1988,9 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         const bounds = svg.getBoundingClientRect();
         const localX = (event.clientX - bounds.left) / bounds.width * width;
         const ratio = (Math.max(plotLeft, Math.min(plotRight, localX)) - plotLeft) / (plotRight - plotLeft || 1);
-        showIndex(Math.round(ratio * (count - 1)));
+        const index = Math.round(ratio * (count - 1));
+        showIndex(index);
+        options.onPointer?.(event, index);
       }}
 
       const hit = make('rect', {{
@@ -1970,6 +2002,13 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         fill: 'transparent',
         'pointer-events': 'all'
       }});
+      hit.addEventListener('wheel', event => {{
+        if (options.onPointer !== showAnalysisTooltip) return;
+        const tooltip = document.getElementById('analysisLegend');
+        if (tooltip.hidden || tooltip.scrollHeight <= tooltip.clientHeight) return;
+        event.preventDefault(); event.stopPropagation();
+        tooltip.scrollTop += event.deltaY;
+      }}, {{passive:false}});
       hit.addEventListener('pointerenter', showFromPointer);
       hit.addEventListener('pointermove', showFromPointer);
       hit.addEventListener('pointerdown', showFromPointer);
@@ -2097,12 +2136,16 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
 
       attachPriceCrosshair(svg, {{
         series, tooltip: !comparisonSeries,
+        onPointer: comparisonSeries ? showAnalysisTooltip : null,
         x, y, count: DATA.time_headers.length, margin, width, height, make,
         onIndexChange: index => {{
           const slot = topologyTimes.indexOf(DATA.time_headers[index]);
           if (slot >= 0) setTopologyTime(slot, false);
         }},
-        onLeave: () => {{ if (edge) resetFlowArrow(edge); }}
+        onLeave: () => {{
+          if (edge) resetFlowArrow(edge);
+          if (comparisonSeries) hideAnalysisTooltip();
+        }}
       }});
 
       document.getElementById('sourceText').textContent = '';
