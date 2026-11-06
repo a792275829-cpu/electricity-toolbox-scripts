@@ -572,8 +572,8 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       </section>
       <div class="side-header"><span class="side-label">断面导航</span><div class="section-controls"><span class="pill" id="visibleCount">0 条</span>
         <select class="sort-select" id="sectionSort" aria-label="断面排序">
-          <option value="severity">按严重度</option>
           <option value="gap">按最大价差</option>
+          <option value="severity">按严重度</option>
           <option value="duration">按累计时点</option>
         </select></div></div>
       <input class="search" id="sectionSearch" type="search" placeholder="搜索节点、片区或方向" aria-label="搜索断面">
