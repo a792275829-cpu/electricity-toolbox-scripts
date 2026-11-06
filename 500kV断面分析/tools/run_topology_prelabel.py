@@ -33,6 +33,14 @@ def main():
     p.add_argument('--review-decisions', type=Path, help='Replay visual review of the exact numbered candidates; no API call')
     args = p.parse_args()
     reviewer = configured_reviewer(args.vision)
+    online_vision_calls = 0
+    if args.vision != 'none':
+        provider_reviewer = reviewer
+        def online_review(*values):
+            nonlocal online_vision_calls
+            online_vision_calls += 1
+            return provider_reviewer(*values)
+        reviewer = online_review
     if args.review_decisions and args.vision != 'none':
         p.error('本地复核文件与在线视觉复核只能选择一种')
     args.output_dir.mkdir(parents=True, exist_ok=False)
@@ -69,7 +77,8 @@ def main():
     report = result['report']; report['vision_provider'] = 'offline-decisions' if args.review_decisions else args.vision
     report['execution'] = dict(ocr_source='cache' if args.ocr_cache else 'actual-inference',
                               ocr_cache_upgraded=bool(args.ocr_cache and cache.get('recipe') != recipe),
-                              geometry='actual-algorithm', online_vision_api_called=args.vision != 'none',
+                              geometry='actual-algorithm', online_vision_api_called=online_vision_calls > 0,
+                              online_vision_calls=online_vision_calls,
                               independent_human_ground_truth=False)
     if args.review_decisions:
         report['review_source'] = json.loads(args.review_decisions.read_text()).get('source', '本地视觉复核记录')
