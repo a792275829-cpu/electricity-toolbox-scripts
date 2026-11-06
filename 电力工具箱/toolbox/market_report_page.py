@@ -23,7 +23,6 @@ class MarketReportPage(ToolPage):
             parent,
             registry=registry,
             title="南方分公司电力市场日报",
-            description="读取 D、D-1、D-2 收益表和清能系统数据，生成手机预览版与打印版 PDF。",
         )
         self.paths = paths
         self.report_date = tk.StringVar(master=self)

@@ -30,7 +30,6 @@ class PrivateBatchUploadPage(ToolPage):
             parent,
             registry=registry,
             title="私有数据批量上传",
-            description="按单元选择文件，直连网站“批量上传”接口；每批最多 12 个文件、合计 10MB，超出自动拆批。",
         )
         self.paths = paths
         self._file_dialogs: FileDialogState | None = None

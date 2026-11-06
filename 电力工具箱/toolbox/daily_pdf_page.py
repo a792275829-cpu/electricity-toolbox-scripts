@@ -30,7 +30,6 @@ class DailyPdfParserPage(ToolPage):
             parent,
             registry=registry,
             title="广东运行日报解析上传",
-            description="解析运行日报，按报告日期将源 PDF 和报价容量 Excel 上传到清能网站数据中心。",
         )
         self.paths = paths
         self.file_dialogs = FileDialogState(paths.file_dialog_settings)
@@ -78,10 +77,8 @@ class DailyPdfParserPage(ToolPage):
         self._notes_label = ttk.Label(
             notes,
             text=(
-                "从日前申报信息表读取汇总值，按报价分布图的颜色覆盖率估算燃煤、燃气、新能源容量。"
-                "已针对矮柱和薄堆叠段优化；不足 3 像素的细小分段会在日志中提示，仍受原图分辨率限制。"
-                "默认将源 PDF 上传至“现货交易日报”，Excel 上传至“报价容量数据”，两项均按 PDF 报告日期匹配。"
-                "仅上传可重试已有文件；上传失败时保留本地解析结果。账号使用任务中心的清能网站配置。"
+                "容量按图像估算，细小分段可能有误差。\n"
+                "PDF → 现货交易日报；Excel → 报价容量数据，均按 PDF 报告日期匹配。"
             ),
             wraplength=self._notes_wraplength,
         )

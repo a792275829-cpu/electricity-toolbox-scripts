@@ -38,7 +38,7 @@ from .power_benefit_page import PowerBenefitUpdatePage
 from .market_report_page import MarketReportPage
 from .summary_upload_page import SummaryUploadPage
 from .private_batch_upload_page import PrivateBatchUploadPage
-from .page_support import DateInput, DateRangeInput, DATE_INPUT_ERROR, DATE_INPUT_HINT, normalize_date_input, parse_date_input
+from .page_support import DateInput, DateRangeInput, DATE_INPUT_ERROR, normalize_date_input, parse_date_input
 from .page_support import (
     add_path_row as _add_path_row,
     clearing_file_date,
@@ -69,7 +69,6 @@ class OnlineEnergyPage(ToolPage):
             parent,
             registry=registry,
             title="导出上网电量",
-            description="按日期范围抓取各公司、各机组上网电量，逐日生成 Excel 汇总。",
         )
         self.paths = paths
         yesterday = (date.today() - timedelta(days=1)).isoformat()
@@ -82,11 +81,6 @@ class OnlineEnergyPage(ToolPage):
         DateRangeInput(
             form, start_variable=self.start_date, end_variable=self.end_date
         ).grid(row=0, column=1, sticky="w", padx=(8, 14))
-        ttk.Label(
-            form,
-            text="弹层里先点开始日期、再点结束日期；同一天即导出当天",
-            style="Muted.TLabel",
-        ).grid(row=0, column=2, sticky="w")
 
         actions = self.actions
         self.export_button = ttk.Button(
@@ -150,7 +144,6 @@ class TradeAnalysisPage(ToolPage):
             parent,
             registry=registry,
             title="出力受限分析",
-            description="选择一个或多个出清 Excel，批量生成 HTML 分析报告。",
         )
         self.paths = paths
         self.file_dialogs = _file_dialog_state(paths)
@@ -307,7 +300,6 @@ class ReportPage(ToolPage):
             parent,
             registry=registry,
             title="早报生成",
-            description="抓取每日数据并根据三个 Excel 数据源生成生产经营情况 Word 报告。",
         )
         self.paths = paths
         self.file_dialogs = _file_dialog_state(paths)
@@ -554,7 +546,6 @@ class GroupUploadPage(ToolPage):
             parent,
             registry=registry,
             title="上传集团每日数据",
-            description="上传能销和省内日报数据；上传完成后自动新建集团日报。",
         )
         self.paths = paths
         self.file_dialogs = _file_dialog_state(paths)
@@ -730,7 +721,6 @@ class MarketTableUpdatePage(ToolPage):
             parent,
             registry=registry,
             title="市场表更新",
-            description="按一个基准运行日期抓取网页数据并写入指定市场 Excel。",
         )
         self.paths = paths
         self.file_dialogs = _file_dialog_state(paths)
@@ -755,9 +745,6 @@ class MarketTableUpdatePage(ToolPage):
         ttk.Label(form, text="基准运行日期").grid(row=0, column=0, sticky="w", pady=5)
         DateInput(form, textvariable=self.run_date, width=18).grid(
             row=0, column=1, sticky="w", pady=5
-        )
-        ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
-            row=0, column=2, sticky="w", padx=(8, 0), pady=5
         )
         browse = _add_path_row(
             form,
@@ -878,7 +865,6 @@ class GuangdongPricePage(ToolPage):
             parent,
             registry=registry,
             title="广东电价预测",
-            description="登录华能广东现货系统，按 96 个十五分钟时点更新数据，并运行 D+1 至 D+15 日前电价预测。",
         )
         self.paths = paths
         self.file_dialogs = _file_dialog_state(paths)
@@ -901,9 +887,6 @@ class GuangdongPricePage(ToolPage):
         ttk.Label(form, text="运行日 D").grid(row=0, column=0, sticky="w", pady=3)
         DateInput(form, textvariable=self.run_date, width=16).grid(
             row=0, column=1, sticky="w", pady=3
-        )
-        ttk.Label(form, text=DATE_INPUT_HINT, style="Muted.TLabel").grid(
-            row=0, column=2, sticky="w", padx=(8, 0), pady=3
         )
         master_button = _add_path_row(
             form,
@@ -958,11 +941,6 @@ class GuangdongPricePage(ToolPage):
             text="1 只输出 D+1，15 输出 D+1 至 D+15；D+2 起没有已发布供需，误差随天数放大。",
             style="Muted.TLabel",
         ).grid(row=4, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=3)
-        ttk.Label(
-            prediction,
-            text="预测前自动补齐总表，再核验供需发布时间并输出每日 96 点电价。",
-            style="Muted.TLabel",
-        ).grid(row=2, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=3)
 
         self.update_button = ttk.Button(
             self.actions, text="补齐数据总表", command=self.start_update
@@ -1113,7 +1091,6 @@ class WpsWriterPage(ToolPage):
             parent,
             registry=registry,
             title="WPS 写入工具",
-            description="将本地或在线表格中的指定区域写入金山文档。",
         )
         self.paths = paths
         # WpsWriterFrame owns its browser/write lifecycle and its own module log.

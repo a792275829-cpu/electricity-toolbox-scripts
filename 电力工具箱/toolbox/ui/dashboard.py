@@ -24,10 +24,9 @@ class DashboardPage(ttk.Frame):
         body.grid(row=1, column=0, sticky="ew", padx=26, pady=(68, 0))
         body.columnconfigure(0, weight=1)
         ttk.Label(body, text="开始今天的工作", style="Hero.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(body, text="选择一个工具，继续你的日常工作。", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(10, 20))
 
         self.metrics = ttk.Frame(body)
-        self.metrics.grid(row=2, column=0, sticky="w", pady=(0, 32))
+        self.metrics.grid(row=2, column=0, sticky="w", pady=(20, 32))
         self.metric_vars = {key: tk.StringVar(self, "0") for key in ("运行中", "已完成", "失败")}
         for column, (label, variable) in enumerate(self.metric_vars.items()):
             item = ttk.Frame(self.metrics)

@@ -19,7 +19,6 @@ class WindForecastPage(ToolPage):
             parent,
             registry=registry,
             title="风力预测截图",
-            description="抓取连续7个预测日期的风力数据，生成日期横向、00:00至23:00纵向的表格截图。",
         )
         self.paths = paths
         self._no_data_reason: str | None = None
@@ -32,9 +31,6 @@ class WindForecastPage(ToolPage):
         ttk.Label(form, text="运行日期").grid(row=0, column=0, sticky="w")
         DateInput(form, textvariable=self.run_date, width=18).grid(
             row=0, column=1, sticky="w", padx=(8, 14)
-        )
-        ttk.Label(form, text="点击日期框选择；输出连续7个预测日期", style="Muted.TLabel").grid(
-            row=0, column=2, sticky="w"
         )
 
         self.generate_button = ttk.Button(self.actions, text="生成截图", command=self.start_generate)

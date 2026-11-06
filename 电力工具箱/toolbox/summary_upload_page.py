@@ -45,7 +45,6 @@ class SummaryUploadPage(ToolPage):
             parent,
             registry=registry,
             title="出清结果汇总上传",
-            description="共用复盘文件夹，可生成电量汇总表、上传出清结果，或依次执行两项功能。",
         )
         self.paths = paths
         self._file_dialogs: FileDialogState | None = None

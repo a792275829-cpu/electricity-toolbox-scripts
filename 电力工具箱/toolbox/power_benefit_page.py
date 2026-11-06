@@ -23,8 +23,7 @@ class PowerBenefitUpdatePage(ToolPage):
     tool_id = 'power-benefit'
     def __init__(self, parent: tk.Misc, paths: ToolPaths, registry: TaskRegistry,
                  *, today: date | None = None) -> None:
-        super().__init__(parent, registry=registry, title="功率调整收益统计表更新",
-                         description="归湖、鮀莲补空白；海风按所选日期覆盖五列小时数据。")
+        super().__init__(parent, registry=registry, title="功率调整收益统计表更新")
         self.paths = paths
         self.file_dialogs = FileDialogState(paths.file_dialog_settings)
         self.workbooks = [tk.StringVar(master=self, value=str(DEFAULT_DIRECTORY / name))

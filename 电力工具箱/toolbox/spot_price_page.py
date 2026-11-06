@@ -35,10 +35,6 @@ class SpotPriceUpdatePage(ToolPage):
             parent,
             registry=registry,
             title="现货价格分析表更新",
-            description=(
-                "勾选归湖、鮀莲、海风中的一个或多个场站，抓取日前和实时出清电价，"
-                "按日期写入对应工作簿的 0时至23时。"
-            ),
         )
         self.paths = paths
         self.file_dialogs = FileDialogState(paths.file_dialog_settings)

@@ -981,12 +981,6 @@ class WpsWriterFrame(ttk.Frame):
             file_frame, textvariable=self.login_status, wraplength=600
         )
         self.login_status_label.grid(row=3, column=1, padx=8, pady=(0, 8), sticky="w")
-        login_hint = ttk.Label(
-            file_frame,
-            text="首次使用或更换电脑后，请先登录。完成登录后，状态会自动刷新。",
-            style="Muted.TLabel", wraplength=600,
-        )
-        login_hint.grid(row=4, column=0, columnspan=2, padx=8, pady=(0, 8), sticky="w")
         browser_width = None
 
         def resize_browser_labels(event) -> None:
@@ -995,7 +989,6 @@ class WpsWriterFrame(ttk.Frame):
                 return
             browser_width = event.width
             self.login_status_label.configure(wraplength=max(160, event.width - 150))
-            login_hint.configure(wraplength=max(240, event.width - 24))
 
         file_frame.bind("<Configure>", resize_browser_labels)
         file_frame.columnconfigure(1, weight=1)

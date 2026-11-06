@@ -30,7 +30,6 @@ class SectionAnalysisPage(ToolPage):
             parent,
             registry=registry,
             title="500kV断面分析",
-            description="批量识别500kV价格分化断面，并按大区、市、节点勾选电价曲线。",
         )
         self.paths = paths
         self.file_dialogs = FileDialogState(paths.file_dialog_settings)
@@ -105,11 +104,6 @@ class SectionAnalysisPage(ToolPage):
             rules,
             textvariable=self.rule_summary,
         ).pack(anchor="w")
-        ttk.Label(
-            rules,
-            text="网页颜色由累计触发时点和最大价差共同决定；颜色越深代表越持久、价差越大。",
-            style="Muted.TLabel",
-        ).pack(anchor="w", pady=(4, 0))
 
         self.register_busy_widgets(
             self.add_button,
