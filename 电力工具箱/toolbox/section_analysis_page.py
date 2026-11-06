@@ -87,17 +87,6 @@ class SectionAnalysisPage(ToolPage):
             command=self.choose_output_root,
             button_text="选择目录",
         )
-        rules = ttk.LabelFrame(self.content, text="判定规则", padding=10)
-        rules.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        self.rule_summary = tk.StringVar(
-            master=self,
-            value="相邻节点一涨一跌  ＋  价差超过阈值  ＋  全天累计至少4个时点\n阈值在结果网页内调整，初始值为80元/MWh。",
-        )
-        ttk.Label(
-            rules,
-            textvariable=self.rule_summary,
-        ).pack(anchor="w")
-
         self.register_busy_widgets(
             self.add_button,
             self.remove_button,
