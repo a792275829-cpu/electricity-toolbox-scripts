@@ -155,7 +155,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       cursor: pointer;
       line-height: 1;
     }}
-    .zoom-controls #toggleFlow {{ width:auto; padding:6px 9px; font-size:12px; font-weight:400; }}
+    .zoom-controls .toggle {{ width:auto; white-space:nowrap; padding:6px 9px; font-size:12px; font-weight:400; }}
     .zoom-controls button:hover {{
       background: color-mix(in srgb, var(--blue) 18%, var(--soft));
     }}
@@ -424,6 +424,14 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       aspect-ratio:360 / 280;
       touch-action:pan-y;
     }}
+    .analysis-hint {{ font-size:12px; color:var(--muted); line-height:1.6; }}
+    .analysis-selection {{ display:flex; flex-wrap:wrap; gap:6px; max-height:120px; overflow:auto; margin-top:8px; }}
+    .analysis-selection button, #clearAnalysis {{ min-height:32px; font-size:12px; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--soft); color:var(--ink); cursor:pointer; }}
+    .analysis-legend {{ max-height:200px; overflow:auto; margin-top:8px; font-size:12px; }}
+    .analysis-legend-row {{ display:flex; align-items:center; gap:6px; padding:5px 0; }}
+    .analysis-legend-row i {{ width:18px; border-top:3px solid; flex-shrink:0; }}
+    .analysis-legend-row span {{ flex:1; overflow-wrap:anywhere; }}
+    .analysis-legend-row b {{ font-variant-numeric:tabular-nums; white-space:nowrap; }}
     .price-crosshair-hit {{ cursor: crosshair; }}
     .source:empty {{ display:none; }}
     .source {{
@@ -495,6 +503,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
           <span class="threshold-count" id="thresholdCount" role="status" aria-live="polite">0 条断面</span>
         </div>
         <div class="zoom-controls" aria-label="地图操作">
+          <button class="toggle" id="toggleAnalysis" type="button" aria-pressed="false" aria-controls="analysisControls">分析模式</button>
           <button class="toggle" id="toggleFlow" type="button" aria-pressed="true">潮流查看</button>
           <button id="zoomIn" type="button" title="放大">+</button>
           <button id="zoomOut" type="button" title="缩小">−</button>
@@ -528,9 +537,15 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     <aside class="side">
       <section id="selectionDetails" hidden aria-label="所选节点或线路电价">
       <p class="panel-title" id="detailTitle"></p>
-      <div class="chart-wrap">
-        <svg id="priceChart" viewBox="0 0 360 280" role="img" aria-label="两端节点24小时电价曲线"></svg>
+      <div id="analysisControls" hidden>
+        <p class="analysis-hint">点击节点或线路加入对比，再次点击取消；线路显示两端节点电价，共用节点只显示一次。</p>
+        <button id="clearAnalysis" type="button">清空已选</button>
+        <div id="analysisSelection" class="analysis-selection" aria-label="已选节点和线路"></div>
       </div>
+      <div class="chart-wrap">
+        <svg id="priceChart" viewBox="0 0 360 280" role="img" aria-label="所选节点24小时电价曲线"></svg>
+      </div>
+      <div id="analysisLegend" class="analysis-legend" aria-label="对比曲线及逐时电价" hidden></div>
       <div class="source" id="sourceText"></div>
       <hr class="detail-divider">
       </section>
@@ -625,6 +640,9 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       edgesByNode.get(edge.a)?.push(edge);
       edgesByNode.get(edge.b)?.push(edge);
     }});
+    let analysisMode = false;
+    const analysisSelections = new Map();
+    const analysisColors = new Map();
     let selectedEdgeName = '';
     let selectedNodeName = '';
     let visibleSectionNames = new Set(sectionEdges.map(edge => edge.edge));
@@ -772,7 +790,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     }});
     mapSvg.addEventListener('pointerup', event => {{
       if (drag && drag.id === event.pointerId) {{
-        const shouldClearSelection = !drag.moved;
+        const shouldClearSelection = !drag.moved && !analysisMode;
         drag = null;
         mapSvg.classList.remove('is-panning');
         if (shouldClearSelection) clearSelection();
@@ -1299,7 +1317,10 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       }}
     }}
 
-    function clearSelection() {{
+    function clearSelection(preserveAnalysis = false) {{
+      if (!preserveAnalysis) analysisSelections.clear();
+      document.getElementById('analysisControls').hidden = true;
+      document.getElementById('analysisLegend').hidden = true;
       resetAllFlowArrows();
       document.querySelectorAll('.flow-arrow').forEach(element => element.classList.remove('context-dimmed'));
       document.querySelectorAll('.edge').forEach(element =>
@@ -1317,9 +1338,11 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       document.getElementById('detailTitle').textContent = '';
       document.getElementById('priceChart').replaceChildren();
       document.getElementById('sourceText').textContent = '';
+      if (analysisMode && !preserveAnalysis) renderAnalysisSelection();
     }}
 
     function selectEdge(edge, line) {{
+      if (analysisMode) {{ toggleAnalysisItem('edge', edge); return; }}
       showSelectionDetails();
       resetAllFlowArrows();
       document.querySelectorAll('.flow-arrow').forEach(element => element.classList.remove('context-dimmed'));
@@ -1339,6 +1362,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     }}
 
     function selectNode(node, group) {{
+      if (analysisMode) {{ toggleAnalysisItem('node', node); return; }}
       showSelectionDetails();
       resetAllFlowArrows();
       document.querySelectorAll('.edge.active').forEach(el => el.classList.remove('active'));
@@ -1368,6 +1392,82 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       if (window.innerWidth <= 920) document.getElementById('detailTitle').scrollIntoView({{ behavior:'smooth', block:'start' }});
     }}
 
+    function toggleAnalysisItem(kind, item) {{
+      const key = kind + ':' + (kind === 'edge' ? item.edge : item.name);
+      if (analysisSelections.has(key)) analysisSelections.delete(key);
+      else analysisSelections.set(key, {{kind, item}});
+      renderAnalysisSelection();
+    }}
+
+    function updateAnalysisReadout(index) {{
+      document.querySelectorAll('#analysisLegend [data-node]').forEach(label => {{
+        const value = nodeByName.get(label.dataset.node)?.prices[index];
+        label.textContent = isPriceValue(value) ? value.toFixed(2) : '暂无数据';
+      }});
+      document.getElementById('sourceText').textContent =
+        `${{DATA.time_headers[index] || ''}} · 电价（元/MWh）`;
+    }}
+
+    function renderAnalysisSelection() {{
+      clearSelection(true);
+      showSelectionDetails();
+      document.getElementById('analysisControls').hidden = false;
+      const choices = document.getElementById('analysisSelection');
+      const legend = document.getElementById('analysisLegend');
+      choices.replaceChildren(); legend.replaceChildren();
+      const names = new Set();
+      let edgeCount = 0, nodeCount = 0;
+      analysisSelections.forEach(({{kind, item}}, key) => {{
+        const name = kind === 'edge' ? item.edge : item.name;
+        if (kind === 'edge') {{
+          edgeCount++; names.add(item.a); names.add(item.b);
+          edgeLines.get(item.edge)?.classList.add('active');
+        }} else {{ nodeCount++; names.add(item.name); }}
+        const button = document.createElement('button');
+        button.type = 'button'; button.textContent = name + ' ×';
+        button.setAttribute('aria-label', '取消选择' + name);
+        button.addEventListener('click', () => {{ analysisSelections.delete(key); renderAnalysisSelection(); }});
+        choices.appendChild(button);
+      }});
+      document.querySelectorAll('.section-item').forEach(item =>
+        item.classList.toggle('active', analysisSelections.has('edge:' + item.dataset.edge)));
+      document.getElementById('clearAnalysis').disabled = !analysisSelections.size;
+      document.getElementById('detailTitle').textContent = analysisSelections.size
+        ? `对比分析 · ${{edgeCount}}条线路 / ${{nodeCount}}个节点`
+        : '对比分析 · 请选择节点或线路';
+      const palette = ['#1261d1','#d42b35','#087c62','#9650bd','#b96800','#007e9e','#a83e80','#657024'];
+      const series = [...names].map(name => {{
+        nodeGroups.get(name)?.classList.add('active');
+        if (!analysisColors.has(name)) analysisColors.set(name, palette[analysisColors.size % palette.length]);
+        return {{name, color: analysisColors.get(name), prices: nodeByName.get(name)?.prices || []}};
+      }});
+      if (!series.length) {{
+        setChartMessage('点击地图上的节点或线路开始对比');
+        return;
+      }}
+      series.forEach(item => {{
+        const row = document.createElement('div'); row.className = 'analysis-legend-row';
+        const swatch = document.createElement('i'); swatch.style.borderColor = item.color;
+        const name = document.createElement('span'); name.textContent = item.name;
+        const value = document.createElement('b'); value.dataset.node = item.name;
+        row.append(swatch, name, value); legend.appendChild(row);
+      }});
+      legend.hidden = false;
+      drawChart(null, null, null, series);
+      updateAnalysisReadout(topologyTimeIndices[topologyTimeSlot]);
+    }}
+
+    document.getElementById('toggleAnalysis').addEventListener('click', event => {{
+      const previousEdge = DATA.edges.find(edge => edge.edge === selectedEdgeName);
+      const previousNode = nodeByName.get(selectedNodeName);
+      analysisMode = !analysisMode;
+      event.currentTarget.setAttribute('aria-pressed', String(analysisMode));
+      clearSelection();
+      if (analysisMode && previousEdge) toggleAnalysisItem('edge', previousEdge);
+      else if (analysisMode && previousNode) toggleAnalysisItem('node', previousNode);
+    }});
+    document.getElementById('clearAnalysis').addEventListener('click', () => clearSelection());
+
     function renderSectionList() {{
       const query = document.getElementById('sectionSearch').value.trim().toLowerCase();
       const sort = document.getElementById('sectionSort').value;
@@ -1391,7 +1491,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       filtered.forEach(edge => {{
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `section-item${{edge.edge === selectedEdgeName ? ' active' : ''}}`;
+        button.className = `section-item${{(analysisMode ? analysisSelections.has('edge:' + edge.edge) : edge.edge === selectedEdgeName) ? ' active' : ''}}`;
         button.dataset.edge = edge.edge;
         const metric = sort === 'gap' ? edge.max_abs_diff.toFixed(2) + ' 元/MWh'
           : sort === 'duration' ? edge.intervals + ' 个时点' : '';
@@ -1422,6 +1522,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       lastTopologyDisplay = nextSlot;
       topologyTimeSlot = nextSlot;
       const time = topologyTimes[topologyTimeSlot];
+      if (analysisMode && analysisSelections.size) updateAnalysisReadout(topologyTimeIndices[topologyTimeSlot]);
       const slider = document.getElementById('topologyTime');
       slider.value = String(topologyTimeSlot);
       const strength = timelineCongestion[topologyTimeSlot];
@@ -1472,7 +1573,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       nodeLabelItems.forEach(item => item.label.classList.toggle('search-match', names.has(item.node.name)));
       const node = matches[0], group = node ? nodeGroups.get(node.name) : null;
       if (!node || !group) return;
-      selectNode(node, group);
+      if (!analysisMode || !analysisSelections.has('node:' + node.name)) selectNode(node, group);
       autoFitMap = false;
       view.scale = 2.6;
       view.x = mapCanvas.width / 2 - node.x * view.scale;
@@ -1734,6 +1835,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       }});
 
       const tooltip = make('g', {{ class: 'price-crosshair-tooltip' }});
+      if (options.tooltip === false) tooltip.setAttribute('display', 'none');
       tooltip.appendChild(make('rect', {{
         width: tooltipWidth,
         height: tooltipHeight,
@@ -1804,6 +1906,14 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       svg.appendChild(hit);
     }}
 
+    function setChartMessage(message) {{
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', '180'); text.setAttribute('y', '140');
+      text.setAttribute('text-anchor', 'middle'); text.setAttribute('font-size', '12');
+      text.setAttribute('fill', 'var(--muted)'); text.textContent = message;
+      document.getElementById('priceChart').replaceChildren(text);
+    }}
+
     function drawNodeChart(node) {{
       document.getElementById('sourceText').textContent = '';
       const svg = document.getElementById('priceChart');
@@ -1853,19 +1963,23 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
 
     }}
 
-    function drawChart(a, b, edge) {{
+    function drawChart(a, b, edge, comparisonSeries = null) {{
+      const series = comparisonSeries || [
+        {{ name:a.name, color:'#1261d1', prices:a.prices }},
+        {{ name:b.name, color:'#e02020', prices:b.prices }}
+      ];
       const svg = document.getElementById('priceChart');
       svg.innerHTML = '';
       const width = 360, height = 280;
-      const margin = {{ left: 42, right: 12, top: 18, bottom: 34 }};
-      const values = [...a.prices, ...b.prices].filter(v => typeof v === 'number');
+      const margin = {{ left: 42, right: 20, top: 18, bottom: 34 }};
+      const values = series.flatMap(item => item.prices).filter(isPriceValue);
       if (!values.length) {{
-        svg.textContent = '缺少节点电价曲线';
+        setChartMessage('缺少节点电价曲线');
         return;
       }}
       const min = Math.min(...values, -50);
       const max = Math.max(...values);
-      const x = i => margin.left + i / (DATA.time_headers.length - 1) * (width - margin.left - margin.right);
+      const x = i => margin.left + i / Math.max(1, DATA.time_headers.length - 1) * (width - margin.left - margin.right);
       const y = v => margin.top + (max - v) / (max - min || 1) * (height - margin.top - margin.bottom);
       const make = (tag, attrs) => {{
         const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -1888,8 +2002,10 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
           return `${{command}} ${{x(index).toFixed(1)}} ${{y(value).toFixed(1)}}`;
         }}).filter(Boolean).join(' ');
       }}
-      svg.appendChild(make('path', {{ d: pathFor(a.prices), fill: 'none', stroke: '#1261d1', 'stroke-width': 2.8 }}));
-      svg.appendChild(make('path', {{ d: pathFor(b.prices), fill: 'none', stroke: '#e02020', 'stroke-width': 2.8 }}));
+      series.forEach(item => svg.appendChild(make('path', {{
+        d:pathFor(item.prices), fill:'none', stroke:item.color, 'stroke-width':2.8,
+        'data-series':item.name
+      }})));
 
       const ticks = [['00:00', 0], ['06:00', 24], ['12:00', 48], ['18:00', 72], ['23:45', 95]];
       ticks.forEach(([label, idx]) => {{
@@ -1906,16 +2022,13 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       }});
 
       attachPriceCrosshair(svg, {{
-        series: [
-          {{ name: a.name, color: '#1261d1', prices: a.prices }},
-          {{ name: b.name, color: '#e02020', prices: b.prices }}
-        ],
+        series, tooltip: !comparisonSeries,
         x, y, count: DATA.time_headers.length, margin, width, height, make,
         onIndexChange: index => {{
           const slot = topologyTimes.indexOf(DATA.time_headers[index]);
           if (slot >= 0) setTopologyTime(slot, false);
         }},
-        onLeave: () => resetFlowArrow(edge)
+        onLeave: () => {{ if (edge) resetFlowArrow(edge); }}
       }});
 
       document.getElementById('sourceText').textContent = '';
