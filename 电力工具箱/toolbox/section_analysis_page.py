@@ -3,6 +3,7 @@ from __future__ import annotations
 from . import commands
 
 import webbrowser
+import queue
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -52,6 +53,8 @@ class SectionAnalysisPage(ToolPage):
         self.clear_button.pack(side="left", padx=(8, 0))
         self.editor_button = ttk.Button(self.actions, text="拓扑编辑", command=self.open_topology_editor)
         self.editor_button.pack(side="left", padx=(8, 0))
+        self.browser_editor_button = ttk.Button(self.actions, text="浏览器编辑", command=self.open_browser_editor)
+        self.browser_editor_button.pack(side="left", padx=(8, 0))
         self.run_button = ttk.Button(self.actions, text="开始分析", command=self.start_analysis)
         self.run_button.pack(side="left", padx=(16, 0))
         self.open_output_button = ttk.Button(
@@ -96,6 +99,7 @@ class SectionAnalysisPage(ToolPage):
             self.clear_button,
             self.run_button,
             self.editor_button,
+            self.browser_editor_button,
             topology_button,
             output_button,
         )
@@ -117,7 +121,50 @@ class SectionAnalysisPage(ToolPage):
 
     def confirm_close(self) -> bool:
         editor = getattr(self, '_topology_editor', None)
-        return editor.close() if editor is not None and editor.winfo_exists() else True
+        if editor is not None and editor.winfo_exists() and not editor.close():
+            return False
+        browser = getattr(self, '_browser_editor', None)
+        if browser is not None and browser.dirty:
+            return messagebox.askyesno('浏览器编辑尚未保存',
+                                      '请在网页保存草稿或导出备份。仍要关闭工具箱及本机编辑服务吗？', parent=self)
+        return True
+
+    def open_browser_editor(self) -> None:
+        from toolbox_shared.topology_web import BrowserEditor
+        browser = getattr(self, '_browser_editor', None)
+        try:
+            if browser is None or browser.closed:
+                native = getattr(self, '_topology_editor', None)
+                initial = native.data if native is not None and native.winfo_exists() else None
+                browser = self._browser_editor = BrowserEditor(
+                    input_path=self.files[0] if len(self.files) == 1 else None, initial_data=initial)
+                self._browser_poll_id = self.after(250, self._poll_browser_editor)
+            if not webbrowser.open_new_tab(browser.url):
+                messagebox.showerror('浏览器编辑', '无法打开默认浏览器，请检查系统默认浏览器设置。', parent=self)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror('浏览器编辑', str(exc), parent=self)
+
+    def _poll_browser_editor(self) -> None:
+        browser = getattr(self, '_browser_editor', None)
+        if browser is None or browser.closed:
+            return
+        while True:
+            try:
+                path = browser.applied.get_nowait()
+            except queue.Empty:
+                break
+            self.topology_path.set(str(path))
+            self.append_log('浏览器编辑的拓扑已应用，后续分析使用该快照。')
+        self._browser_poll_id = self.after(250, self._poll_browser_editor)
+
+    def destroy(self) -> None:
+        poll_id = getattr(self, '_browser_poll_id', None)
+        if poll_id is not None:
+            self.after_cancel(poll_id)
+        browser = getattr(self, '_browser_editor', None)
+        if browser is not None:
+            browser.close()
+        super().destroy()
 
     def set_files(self, paths: list[Path]) -> None:
         self.files = list(paths)

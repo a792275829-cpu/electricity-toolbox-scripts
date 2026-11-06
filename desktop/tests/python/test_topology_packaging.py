@@ -30,7 +30,10 @@ class TopologyPackagingTests(unittest.TestCase):
                      for p in source.rglob("*") if p.is_file()}
             self.assertIn(TOPOLOGY.as_posix(), files)
             for resource in ('toolbox_shared/section_schema.py', 'toolbox_shared/section_topology.py',
-                             '电力工具箱/toolbox/topology_editor.py'):
+                             '电力工具箱/toolbox/topology_editor.py', 'toolbox_shared/topology_web.py',
+                             '500kV断面分析/tools/topology_editor/index.html',
+                             '500kV断面分析/tools/topology_editor/app.js',
+                             '500kV断面分析/tools/topology_editor/style.css'):
                 self.assertIn(resource, files)
             (payload / "manifest.json").write_text(json.dumps({
                 "layout": 2, "version": "test", "build": "topology-test", "files": files,

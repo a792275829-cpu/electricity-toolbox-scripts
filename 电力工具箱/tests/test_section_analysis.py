@@ -111,6 +111,7 @@ class SectionAnalysisPageTests(unittest.TestCase):
 
         actions = [widget.cget("text") for widget in page.actions.winfo_children()]
         self.assertIn("拓扑编辑", actions)
+        self.assertIn("浏览器编辑", actions)
         self.assertEqual(actions[-2:], ["开始分析", "打开结果目录"])
         self.assertFalse(hasattr(page, "open_latest_button"))
         self.assertFalse(hasattr(page, "threshold"))
@@ -135,6 +136,24 @@ class SectionAnalysisPageTests(unittest.TestCase):
             page.open_topology_editor()
             editor_class.assert_called_once()
             editor_class.return_value.lift.assert_called_once()
+
+    def test_browser_editor_entry_reuses_service_and_receives_applied_path(self) -> None:
+        import queue
+        from toolbox.section_analysis_page import SectionAnalysisPage
+        page = SectionAnalysisPage(self.root, self.paths, self.registry)
+        service = Mock(closed=False, dirty=False, url='http://127.0.0.1:12345/#test', applied=queue.Queue())
+        with patch('toolbox_shared.topology_web.BrowserEditor', return_value=service) as factory, \
+             patch('toolbox.section_analysis_page.webbrowser.open_new_tab', return_value=True) as browser:
+            page.open_browser_editor()
+            page.open_browser_editor()
+            factory.assert_called_once()
+            self.assertEqual(browser.call_count, 2)
+            service.applied.put(Path('/tmp/browser-applied.json'))
+            page.after_cancel(page._browser_poll_id)
+            page._poll_browser_editor()
+            self.assertEqual(page.topology_path.get(), '/tmp/browser-applied.json')
+        page.destroy()
+        service.close.assert_called_once()
 
     def test_success_opens_all_generated_html_in_default_browser(self) -> None:
         from toolbox.section_analysis_page import SectionAnalysisPage, result_html_name
