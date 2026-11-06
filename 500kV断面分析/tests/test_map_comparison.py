@@ -130,6 +130,7 @@ class MapComparisonTests(unittest.TestCase):
         chart = self.page.locator('#priceChart').bounding_box()
         self.assertAlmostEqual(chart['width'], 444, delta=1)
         self.assertAlmostEqual(chart['height'], 345.33, delta=1)
+        panel.evaluate('(el) => Promise.allSettled(el.getAnimations().map(a => a.finished))')
         before = panel.bounding_box()
         handle = self.page.locator('#detailTitle').bounding_box()
         transform = self.page.locator('#mapViewport').get_attribute('transform')
@@ -223,3 +224,73 @@ class MapComparisonTests(unittest.TestCase):
         expect(tooltip).to_be_visible()
         self.page.locator('#showRegionCurves').click()
         expect(tooltip).to_be_hidden()
+
+    def test_button_zoom_animates_and_drag_interrupts_without_drift(self):
+        before = self.page.locator('#mapViewport').get_attribute('transform')
+        self.page.locator('#zoomIn').evaluate('(el) => el.click()')
+        self.assertTrue(self.page.evaluate('viewMotionFrame > 0'))
+        self.page.wait_for_function('(before) => viewMotionFrame > 0 && document.getElementById("mapViewport").getAttribute("transform") !== before', arg=before)
+        self.page.mouse.move(20, 300)
+        self.page.mouse.down()
+        self.assertEqual(self.page.evaluate('viewMotionFrame'), 0)
+        stopped = self.page.locator('#mapViewport').get_attribute('transform')
+        self.page.mouse.up()
+        self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+        self.assertEqual(self.page.locator('#mapViewport').get_attribute('transform'), stopped)
+        self.page.locator('#zoomReset').click()
+        self.page.wait_for_function('viewMotionFrame === 0')
+        self.assertEqual(self.page.locator('#mapViewport').get_attribute('transform'), before)
+
+    def test_curve_motion_only_affects_added_and_removed_series(self):
+        self.page.locator('#toggleAnalysis').click()
+        def select(name):
+            return self.page.evaluate('''name => {
+                selectNode(nodeByName.get(name), nodeGroups.get(name));
+                return [...document.querySelectorAll('#priceChart path[data-series]')].map(path =>
+                    [path.dataset.series, path.getAnimations().map(a => a.effect.getTiming().duration)]);
+            }''', name)
+        self.assertEqual(select('甲'), [['甲', [140]]])
+        self.assertEqual(select('乙'), [['甲', []], ['乙', [140]]])
+        self.assertEqual(select('乙'), [['甲', []]])
+        self.assertEqual(self.page.locator('#priceChart [data-exiting-series]').count(), 1)
+        select('乙')
+        self.page.locator('#clearAnalysis').click()
+        self.page.evaluate('() => Promise.allSettled(document.getAnimations().map(a => a.finished))')
+        self.assertEqual(self.page.locator('[data-exiting-series]').count(), 0)
+        self.assertEqual(self.series(), [])
+
+    def test_reduced_motion_disables_transitions_and_snaps_active_zoom(self):
+        self.page.emulate_media(reduced_motion='reduce')
+        self.page.locator('#toggleAnalysis').click()
+        self.node('甲')
+        self.node('乙')
+        self.page.locator('#zoomIn').click()
+        self.assertEqual(self.page.evaluate('viewMotionFrame'), 0)
+        self.assertEqual(self.page.evaluate('document.getAnimations().length'), 0)
+        hit = self.page.locator('#priceChart .price-crosshair-hit')
+        hit.hover()
+        self.assertTrue(self.page.locator('#analysisLegend').is_visible())
+        self.page.mouse.move(0, 0)
+        self.assertTrue(self.page.locator('#analysisLegend').is_hidden())
+        self.page.emulate_media(reduced_motion='no-preference')
+        self.page.locator('#zoomIn').evaluate('(el) => el.click()')
+        self.assertTrue(self.page.evaluate('viewMotionFrame > 0'))
+        self.page.emulate_media(reduced_motion='reduce')
+        self.page.wait_for_function('viewMotionFrame === 0')
+        self.assertEqual(self.page.evaluate('document.getAnimations().length'), 0)
+
+    def test_view_fades_and_tooltip_movement_does_not_restart_fade(self):
+        durations = self.page.locator('#showRegionCurves').evaluate('''el => {
+            el.click();
+            return document.getElementById('regionCurveView').getAnimations().map(a => a.effect.getTiming().duration);
+        }''')
+        self.assertEqual(durations, [160])
+        self.page.locator('#showTopology').click()
+        self.page.locator('#toggleAnalysis').click()
+        self.node('甲')
+        hit = self.page.locator('#priceChart .price-crosshair-hit')
+        hit.hover(position={'x': 70, 'y': 70})
+        self.page.evaluate('window.tooltipMotionForTest = uiAnimations.get(document.getElementById("analysisLegend"))')
+        hit.hover(position={'x': 100, 'y': 100})
+        self.assertTrue(self.page.evaluate('uiAnimations.get(document.getElementById("analysisLegend")) === window.tooltipMotionForTest'))
+        self.assertTrue(self.page.locator('#analysisLegend').is_visible())

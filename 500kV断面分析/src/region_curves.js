@@ -123,10 +123,12 @@
     try { history.replaceState(null,'',`#curves?${params}`); } catch (_) { /* File viewers may restrict history. */ }
   }
   function switchView(curves) {
+    const changed = panel.hidden === curves;
     hideTooltip();
     document.querySelector('.analysis-switch').dataset.view=curves ? 'curves' : 'topology';
     (curves ? document.querySelector('.curve-main') : document.querySelector('.map-shell')).prepend(document.querySelector('.analysis-views'));
     panel.hidden = !curves; mapPanel.hidden = curves;
+    if (changed) animateUI(curves ? panel : mapPanel, [{opacity:0}, {opacity:1}], 160);
     document.dispatchEvent(new CustomEvent('analysisviewchange'));
     $('showRegionCurves').setAttribute('aria-pressed',String(curves));
     $('showTopology').setAttribute('aria-pressed',String(!curves));
@@ -187,7 +189,7 @@
       input.indeterminate=count>0 && count<names.length;
     });
   }
-  function hideTooltip() { $('curveTooltip').hidden=true; lastPointer=null; tooltipKey=null; }
+  function hideTooltip() { setTooltipVisibility($('curveTooltip'),false); lastPointer=null; tooltipKey=null; }
   function showTooltip(clientX, clientY) {
     if (!$('curvePopupEnabled').checked || panel.hidden || !visibleSeries().length) return;
     const tooltip=$('curveTooltip');
@@ -213,7 +215,7 @@
       });
       tooltipKey=key;
     }
-    tooltip.hidden=false;
+    setTooltipVisibility(tooltip,true);
     const box=tooltip.getBoundingClientRect();
     const left=clientX+16+box.width<innerWidth-12 ? clientX+16 : clientX-box.width-16;
     tooltip.style.left=`${Math.max(12,Math.min(innerWidth-box.width-12,left))}px`;
@@ -280,7 +282,9 @@
   function draw() {
     if (panel.hidden) return;
     hideTooltip();
-    const svg=$('regionPriceChart'); svg.replaceChildren(); guide=null;markerLayer=null;
+    const svg=$('regionPriceChart');
+    const previousPaths=[...svg.querySelectorAll('path[data-series]')].map(path => path.cloneNode(true));
+    svg.replaceChildren(); guide=null;markerLayer=null;
     series=aggregateSeries(nodes,selected,'nodes',times.length);
     const palette=seriesPalette(series.length);
     automaticColors=new Map(series.map((item,index) => [item.name,palette[index]]));
@@ -318,6 +322,7 @@
           svg.append(make('circle',{cx:x(j),cy:y(v),r:3,fill:color(item.name)}));
       });
     });
+    animateComparisonPaths(previousPaths,svg);
     guide=make('line',{y1:margin.top,y2:height-margin.bottom,stroke:'var(--muted)','pointer-events':'none'});
     svg.append(guide);
     markerLayer=make('g',{'pointer-events':'none'});svg.append(markerLayer);

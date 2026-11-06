@@ -586,6 +586,40 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
   </div>
   <script>
     const DATA = {json_data};
+    const uiAnimations = new WeakMap(), tooltipVisibility = new WeakMap(), activeUIMotions = new Set();
+    const uiMotionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+    const reduceUIMotion = () => uiMotionPreference.matches;
+    uiMotionPreference.addEventListener('change', () => {{
+      if (reduceUIMotion()) activeUIMotions.forEach(animation => animation.cancel());
+    }});
+    function animateUI(element, frames, duration) {{
+      uiAnimations.get(element)?.cancel();
+      if (reduceUIMotion()) return null;
+      const animation = element.animate(frames, {{duration, easing:'cubic-bezier(.2,.7,.2,1)'}});
+      uiAnimations.set(element, animation); activeUIMotions.add(animation);
+      animation.finished.catch(() => {{}}).then(() => activeUIMotions.delete(animation));
+      animation.addEventListener('cancel', () => {{
+        if (tooltipVisibility.has(element)) element.hidden = !tooltipVisibility.get(element);
+      }});
+      return animation;
+    }}
+    function setTooltipVisibility(element, visible, immediate = false) {{
+      if (immediate === true || reduceUIMotion()) {{
+        uiAnimations.get(element)?.cancel();
+        tooltipVisibility.set(element, visible); element.hidden = !visible; return;
+      }}
+      if (!visible && element.hidden) {{ tooltipVisibility.set(element, false); return; }}
+      if (tooltipVisibility.get(element) === visible) return;
+      const opacity = element.hidden ? 0 : Number(getComputedStyle(element).opacity);
+      tooltipVisibility.set(element, visible); element.hidden = false;
+      const animation = animateUI(element, [{{opacity}}, {{opacity:visible ? 1 : 0}}], visible ? 80 : 60);
+      if (animation) animation.onfinish = () => {{
+        if (tooltipVisibility.get(element) === visible) element.hidden = !visible;
+      }};
+      else element.hidden = !visible;
+    }}
+
+
   </script>
   <script>
     const sourceCanvasWidth = Number(DATA.metadata.layout_canvas_width || 1340);
@@ -729,12 +763,28 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       view.y = Math.max(-{SVG_H} * view.scale + visibleMarginY, Math.min(mapCanvas.height - visibleMarginY, view.y));
     }}
 
-    function applyView() {{
+    let viewMotionFrame = 0;
+    function applyView(duration = 0) {{
+      cancelAnimationFrame(viewMotionFrame); viewMotionFrame = 0;
       clampView();
-      mapViewport.setAttribute('transform', `translate(${{view.x}} ${{view.y}}) scale(${{view.scale}})`);
+      const target = {{...view}};
+      const matrix = mapViewport.transform.baseVal.consolidate()?.matrix;
+      const previous = matrix ? {{scale:matrix.a, x:matrix.e, y:matrix.f}} : target;
+      const paint = () => mapViewport.setAttribute('transform', `translate(${{view.x}} ${{view.y}}) scale(${{view.scale}})`);
+      if (!duration || reduceUIMotion()) {{ paint(); return; }}
+      const started = performance.now();
+      view = previous;
+      const frame = now => {{
+        const progress = reduceUIMotion() ? 1 : Math.min(1, (now - started) / duration);
+        const ease = 1 - (1 - progress) ** 3;
+        view = Object.fromEntries(['scale','x','y'].map(key => [key, previous[key] + (target[key] - previous[key]) * ease]));
+        paint();
+        viewMotionFrame = progress < 1 ? requestAnimationFrame(frame) : 0;
+      }};
+      viewMotionFrame = requestAnimationFrame(frame);
     }}
 
-    function zoomToScale(targetScale, clientX, clientY) {{
+    function zoomToScale(targetScale, clientX, clientY, duration = 0) {{
       const rect = mapSvg.getBoundingClientRect();
       autoFitMap = false;
       const px = ((clientX ?? (rect.left + rect.width / 2)) - rect.left) / rect.width * mapCanvas.width;
@@ -744,11 +794,11 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       view.x = px - (px - view.x) * (nextScale / oldScale);
       view.y = py - (py - view.y) * (nextScale / oldScale);
       view.scale = nextScale;
-      applyView();
+      applyView(duration);
     }}
 
-    function zoomBy(factor, clientX, clientY) {{
-      zoomToScale(view.scale * factor, clientX, clientY);
+    function zoomBy(factor, clientX, clientY, duration = 0) {{
+      zoomToScale(view.scale * factor, clientX, clientY, duration);
     }}
 
     function panByWheel(deltaX, deltaY) {{
@@ -769,11 +819,11 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       return fineMotion || now < trackpadUntil;
     }}
 
-    document.getElementById('zoomIn').addEventListener('click', () => zoomBy(1.28));
-    document.getElementById('zoomOut').addEventListener('click', () => zoomBy(1 / 1.28));
+    document.getElementById('zoomIn').addEventListener('click', () => zoomBy(1.28, undefined, undefined, 220));
+    document.getElementById('zoomOut').addEventListener('click', () => zoomBy(1 / 1.28, undefined, undefined, 220));
     document.getElementById('zoomReset').addEventListener('click', () => {{
       autoFitMap = true;
-      fitMap();
+      fitMap(220);
     }});
     mapSvg.addEventListener('wheel', event => {{
       event.preventDefault();
@@ -806,6 +856,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     mapSvg.addEventListener('pointerdown', event => {{
       if (event.button !== 0) return;
       if (event.target.closest?.('.node-group, .edge, .edge-hit, .flow-arrow')) return;
+      cancelAnimationFrame(viewMotionFrame); viewMotionFrame = 0;
       mapSvg.setPointerCapture(event.pointerId);
       drag = {{ id: event.pointerId, x: event.clientX, y: event.clientY, startX: view.x, startY: view.y, moved: false }};
     }});
@@ -1312,7 +1363,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       }}
       return true;
     }}
-    function fitMap() {{
+    function fitMap(duration = 0) {{
       if (!resizeMapCanvas() || !DATA.nodes.length) return;
       const boxes = nodeLabelItems.map(item => item.label.getBBox()).filter(box => box.width && box.height);
       const province = mapViewport.querySelector('.province');
@@ -1324,14 +1375,15 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       const padding = analysisMode ? 6 : 12;
       const scale = Math.min(mapCanvas.width / Math.max(1, right - left + padding * 2), mapCanvas.height / Math.max(1, bottom - top + padding * 2));
       view = {{scale, x:mapCanvas.width / 2 - (left + right) / 2 * scale, y:mapCanvas.height / 2 - (top + bottom) / 2 * scale}};
-      applyView();
+      applyView(duration);
     }}
-    let mapResizeFrame;
+    let mapResizeFrame, layoutMotionUntil = 0;
     const mapResizeObserver = new ResizeObserver(() => {{
       cancelAnimationFrame(mapResizeFrame);
       mapResizeFrame = requestAnimationFrame(() => {{
-        if (autoFitMap) fitMap();
-        else if (resizeMapCanvas()) applyView();
+        const duration = Math.max(0, layoutMotionUntil - performance.now());
+        if (autoFitMap) fitMap(duration);
+        else if (resizeMapCanvas()) applyView(duration);
       }});
     }});
     mapResizeObserver.observe(mapSvg);
@@ -1345,18 +1397,16 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       if (!details.hidden) return;
       details.hidden = false;
       detailsAnimation?.cancel();
-      if (!analysisMode && !flowMotionPreference.matches) {{
-        detailsAnimation = details.animate([
-          {{opacity:0, transform:'translateY(6px)'}},
-          {{opacity:1, transform:'translateY(0)'}}
-        ], {{duration:180, easing:'ease-out'}});
-      }}
+      if (!analysisMode) detailsAnimation = animateUI(details, [
+        {{opacity:0, transform:'translateY(6px)'}},
+        {{opacity:1, transform:'translateY(0)'}}
+      ], 180);
     }}
 
     function clearSelection(preserveAnalysis = false) {{
       if (!preserveAnalysis) analysisSelections.clear();
       document.getElementById('analysisControls').hidden = true;
-      document.getElementById('analysisLegend').hidden = true;
+      setTooltipVisibility(document.getElementById('analysisLegend'), false, true);
       resetAllFlowArrows();
       document.querySelectorAll('.flow-arrow').forEach(element => element.classList.remove('context-dimmed'));
       document.querySelectorAll('.edge').forEach(element =>
@@ -1428,6 +1478,22 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       if (window.innerWidth <= 920) document.getElementById('detailTitle').scrollIntoView({{ behavior:'smooth', block:'start' }});
     }}
 
+    function animateComparisonPaths(previous, svg = document.getElementById('priceChart')) {{
+      const current = [...svg.querySelectorAll('path[data-series]')];
+      const oldNames = new Set(previous.map(path => path.dataset.series));
+      const newNames = new Set(current.map(path => path.dataset.series));
+      current.filter(path => !oldNames.has(path.dataset.series))
+        .forEach(path => animateUI(path, [{{opacity:0}}, {{opacity:1}}], 140));
+      if (reduceUIMotion()) return;
+      previous.filter(path => !newNames.has(path.dataset.series)).forEach(path => {{
+        path.removeAttribute('data-series'); path.setAttribute('data-exiting-series', 'true');
+        path.setAttribute('pointer-events','none'); path.setAttribute('aria-hidden','true');
+        svg.insertBefore(path, svg.firstChild);
+        const animation = animateUI(path, [{{opacity:1}}, {{opacity:0}}], 90);
+        if (animation) {{ animation.onfinish = () => path.remove(); animation.oncancel = () => path.remove(); }} else path.remove();
+      }});
+    }}
+
     function toggleAnalysisItem(kind, item) {{
       const key = kind + ':' + (kind === 'edge' ? item.edge : item.name);
       if (analysisSelections.has(key)) analysisSelections.delete(key);
@@ -1444,15 +1510,15 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       if (time) time.textContent = `${{DATA.time_headers[index] || ''}} · 电价（元/MWh）`;
     }}
 
-    function hideAnalysisTooltip() {{
-      document.getElementById('analysisLegend').hidden = true;
+    function hideAnalysisTooltip(immediate = false) {{
+      setTooltipVisibility(document.getElementById('analysisLegend'), false, immediate);
     }}
     function showAnalysisTooltip(event, index) {{
       if (!analysisMode || !analysisSelections.size) return;
       hideNodePriceTooltip();
       updateAnalysisReadout(index);
       const tooltip = document.getElementById('analysisLegend');
-      tooltip.hidden = false;
+      setTooltipVisibility(tooltip, true);
       const box = tooltip.getBoundingClientRect();
       const left = event.clientX + 14 + box.width <= innerWidth - 8
         ? event.clientX + 14 : event.clientX - box.width - 14;
@@ -1461,17 +1527,19 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       tooltip.style.left = Math.max(8, Math.min(innerWidth - box.width - 8, left)) + 'px';
       tooltip.style.top = Math.max(8, Math.min(innerHeight - box.height - 8, top)) + 'px';
     }}
-    window.addEventListener('blur', hideAnalysisTooltip);
-    window.addEventListener('resize', hideAnalysisTooltip);
-    document.addEventListener('analysisviewchange', hideAnalysisTooltip);
+    window.addEventListener('blur', () => hideAnalysisTooltip(true));
+    window.addEventListener('resize', () => hideAnalysisTooltip(true));
+    document.addEventListener('analysisviewchange', () => hideAnalysisTooltip(true));
     document.addEventListener('scroll', event => {{
-      if (event.target !== document.getElementById('analysisLegend')) hideAnalysisTooltip();
+      if (event.target !== document.getElementById('analysisLegend')) hideAnalysisTooltip(true);
     }}, true);
     document.addEventListener('pointerdown', event => {{
-      if (!event.target.closest?.('#priceChart')) hideAnalysisTooltip();
+      if (!event.target.closest?.('#priceChart')) hideAnalysisTooltip(true);
     }});
 
     function renderAnalysisSelection() {{
+      const previousPaths = [...document.querySelectorAll('#priceChart path[data-series]')].map(path => path.cloneNode(true));
+      const previousKeys = new Set([...document.querySelectorAll('#analysisSelection [data-selection-key]')].map(el => el.dataset.selectionKey));
       clearSelection(true);
       showSelectionDetails();
       document.getElementById('analysisControls').hidden = false;
@@ -1488,10 +1556,11 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
           edgeLines.get(item.edge)?.classList.add('active');
         }} else {{ names.add(item.name); }}
         const button = document.createElement('button');
-        button.type = 'button'; button.textContent = name + ' ×';
+        button.type = 'button'; button.textContent = name + ' ×'; button.dataset.selectionKey = key;
         button.setAttribute('aria-label', '取消选择' + name);
         button.addEventListener('click', () => {{ analysisSelections.delete(key); renderAnalysisSelection(); }});
         choices.appendChild(button);
+        if (!previousKeys.has(key)) animateUI(button, [{{opacity:0, transform:'translateY(3px)'}}, {{opacity:1, transform:'translateY(0)'}}], 120);
       }});
       document.querySelectorAll('.section-item').forEach(item =>
         item.classList.toggle('active', analysisSelections.has('edge:' + item.dataset.edge)));
@@ -1505,6 +1574,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       }});
       if (!series.length) {{
         setChartMessage('点击地图上的节点或线路开始对比');
+        animateComparisonPaths(previousPaths);
         return;
       }}
       series.forEach(item => {{
@@ -1516,6 +1586,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       }});
       legend.hidden = true;
       drawChart(null, null, null, series);
+      animateComparisonPaths(previousPaths);
       updateAnalysisReadout(topologyTimeIndices[topologyTimeSlot]);
       placeAnalysisFloat();
     }}
@@ -1523,6 +1594,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     document.getElementById('toggleAnalysis').addEventListener('click', event => {{
       const previousEdge = DATA.edges.find(edge => edge.edge === selectedEdgeName);
       const previousNode = nodeByName.get(selectedNodeName);
+      layoutMotionUntil = performance.now() + 200;
       analysisMode = !analysisMode;
       document.body.classList.toggle('analysis-mode', analysisMode);
       const details = document.getElementById('selectionDetails');
@@ -1536,7 +1608,8 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       if (analysisMode && previousEdge) toggleAnalysisItem('edge', previousEdge);
       else if (analysisMode && previousNode) toggleAnalysisItem('node', previousNode);
       if (analysisMode) placeAnalysisFloat();
-      requestAnimationFrame(() => {{ if (autoFitMap) fitMap(); else if (resizeMapCanvas()) applyView(); }});
+      animateUI(analysisMode ? details : document.querySelector('.side'), [{{opacity:0, transform:'translateX(8px)'}}, {{opacity:1, transform:'translateX(0)'}}], 180);
+      requestAnimationFrame(() => {{ if (autoFitMap) fitMap(200); else if (resizeMapCanvas()) applyView(200); }});
     }});
     let analysisFloatPosition = null, analysisFloatDrag = null;
     function placeAnalysisFloat(x, y) {{
@@ -1557,7 +1630,11 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     analysisFloatHandle.addEventListener('pointerdown', event => {{
       if (!analysisMode || event.button !== 0) return;
       event.preventDefault(); event.stopPropagation();
-      const box = document.getElementById('selectionDetails').getBoundingClientRect();
+      const details = document.getElementById('selectionDetails');
+      const previousBox = details.getBoundingClientRect();
+      uiAnimations.get(details)?.cancel();
+      placeAnalysisFloat(previousBox.left, previousBox.top);
+      const box = details.getBoundingClientRect();
       analysisFloatDrag = {{id:event.pointerId, x:event.clientX, y:event.clientY, left:box.left, top:box.top}};
       analysisFloatHandle.setPointerCapture(event.pointerId);
     }});
@@ -1694,7 +1771,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       view.scale = 2.6;
       view.x = mapCanvas.width / 2 - node.x * view.scale;
       view.y = mapCanvas.height / 2 - node.y * view.scale;
-      applyView();
+      applyView(220);
     }}
     nodeSearch.addEventListener('input', () => {{ if (!nodeSearch.value.trim()) commitNodeSearch(); }});
     nodeSearch.addEventListener('blur', () => commitNodeSearch());
