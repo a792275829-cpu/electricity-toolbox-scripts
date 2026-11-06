@@ -63,6 +63,8 @@
 
 ### 断面拓扑编辑的模块边界
 
-`toolbox_shared/section_schema.py` 统一现有拓扑解析、节点名称、电压和电价表头契约，原分析模块继续导出这些符号。`toolbox_shared/section_topology.py` 管理编辑节点库、Excel差异同步、版本检查和分析适配。编辑快照通过既有断面分析与HTML生成流程输出，不增加独立的判定算法。针对性验证使用 section 套件的 `test_topology_editor.py`、`test_topology_web.py` 和 toolbox 套件的 `test_section_analysis.py`。
+`toolbox_shared/section_schema.py` 统一现有拓扑解析、节点名称、电压和电价表头契约，原分析模块继续导出这些符号。`toolbox_shared/section_topology.py` 管理编辑节点库、Excel差异同步、底图标注坐标校验、简图生成、版本检查和分析适配。编辑快照通过既有断面分析与HTML生成流程输出，不增加独立的判定算法。针对性验证使用 section 套件的 `test_topology_editor.py`、`test_topology_web.py`、`test_topology_annotation.py` 和 toolbox 套件的 `test_section_analysis.py`。
 
 HTML拓扑编辑由 `toolbox_shared/topology_web.py` 提供仅绑定127.0.0.1的会话服务，资源在 `500kV断面分析/tools/topology_editor/`。服务共用 `section_topology.py` 的解析、同步、校验、版本检查和保存；工具箱页面只负责打开浏览器及接收已应用快照。`test_topology_web.py` 使用独立无界面浏览器验证手势事件与保存回读，不控制用户浏览器。
+
+底图资源与带图备份由 `toolbox_shared/section_basemap.py` 管理，原始PDF／图片只进入用户数据目录；`map_anchor` 与分析图 `anchor` 分开，旧JSON继续兼容。底图标注工作流仅将已核对的连接用于简图和分析，PDF不是线路识别器。

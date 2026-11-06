@@ -12,6 +12,7 @@ from threading import Lock, Thread
 from urllib.parse import unquote, urlparse
 
 from toolbox_shared import section_topology as model
+from toolbox_shared import section_basemap as basemap
 from toolbox_shared.storage import WORKSPACE_ROOT
 
 WEB = WORKSPACE_ROOT / '500kV断面分析/tools/topology_editor'
@@ -44,6 +45,13 @@ class BrowserEditor:
     def state(self):
         imported_initial = self.initial_data is not None
         data = self.initial_data if imported_initial else model.load_catalog()
+        if not data.get('base_map'):
+            default = basemap.default_map()
+            if default:
+                data = deepcopy(data)
+                data['base_map'] = default
+                data['schematic_generated'] = False
+                imported_initial = True
         model.validate_catalog(data)
         if self.input_path:
             imported = model.read_catalog(self.input_path)
@@ -61,7 +69,13 @@ class BrowserEditor:
             self.dirty = bool(body.get('dirty'))
             return {'ok': True}
         data = body['data']
+        if name == 'import-backup':
+            return dict(data=basemap.import_backup(data))
         model.validate_catalog(data)
+        if name == 'backup':
+            return dict(data=basemap.export_backup(data))
+        if name == 'generate':
+            return dict(data=model.generate_schematic(data, reset_layout=bool(body.get('reset_layout'))))
         if name == 'sync':
             data = model.synchronize(data, body['imported'])
             model.validate_catalog(data)
@@ -129,6 +143,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             self.authorize()
+            if path.startswith('/api/base-map/'):
+                raw = basemap.asset_path(path.removeprefix('/api/base-map/')).read_bytes()
+                self.respond(200, raw, basemap.media_type(path.removeprefix('/api/base-map/')))
+                return
             if path != '/api/state':
                 self.respond(404, {'error': '页面不存在'})
                 return
@@ -144,10 +162,15 @@ class Handler(BaseHTTPRequestHandler):
             self.authorize(writing=True)
             length = int(self.headers.get('Content-Length', '0'))
             path = urlparse(self.path).path
-            limit = 100 * 1024 * 1024 if path == '/api/read-prices' else 30 * 1024 * 1024
+            limit = 100 * 1024 * 1024 if path in ('/api/read-prices', '/api/read-map', '/api/import-backup') else 30 * 1024 * 1024
             if not 0 < length <= limit:
                 raise ValueError('文件或请求大小无效')
             raw = self.rfile.read(length)
+            if path == '/api/read-map':
+                filename = Path(unquote(self.headers.get('X-File-Name', '底图.png'))).name
+                metadata = basemap.store_image(raw, filename)
+                self.respond(200, metadata)
+                return
             if path == '/api/read-prices':
                 filename = Path(unquote(self.headers.get('X-File-Name', '节点电价.xlsx'))).name
                 if Path(filename).suffix.lower() != '.xlsx':
@@ -168,4 +191,4 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, OSError, KeyError, TypeError) as exc:
             self.respond(400, {'error': str(exc)})
         except Exception:
-            self.respond(400, {'error': '无法读取文件，请确认是有效的节点电价.xlsx或拓扑JSON'})
+            self.respond(400, {'error': '无法读取文件，请确认底图PDF／图片、节点电价.xlsx或拓扑JSON有效'})

@@ -5,3 +5,19 @@
 .primary:hover:not(:disabled){background:#195b9e;color:white}
 
 #pricesDialog{max-width:900px}.tableScroll{overflow:auto;max-height:60vh}#pricesTable{border-collapse:collapse;width:100%;font-size:15px}#pricesTable th,#pricesTable td{padding:8px;border:1px solid #dce4eb;text-align:right;min-width:90px}#pricesTable th{background:#f1f6fa}.priceDifference td{background:#fff1ce}
+
+/* Step-based annotation: the inspector takes space only when needed. */
+.steps{display:flex;align-items:center;gap:10px;padding:10px 14px;background:white;border-bottom:1px solid #dce4eb;flex-wrap:wrap}
+.steps #progress{margin-left:auto;font-size:15px;color:#52718b}
+.more{position:relative;margin:0}.more>summary{font-size:16px;padding:8px;list-style:none;font-weight:400}.more>div{position:absolute;right:0;top:100%;z-index:10;background:white;padding:8px;min-width:180px;border:1px solid #cfdae5;box-shadow:0 5px 16px #1232;border-radius:8px}.more button{width:100%;margin:3px 0}
+main{grid-template-columns:clamp(340px,29vw,460px) minmax(300px,1fr)}
+main.hasSelection{grid-template-columns:clamp(340px,27vw,460px) minmax(300px,1fr) clamp(280px,22vw,360px)}
+#inspector{display:none}main.hasSelection #inspector{display:block}
+.inspectorTitle{display:flex;align-items:center;justify-content:space-between}.inspectorTitle h2{margin:0}.inspectorTitle #closeInspector{width:auto;margin:0;padding:3px 10px;font-size:22px}
+#baseImage{pointer-events:none}#drawing{position:relative}#mapEmpty{padding:22px;line-height:1.7;color:#52718b;background:#e8f1fa}
+#annotationTools label{font-size:15px;margin:6px 0}#annotationTools button{margin-top:5px;width:100%}
+#connections button{font-size:16px}#notice{line-height:1.5}#library{padding:12px}#nodeList{scrollbar-gutter:stable}
+@media(max-width:1100px){main{grid-template-columns:310px minmax(260px,1fr)}main.hasSelection{grid-template-columns:310px minmax(260px,1fr) 270px}}
+@media(max-width:900px){main,main.hasSelection{grid-template-columns:300px minmax(260px,1fr)}main.hasSelection #inspector{grid-column:1 / -1;max-height:40vh}#drawing,#library{min-height:360px}.steps #progress{margin-left:0}}
+@media(max-width:600px){main,main.hasSelection{grid-template-columns:minmax(0,1fr)}main.hasSelection #inspector{grid-column:auto}#drawing{min-height:420px}}
+.edge.unreviewed{stroke:#b47719;stroke-dasharray:6 5}.edge.unreviewed.active{stroke:#176dc4}

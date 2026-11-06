@@ -182,6 +182,10 @@ def synchronize(data: dict, imported: dict) -> dict:
                 ambiguous = any(n['id'] not in used for n in old)
                 target = dict(id=uuid4().hex, name=item['station'], anchor=None,
                               city='', present=True, pending=ambiguous, **deepcopy(item))
+                # Share a known physical station location, never its electrical edges.
+                locations = {json.dumps(n['map_anchor'], sort_keys=True) for n in old if n.get('map_anchor') is not None}
+                if result.get('base_map') and len(locations) == 1:
+                    target['map_anchor'] = json.loads(next(iter(locations)))
                 result['nodes'].append(target)
                 added += 1
             pending += int(target['pending'])
@@ -212,6 +216,35 @@ def resolve_variant(data: dict, candidate_id: str, old_id: str | None) -> str:
     return old_id
 
 
+def generate_schematic(data: dict, *, reset_layout: bool = False) -> dict:
+    """Project annotated stations into the existing analysis coordinate system."""
+    validate_catalog(data)
+    if not data.get('base_map'):
+        raise ValueError('请先导入底图并标注站点')
+    result = deepcopy(data)
+    base = result['base_map']
+    marked = [n for n in result['nodes'] if n.get('map_anchor') is not None and n['present']]
+    confirmed = [e for e in result['edges'] if e.get('reviewed') and
+                 all(any(n['id'] == e[k] for n in marked) for k in ('a', 'b'))]
+    if not confirmed:
+        raise ValueError('请先标注线路两端，并至少核对确认一条连接')
+    groups = defaultdict(list)
+    for n in marked:
+        groups[n['station'], n['voltage']].append(n)
+    for variants in groups.values():
+        for index, n in enumerate(sorted(variants, key=lambda n: n['id'])):
+            if n.get('diagram_manual') and n['anchor'] is not None and not reset_layout:
+                continue
+            offset = (index - (len(variants)-1)/2) * max(result['image']['width'], result['image']['height']) * .04
+            n['anchor'] = dict(
+                x=max(0, min(result['image']['width'], n['map_anchor']['x']/base['width']*result['image']['width']+offset)),
+                y=n['map_anchor']['y']/base['height']*result['image']['height'])
+            n['diagram_manual'] = False
+    result['schematic_generated'] = True
+    validate_catalog(result)
+    return result
+
+
 def validate_catalog(data: dict) -> None:
     if not isinstance(data, dict) or data.get('version') != 1 or not isinstance(data.get('nodes'), list) or not isinstance(data.get('edges'), list):
         raise ValueError('拓扑文件格式无效')
@@ -226,6 +259,16 @@ def validate_catalog(data: dict) -> None:
     if not isinstance(image, dict) or any(not isinstance(image.get(k), (int, float)) or
             not math.isfinite(image[k]) or image[k] <= 0 for k in ('width', 'height')):
         raise ValueError('画布尺寸无效')
+    base = data.get('base_map')
+    if base is not None:
+        if (not isinstance(base, dict) or not isinstance(base.get('id'), str)
+                or not re.fullmatch(r'[0-9a-f]{64}', base['id'])
+                or not isinstance(base.get('name'), str)
+                or any(isinstance(base.get(k), bool) or not isinstance(base.get(k), (int, float))
+                       or not math.isfinite(base[k]) or base[k] <= 0 for k in ('width', 'height'))):
+            raise ValueError('底图信息无效')
+    if 'schematic_generated' in data and not isinstance(data['schematic_generated'], bool):
+        raise ValueError('简图状态无效')
     ids = set()
     for n in data['nodes']:
         if not isinstance(n, dict):
@@ -248,6 +291,13 @@ def validate_catalog(data: dict) -> None:
             raise ValueError('电价曲线长度与时点不一致')
         if any(v is not None and (isinstance(v, bool) or not isinstance(v, (float, int)) or not math.isfinite(v)) for v in curve):
             raise ValueError('电价曲线存在无效数值')
+        point = n.get('map_anchor')
+        if point is not None and (not base or not isinstance(point, dict) or set(point) != {'x', 'y'}
+                or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                       or not 0 <= v <= base['width' if k == 'x' else 'height'] for k, v in point.items())):
+            raise ValueError('底图标注坐标无效')
+        if 'diagram_manual' in n and not isinstance(n['diagram_manual'], bool):
+            raise ValueError('简图布局状态无效')
         anchor = n.get('anchor')
         if anchor is not None and (set(anchor) != {'x', 'y'} or any(
             isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
@@ -258,6 +308,8 @@ def validate_catalog(data: dict) -> None:
     for e in data['edges']:
         if not isinstance(e, dict) or any(not isinstance(e.get(k), str) for k in ('a', 'b', 'kind')):
             raise ValueError('线路格式无效')
+        if 'reviewed' in e and not isinstance(e['reviewed'], bool):
+            raise ValueError('线路核对状态无效')
         key = tuple(sorted((e['a'], e['b'])))
         if e['a'] not in ids or e['b'] not in ids or e['a'] == e['b'] or key in seen:
             raise ValueError('存在重复连接、自连接或不存在的端点')
@@ -295,11 +347,14 @@ def save_catalog(data: dict, path: Path | None = None, *, check_revision: bool =
 
 def analysis_selection(data: dict) -> tuple[list[dict], list[dict]]:
     validate_catalog(data)
+    if data.get('base_map') and not data.get('schematic_generated'):
+        raise ValueError('请先核对连接并生成简图，再应用到分析')
     if any(n['present'] and n['pending'] and n['voltage'] == 500 for n in data['nodes']):
         raise ValueError('500kV同站多价格仍有待确认节点，请先在拓扑编辑器中处理')
     eligible = {n['id']: n for n in data['nodes'] if n['present'] and n['voltage'] == 500
-                and n['anchor'] is not None}
-    edges = [e for e in data['edges'] if e['kind'] == 'line' and e['a'] in eligible and e['b'] in eligible]
+                and n['anchor'] is not None and (not data.get('base_map') or n.get('map_anchor') is not None)}
+    edges = [e for e in data['edges'] if e['kind'] == 'line' and e['a'] in eligible and e['b'] in eligible
+             and (not data.get('base_map') or e.get('reviewed'))]
     if not edges:
         raise ValueError('至少需要一条两端已定位、有效的500kV站间线路')
     connected = {e[k] for e in edges for k in ('a', 'b')}

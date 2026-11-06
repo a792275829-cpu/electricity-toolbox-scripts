@@ -139,7 +139,7 @@ class BrowserTests(unittest.TestCase):
         self.page.evaluate('()=>new Promise(requestAnimationFrame)')
 
     def choose(self, index):
-        self.page.locator(f'.node[data-node="{self.data["nodes"][index]["id"]}"]').press('Enter')
+        self.page.locator(f'#nodeList button[data-node-id="{self.data["nodes"][index]["id"]}"]').click()
 
     def test_trackpad_pinch_changes_canvas_scale_around_pointer(self):
         before = self.matrix()
@@ -188,6 +188,7 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(saved['edges'], self.data['edges'])
 
     def test_readable_layout_prioritizes_library_and_larger_type(self):
+        self.choose(0)
         metrics = self.page.evaluate("""()=>{
             const box=id=>document.getElementById(id).getBoundingClientRect();
             return {library:box('library').width, drawing:box('drawing').width,
@@ -269,6 +270,7 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(saved['summary']['duplicates'], 1)
         self.assertEqual(saved['edges'], self.data['edges'])
         self.assertEqual(source.read_bytes(), original)
+        self.page.locator('details.more > summary').click()
         with self.page.expect_download() as pending_download:
             self.page.get_by_role('button', name='导出备份', exact=True).click()
         backup = Path(self.temp.name)/'backup.json'
@@ -290,6 +292,7 @@ class BrowserTests(unittest.TestCase):
         self.page.once('dialog', lambda dialog: dialog.accept())
         self.page.locator('#jsonFile').set_input_files(str(path))
         self.page.locator('#notice').filter(has_text='备份已导入').wait_for()
+        self.page.get_by_text('节点清理', exact=True).click()
         self.page.once('dialog', lambda dialog: dialog.dismiss())
         self.page.locator('#cleanMissing').click()
         self.assertEqual(self.page.locator('.node').count(), 3)
