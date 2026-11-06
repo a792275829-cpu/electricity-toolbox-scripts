@@ -57,6 +57,10 @@ def name_variants(text: object, *, ocr: bool = False) -> set[str]:
     if ocr and len(value) >= 3 and value[-1:] in {"A", "B", "Y"}:
         variants.add(value[:-1])
     if ocr:
+        buses = re.fullmatch(r"([\u4e00-\u9fff]{2,8})[ABY]{1,2}", value)
+        if buses:
+            variants.add(buses.group(1))
+    if ocr:
         # OCR 偶尔会把母线字母后的线路字符黏到站名上。
         match = re.match(r"^([\u4e00-\u9fff]{2,8})[ABY](?:F|D|G|H|N|M|P|Z|\d).*$", value)
         if match:

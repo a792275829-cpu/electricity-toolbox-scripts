@@ -21,6 +21,47 @@ import test_topology_annotation as annotation
 
 
 class PrecisionTests(unittest.TestCase):
+    def test_combined_bus_suffix_is_exact_evidence_not_fuzzy_correction(self):
+        self.assertEqual(auto.vocabulary_hits('盘允BY', ['盘允','盘龙']), {'盘允'})
+        self.assertEqual(auto.vocabulary_hits('盘允XYZ', ['盘允']), set())
+        self.assertEqual(auto.vocabulary_hits('盘龙BY', ['盘允']), set())
+
+    def test_competing_station_label_abstains_without_inventing_symbol(self):
+        own = dict(id='own', box=dict(x=5982, y=2262, width=95, height=37))
+        other = dict(id='other', box=dict(x=6120, y=2220, width=60, height=30))
+        circle = dict(x=6099, y=2255, radius=30)
+        evidence = auto.competing_labels(circle, own, '目标', [('邻站', other)])
+        self.assertEqual([r['station'] for r in evidence], ['邻站'])
+        self.assertEqual(circle, dict(x=6099, y=2255, radius=30))
+        self.assertEqual(auto.competing_labels(circle, own, '目标', [('目标', other)]), [])
+
+    def test_far_label_is_not_competing_evidence(self):
+        own = self.record('目标', .99)
+        other = deepcopy(own); other.update(id='other'); other['box']['x'] = 500
+        self.assertEqual(auto.competing_labels(dict(x=80,y=100,radius=30),own,'目标',[('远站',other)]), [])
+
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_protected_neighbor_must_independently_own_circle_before_abstention(self):
+        data = annotation.annotated()
+        own, neighbor = data['nodes'][:2]
+        own.pop('map_anchor', None)
+        records = [self.record(own['station'], .99), self.record(neighbor['station'], .99)]
+        records[1].update(id='neighbor', box=dict(x=160,y=70,width=60,height=20))
+        before = deepcopy(data)
+        circle = dict(x=180,y=120,score=.9,radius=30,refined=True)
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder)/'map.png'; Image.new('RGB',(1000,700),'white').save(image)
+            for margin, expected in ((.02, 1), (.12, 0)):
+                def detect(_, box, *args, **kwargs):
+                    return [deepcopy(circle), dict(x=280,y=120,score=.9-margin if box['x']==160 else .7,
+                                                   radius=30,refined=True)]
+                with patch.object(auto.maps,'asset_path',return_value=image), patch.object(auto,'detect_circle_candidates',side_effect=detect):
+                    result = auto.prelabel(data,records=records,sample=[(own['station'],own['voltage'])])
+                self.assertEqual(result['report']['candidates'], expected)
+                self.assertEqual(result['data']['nodes'][1], before['nodes'][1])
+                self.assertEqual(result['data']['edges'], before['edges'])
+        self.assertEqual(data, before)
+
     def record(self, text='长河岭', confidence=.7):
         return dict(id='r', text=text, confidence=confidence, category='node',
                     box=dict(x=30, y=40, width=80, height=20))

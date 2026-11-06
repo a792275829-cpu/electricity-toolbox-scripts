@@ -4,6 +4,8 @@ import argparse
 from copy import deepcopy
 from hashlib import sha256
 import json
+import html
+import base64
 import math
 from pathlib import Path
 from statistics import median
@@ -65,6 +67,10 @@ def main():
     (args.output_dir/'ocr.json').write_text(json.dumps(dict(image_sha256=digest, engine=args.ocr_engine, recipe=recipe, records=records), ensure_ascii=False))
     result = prelabel(data, records=records, engine=args.ocr_engine, reviewer=reviewer, sample=sample, enhanced=not args.baseline)
     report = result['report']; report['vision_provider'] = 'offline-decisions' if args.review_decisions else args.vision
+    report['execution'] = dict(ocr_source='cache' if args.ocr_cache else 'actual-inference',
+                              ocr_cache_upgraded=bool(args.ocr_cache and cache.get('recipe') != recipe),
+                              geometry='actual-algorithm', online_vision_api_called=args.vision != 'none',
+                              independent_human_ground_truth=False)
     if args.review_decisions:
         report['review_source'] = json.loads(args.review_decisions.read_text()).get('source', '本地视觉复核记录')
     report['inputs'] = dict(image_sha256=digest, width=image.width, height=image.height,
@@ -122,6 +128,19 @@ def main():
                 d.line((a,c-12,a,c+12), fill='#00a0ff', width=2)
             sheet.paste(crop,(x+10,y+65))
     sheet.save(output/'30站小样.png')
+    preview = base64.b64encode((output/'30站小样.png').read_bytes()).decode('ascii')
+    rows_html = ''.join('<tr>'+''.join('<td>'+html.escape(str(value))+'</td>' for value in
+                        (r['station'], r['voltage'], r['text'] or '未匹配', r['point'] or '未决', r['reason']))+'</tr>'
+                        for r in report['rows'])
+    (output/'核对报告.html').write_text('<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1"><title>拓扑初标核对报告</title>'
+        '<style>body{font:16px system-ui;margin:24px;color:#17202a}td,th{border:1px solid #ccc;padding:8px}'
+        'table{border-collapse:collapse}img{max-width:100%;height:auto}pre{white-space:pre-wrap}</style>'
+        '<h1>拓扑初标核对报告</h1><p>候选均为待核对；无独立人工电压／坐标真值，候选数量不是准确率。</p>'
+        '<pre>'+html.escape(json.dumps({k:v for k,v in report.items() if k != 'rows'},ensure_ascii=False,indent=2))+'</pre>'
+        '<table><tr><th>站名</th><th>电压</th><th>OCR文字</th><th>候选</th><th>结论</th></tr>'+rows_html+'</table>'
+        '<p><a href="待核对初标.json" download>下载可导入待核对JSON</a></p>'
+        '<img alt="原图逐站候选与文字框" src="data:image/png;base64,'+preview+'"></html>', encoding='utf-8')
     # Read back the deliverable and validate it before reporting success.
     restored = maps.import_backup(json.loads((output/'待核对初标.json').read_text()))
     model.validate_catalog(restored)

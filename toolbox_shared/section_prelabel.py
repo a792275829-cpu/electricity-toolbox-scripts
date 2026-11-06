@@ -12,7 +12,7 @@ import tempfile
 
 from PIL import Image, ImageOps
 from toolbox_shared import section_basemap as maps, section_topology as model
-from toolbox_shared.section_annotation_geometry import match_text_candidates, detect_circle_candidates, name_variants, levenshtein
+from toolbox_shared.section_annotation_geometry import match_text_candidates, detect_circle_candidates, name_variants, levenshtein, rectangle_distance
 from toolbox_shared.storage import WORKSPACE_ROOT, data_path
 
 
@@ -34,6 +34,29 @@ def deduplicate(records):
 
 
 OCR_RECIPE = 'native1500-retry2x-v2'
+
+
+ALGORITHM_VERSION = 'station-ownership-abstention-bus-suffix-v6'
+
+
+def competing_labels(chosen, record, station, labels):
+    """Comparable nearby station labels make automatic circle ownership unsafe.
+
+    This is an abstention signal, not a voltage or nearest-label classifier.
+    Never switch to a lower-ranked circle after finding competing evidence.
+    """
+    own_distance = rectangle_distance(chosen['x'], chosen['y'], record['box'])
+    tolerance = chosen.get('radius', 30) * .25
+    competitors = []
+    for name, other in labels:
+        if name == station or name_variants(name) & name_variants(station):
+            continue
+        if other['id'] == record['id']:
+            continue
+        distance = rectangle_distance(chosen['x'], chosen['y'], other['box'])
+        if distance <= own_distance + tolerance:
+            competitors.append(dict(station=name, record_id=other['id'], distance=round(distance, 2)))
+    return sorted(competitors, key=lambda item: (item['distance'], item['station'], item['record_id']))
 
 
 def optional_runtime():
@@ -242,8 +265,22 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
             exact.update(by_name.get(variant, {}))
         matches[g] = match_text_candidates(g[0], list(exact.values()))
 
+    # Include protected and unsampled stations as competing evidence too.
+    labels = []
+    for station in sorted({n['station'] for n in data['nodes'] if n['present']}):
+        exact = {}
+        for variant in name_variants(station):
+            exact.update(by_name.get(variant, {}))
+        for candidate in match_text_candidates(station, list(exact.values())):
+            r = candidate.record
+            if (candidate.score >= .9 and not r.get('ocr_conflict')
+                    and (not r.get('ocr_retried') or r.get('retry_agreed'))
+                    and float(r.get('confidence', 0)) >= .8):
+                labels.append((station, r))
     selected = list(sample) if sample is not None else sample_groups(list(groups), matches, limit)
     pixels = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    label_records = {r['id']: r for _, r in labels}
+    ownership_circles = {}
     result = deepcopy(data); report = []
     for group in selected:
         texts = matches[group]
@@ -297,6 +334,26 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
                     row['vision_status'] = '已复核' if chosen else '不一致'
                     if not chosen:
                         row['reason'] = '视觉复核未通过，需人工定位'
+                if chosen and enhanced and reviewer is None:
+                    competitors = competing_labels(chosen, text.record, group[0], labels)
+                    owners = []
+                    for competitor in competitors:
+                        key = (competitor['record_id'], group[1])
+                        if key not in ownership_circles:
+                            ownership_circles[key] = detect_circle_candidates(
+                                pixels, label_records[key[0]]['box'], cv2, refine=True, voltage=key[1])
+                        options = ownership_circles[key]
+                        # The other label must independently prefer this same circle
+                        # with the existing confidence margin. Proximity alone is
+                        # insufficient in dense substations.
+                        if (options and options[0].get('refined')
+                                and math.hypot(options[0]['x']-chosen['x'], options[0]['y']-chosen['y']) < 12
+                                and options[0]['score']-(options[1]['score'] if len(options)>1 else 0) >= .04):
+                            owners.append(competitor)
+                    if owners:
+                        row['competing_labels'] = owners
+                        row['reason'] = '圆点附近有其他站名归属竞争，需视觉或人工核对'
+                        chosen = None
                 if chosen:
                     row['ocr_record_id'] = text.record['id']
                     row['ocr_retried'] = text.record.get('ocr_retried', False)
@@ -320,7 +377,7 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
                     n['map_candidate'] = deepcopy(candidate)
         report.append(row)
     model.validate_catalog(result)
-    return dict(data=result, report=dict(engine=engine, recipe=OCR_RECIPE if enhanced else 'native1500-baseline', tiles=len(tiles(*image.size)), ocr_boxes=len(records),
+    return dict(data=result, report=dict(engine=engine, algorithm_version=ALGORITHM_VERSION if enhanced else 'baseline', recipe=OCR_RECIPE if enhanced else 'native1500-baseline', tiles=len(tiles(*image.size)), ocr_boxes=len(records),
                                         ocr_retried=sum(bool(r.get('ocr_retried')) for r in records),
                                         ocr_conflicts=sum(bool(r.get('ocr_conflict')) for r in records),
                                         sample_selection='fixed' if sample is not None else 'ocr-stratified-exploration', sampled=len(report),
