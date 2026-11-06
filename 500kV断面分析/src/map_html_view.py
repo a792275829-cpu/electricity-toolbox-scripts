@@ -424,7 +424,27 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       aspect-ratio:360 / 280;
       touch-action:pan-y;
     }}
-    .analysis-mode {{ --side-width:clamp(480px, 38vw, 720px); }}
+    .analysis-mode .app {{ grid-template-columns:1fr; }}
+    .analysis-mode .side {{ display:none; }}
+    .analysis-mode .map-pane {{ height:100dvh; }}
+    .analysis-mode .map-shell {{ flex:1; min-height:0; }}
+    .analysis-mode #map {{ flex:1; height:100%; min-height:0; max-height:none; aspect-ratio:auto; }}
+    .analysis-mode #selectionDetails {{
+      position:fixed; z-index:40; width:min(480px, calc(100vw - 24px));
+      max-height:calc(100dvh - 112px); overflow:auto; padding:12px;
+      border:1px solid rgba(100,130,160,.3); border-radius:12px;
+      background:rgba(255,255,255,.22); backdrop-filter:blur(3px);
+      box-shadow:0 8px 32px rgba(30,50,70,.12);
+    }}
+    .analysis-mode #selectionDetails.analysis-float-hidden {{ display:none; }}
+    .analysis-mode #detailTitle {{ cursor:grab; touch-action:none; user-select:none; font-size:14px; padding:4px 0 8px; }}
+    .analysis-mode #detailTitle::before {{ content:'⠿'; color:var(--muted); margin-right:8px; }}
+    .analysis-mode #detailTitle:active {{ cursor:grabbing; }}
+    .analysis-mode #detailTitle:focus-visible {{ outline:2px solid var(--blue); outline-offset:2px; }}
+    .analysis-mode .chart-wrap, .analysis-mode #priceChart {{ background:transparent; }}
+    .analysis-mode .chart-wrap {{ padding:4px; margin-top:8px; }}
+    .analysis-mode .analysis-selection {{ max-height:72px; }}
+    .analysis-mode .analysis-legend {{ max-height:140px; }}
     .analysis-mode .side-header, .analysis-mode #sectionSearch,
     .analysis-mode #sectionList, .analysis-mode .detail-divider {{ display:none; }}
     .analysis-selection {{ display:flex; flex-wrap:wrap; gap:6px; max-height:120px; overflow:auto; margin-top:8px; }}
@@ -1310,7 +1330,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       if (!details.hidden) return;
       details.hidden = false;
       detailsAnimation?.cancel();
-      if (!flowMotionPreference.matches) {{
+      if (!analysisMode && !flowMotionPreference.matches) {{
         detailsAnimation = details.animate([
           {{opacity:0, transform:'translateY(6px)'}},
           {{opacity:1, transform:'translateY(0)'}}
@@ -1453,6 +1473,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       legend.hidden = false;
       drawChart(null, null, null, series);
       updateAnalysisReadout(topologyTimeIndices[topologyTimeSlot]);
+      placeAnalysisFloat();
     }}
 
     document.getElementById('toggleAnalysis').addEventListener('click', event => {{
@@ -1460,11 +1481,63 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       const previousNode = nodeByName.get(selectedNodeName);
       analysisMode = !analysisMode;
       document.body.classList.toggle('analysis-mode', analysisMode);
+      const details = document.getElementById('selectionDetails');
+      (analysisMode ? document.body : document.querySelector('.side')).prepend(details);
+      const handle = document.getElementById('detailTitle');
+      handle.tabIndex = analysisMode ? 0 : -1;
+      handle.title = analysisMode ? '拖动移动曲线框；聚焦后用方向键移动' : '';
+      if (!analysisMode) {{ details.style.left = ''; details.style.top = ''; details.style.maxHeight = ''; }}
       event.currentTarget.setAttribute('aria-pressed', String(analysisMode));
       clearSelection();
       if (analysisMode && previousEdge) toggleAnalysisItem('edge', previousEdge);
       else if (analysisMode && previousNode) toggleAnalysisItem('node', previousNode);
+      if (analysisMode) placeAnalysisFloat();
+      requestAnimationFrame(() => {{ if (autoFitMap) fitMap(); else if (resizeMapCanvas()) applyView(); }});
     }});
+    let analysisFloatPosition = null, analysisFloatDrag = null;
+    function placeAnalysisFloat(x, y) {{
+      if (!analysisMode) return;
+      const details = document.getElementById('selectionDetails');
+      const topLimit = Math.max(8, document.querySelector('.map-toolbar').getBoundingClientRect().bottom + 8);
+      details.style.maxHeight = Math.max(120, innerHeight - topLimit - 8) + 'px';
+      const box = details.getBoundingClientRect();
+      const point = analysisFloatPosition || {{x: innerWidth - box.width - 16, y: 104}};
+      analysisFloatPosition = {{
+        x: Math.max(8, Math.min(innerWidth - box.width - 8, x ?? point.x)),
+        y: Math.max(topLimit, Math.min(innerHeight - box.height - 8, y ?? point.y))
+      }};
+      details.style.left = analysisFloatPosition.x + 'px';
+      details.style.top = analysisFloatPosition.y + 'px';
+    }}
+    const analysisFloatHandle = document.getElementById('detailTitle');
+    analysisFloatHandle.addEventListener('pointerdown', event => {{
+      if (!analysisMode || event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      const box = document.getElementById('selectionDetails').getBoundingClientRect();
+      analysisFloatDrag = {{id:event.pointerId, x:event.clientX, y:event.clientY, left:box.left, top:box.top}};
+      analysisFloatHandle.setPointerCapture(event.pointerId);
+    }});
+    analysisFloatHandle.addEventListener('pointermove', event => {{
+      const drag = analysisFloatDrag;
+      if (!drag || drag.id !== event.pointerId) return;
+      placeAnalysisFloat(drag.left + event.clientX - drag.x, drag.top + event.clientY - drag.y);
+    }});
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(type =>
+      analysisFloatHandle.addEventListener(type, () => {{ analysisFloatDrag = null; }}));
+    analysisFloatHandle.addEventListener('keydown', event => {{
+      if (!analysisMode || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) return;
+      event.preventDefault(); event.stopPropagation();
+      const box = document.getElementById('selectionDetails').getBoundingClientRect();
+      const step = event.shiftKey ? 40 : 10;
+      placeAnalysisFloat(box.left + (event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0),
+        box.top + (event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0));
+    }});
+    window.addEventListener('resize', () => {{ if (analysisMode) placeAnalysisFloat(); }});
+    document.addEventListener('analysisviewchange', () => {{
+      document.getElementById('selectionDetails').classList.toggle('analysis-float-hidden', document.querySelector('.app').hidden);
+      if (analysisMode && !document.querySelector('.app').hidden) placeAnalysisFloat();
+    }});
+
     document.getElementById('clearAnalysis').addEventListener('click', () => clearSelection());
 
     function renderSectionList() {{
