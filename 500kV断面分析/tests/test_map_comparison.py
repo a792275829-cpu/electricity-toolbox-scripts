@@ -173,3 +173,19 @@ class MapComparisonTests(unittest.TestCase):
         self.assertRegex(self.page.locator('#analysisLegend [data-node="甲"]').inner_text(), r'^\d+\.00$')
         self.assertEqual(self.series(), ['甲', '乙'])
         self.assertLessEqual(self.page.evaluate('document.documentElement.scrollWidth'), 391)
+
+    def test_timeline_colors_cover_start_and_distinguish_missing_prices(self):
+        slider = self.page.locator('#topologyTime')
+        gradient = slider.evaluate('(el) => el.style.getPropertyValue("--congestion-gradient")')
+        self.assertIn('hsl(120 72% 42%) 0%', gradient)
+        self.assertIn('100%', gradient)
+        self.assertIn('calc(9px + (100% - 18px)', gradient)
+        self.assertIn('零触发', slider.get_attribute('title'))
+        self.assertEqual(self.page.evaluate('timelineCongestion[0]'), 0)
+        self.assertTrue(self.page.evaluate('CSS.supports("background-image", document.getElementById("topologyTime").style.getPropertyValue("--congestion-gradient"))'))
+        # Real gaps must stay gray instead of being painted as zero congestion.
+        self.page.evaluate('DATA.nodes.forEach(node => { node.prices[0] = null; }); refreshTimelineBand();')
+        self.assertIsNone(self.page.evaluate('timelineCongestion[0]'))
+        self.assertIsNone(self.page.evaluate('timelineCongestion[1]'))
+        self.assertIn('#cbd5e1 0%', slider.evaluate('(el) => el.style.getPropertyValue("--congestion-gradient")'))
+        self.assertIn('数据不足', slider.get_attribute('title'))

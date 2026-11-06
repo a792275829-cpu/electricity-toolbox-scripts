@@ -685,7 +685,13 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
 
     function refreshTimelineBand() {{
       topologyTimeIndices.forEach((index, slot) => {{
-        if (index <= 0) {{ timelineCongestion[slot] = null; return; }}
+        if (index < 0) {{ timelineCongestion[slot] = null; return; }}
+        if (index === 0) {{
+          // The first observation has zero triggering intervals, not missing prices.
+          timelineCongestion[slot] = DATA.edges.some(edge =>
+            [nodeByName.get(edge.a)?.prices[index], nodeByName.get(edge.b)?.prices[index]].every(Number.isFinite)) ? 0 : null;
+          return;
+        }}
         const hasData = DATA.edges.some(edge => {{
           const a = nodeByName.get(edge.a)?.prices, b = nodeByName.get(edge.b)?.prices;
           return [a?.[index], b?.[index], a?.[index-1], b?.[index-1]].every(Number.isFinite);
@@ -695,16 +701,24 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
           : null;
       }});
       timelineMax = Math.max(0, ...timelineCongestion.filter(Number.isFinite));
+      // Match the 96 slot centers to the thumb's 9px inset and split at midpoints.
+      const boundary = index => index === 0 ? '0%' : index === 96 ? '100%'
+        : `calc(9px + (100% - 18px) * ${{(index - .5) / 95}})`;
       const stops = timelineCongestion.flatMap((value, i) => {{
         const ratio = value === null ? null : (timelineMax ? value / timelineMax : 0);
         const color = ratio === null ? '#cbd5e1' : `hsl(${{120 * (1 - ratio)}} 72% 42%)`;
-        return [`${{color}} ${{i / 96 * 100}}%`, `${{color}} ${{(i+1) / 96 * 100}}%`];
+        return [`${{color}} ${{boundary(i)}}`, `${{color}} ${{boundary(i+1)}}`];
       }});
       document.getElementById('topologyTime').style.setProperty('--congestion-gradient', `linear-gradient(to right, ${{stops.join(',')}})`);
       const strength = timelineCongestion[topologyTimeSlot];
-      document.getElementById('topologyTime').title = strength === null
-        ? `${{topologyTimes[topologyTimeSlot]}}：数据不足`
-        : `${{topologyTimes[topologyTimeSlot]}}：触发断面价差合计 ${{strength.toFixed(2)}} 元/MWh`;
+      document.getElementById('topologyTime').title = timelineStrengthTitle(topologyTimeSlot, strength);
+    }}
+
+    function timelineStrengthTitle(slot, strength) {{
+      const time = topologyTimes[slot];
+      if (strength === null) return `${{time}}：数据不足`;
+      if (topologyTimeIndices[slot] === 0) return `${{time}}：起始时点，尚不判定涨跌（零触发）`;
+      return `${{time}}：触发断面价差合计 ${{strength.toFixed(2)}} 元/MWh`;
     }}
 
     function clampView() {{
@@ -1598,7 +1612,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       const slider = document.getElementById('topologyTime');
       slider.value = String(topologyTimeSlot);
       const strength = timelineCongestion[topologyTimeSlot];
-      slider.title = strength === null ? `${{time}}：数据不足` : `${{time}}：触发断面价差合计 ${{strength.toFixed(2)}} 元/MWh`;
+      slider.title = timelineStrengthTitle(topologyTimeSlot, strength);
 
       slider.parentElement.style.setProperty('--time-progress', String(topologyTimeSlot / 95));
       slider.setAttribute('aria-valuetext', time);
