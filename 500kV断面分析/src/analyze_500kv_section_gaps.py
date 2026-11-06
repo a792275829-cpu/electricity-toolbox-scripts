@@ -2,25 +2,25 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
 from openpyxl import Workbook, load_workbook
 
+# Legacy standalone scripts import src before their own workspace bootstrap.
+_workspace = str(Path(__file__).resolve().parents[2])
+if _workspace not in sys.path:
+    sys.path.insert(0, _workspace)
 
-TIME_HEADER_RE = re.compile(r"^\d{2}:\d{2}$")
-NODE_VOLTAGE_RE = re.compile(r"(?<!\d)(\d+)\s*[_-]?\s*k\s*v", re.IGNORECASE)
-SECTION_2_RE = re.compile(r"^##\s+2\.")
-SECTION_NEXT_RE = re.compile(r"^##\s+3\.")
+from toolbox_shared.section_schema import (
+    TIME_HEADER_RE, NODE_VOLTAGE_RE, SECTION_2_RE, SECTION_NEXT_RE, TopologyEdge,
+    parse_topology_edges, price_node_voltage, normalize_price_node_name, _column_map,
+)
+
+
 MIN_SECTION_INTERVALS = 4
-
-
-@dataclass(frozen=True)
-class TopologyEdge:
-    group: str
-    a: str
-    b: str
 
 
 @dataclass(frozen=True)
@@ -140,52 +140,6 @@ def analyze_section_gaps(
     )
 
 
-def parse_topology_edges(topology_path: Path) -> tuple[list[TopologyEdge], list[tuple[str, str, str]]]:
-    in_section = False
-    current_group = ""
-    edges = []
-    seen: set[tuple[str, str]] = set()
-    skipped_duplicates = []
-
-    for raw_line in Path(topology_path).read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not in_section:
-            in_section = bool(SECTION_2_RE.match(line))
-            continue
-
-        if SECTION_NEXT_RE.match(line):
-            break
-        if not line:
-            continue
-        if line.startswith("### "):
-            current_group = line[4:].strip()
-            continue
-        if not current_group:
-            continue
-
-        if "：" in line:
-            a, neighbors_text = (value.strip() for value in line.split("：", 1))
-            parts = [f"{a}-{neighbor.strip()}" for neighbor in re.split(r"[，,、]", neighbors_text) if neighbor.strip()]
-        else:
-            parts = re.split(r"[，,、]", line)
-
-        for part in parts:
-            part = part.strip()
-            if not part or "-" not in part:
-                continue
-            a, b = (value.strip() for value in part.split("-", 1))
-            edge_key = tuple(sorted((a, b)))
-            if edge_key in seen:
-                skipped_duplicates.append((a, b, current_group))
-                continue
-            seen.add(edge_key)
-            edges.append(TopologyEdge(current_group, a, b))
-
-    if not edges:
-        raise ValueError(f"拓扑文件未解析到“## 2.”下的边: {topology_path}")
-    return edges, skipped_duplicates
-
-
 def read_price_workbook(workbook_path: Path) -> tuple[list[str], list[dict[str, object]]]:
     workbook = load_workbook(workbook_path, read_only=True, data_only=True)
     try:
@@ -228,11 +182,17 @@ def read_price_workbook(workbook_path: Path) -> tuple[list[str], list[dict[str, 
 
 def match_price_rows(topology_nodes: Iterable[str], price_rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
     price_rows = [row for row in price_rows if price_node_voltage(row["raw_name"]) in (None, 500)]
+    by_raw_name = {}
+    for row in price_rows:
+        by_raw_name.setdefault(row['raw_name'], row)
     by_normalized_name: dict[str, list[dict[str, object]]] = {}
     for row in price_rows:
         by_normalized_name.setdefault(row["normalized_name"], []).append(row)
     matched = {}
     for node in topology_nodes:
+        if node in by_raw_name:
+            matched[node] = by_raw_name[node]
+            continue
         candidates = by_normalized_name.get(node, [])
         if not candidates:
             candidates = [row for row in price_rows if node in str(row["raw_name"])]
@@ -241,27 +201,6 @@ def match_price_rows(topology_nodes: Iterable[str], price_rows: list[dict[str, o
 
         matched[node] = min(candidates, key=lambda row: _price_row_priority(str(row["raw_name"])))
     return matched
-
-
-def price_node_voltage(name: object) -> int | None:
-    """Use the final voltage label (the earlier label may describe the station)."""
-    labels = NODE_VOLTAGE_RE.findall("" if name is None else str(name))
-    return int(labels[-1]) if labels else None
-
-
-def normalize_price_node_name(name: object) -> str:
-    text = "" if name is None else str(name).strip()
-    text = re.sub(r"^其他", "", text)
-    text = text.replace("开关站", "")
-    text = text.replace("换流站", "")
-    text = text.replace("站", "")
-    text = text.replace("变", "")
-    text = re.sub(r"\(500kV\)", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"500\s*kV.*$", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"220\s*kV.*$", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"#.*$", "", text)
-    text = re.sub(r"\d+母$", "", text)
-    return text.strip()
 
 
 def summarize_edges(records: list[dict[str, object]], time_headers: list[str]) -> list[dict[str, object]]:
@@ -326,24 +265,6 @@ def write_analysis_workbook(path: Path, sheets: list[tuple[str, list[dict[str, o
         sheet.freeze_panes = "A2"
 
     workbook.save(path)
-
-
-def _column_map(header: tuple[object, ...]) -> dict[str, object] | None:
-    cleaned = ["" if value is None else str(value).strip() for value in header]
-    try:
-        node_index = cleaned.index("节点名称")
-    except ValueError:
-        return None
-
-    time_columns = [index for index, value in enumerate(cleaned) if TIME_HEADER_RE.match(value)]
-    if not time_columns:
-        return None
-
-    return {
-        "node": node_index,
-        "time_columns": time_columns,
-        "time_headers": [cleaned[index] for index in time_columns],
-    }
 
 
 def _price_row_priority(raw_name: str) -> tuple[int, str]:

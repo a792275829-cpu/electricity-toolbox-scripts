@@ -45,14 +45,14 @@ def main() -> None:
 
     frame.columnconfigure(1, weight=1)
 
-    topology_entry = row("拓扑 Markdown", 0)
+    topology_entry = row("拓扑文件", 0)
     topology_entry.configure(textvariable=topology_var)
 
     def choose_topology() -> None:
         path = filedialog.askopenfilename(
-            title="选择拓扑 Markdown",
+            title="选择拓扑 Markdown 或编辑器 JSON",
             initialfile=topology_var.get(),
-            filetypes=[("Markdown", "*.md"), ("All files", "*.*")],
+            filetypes=[("拓扑文件", "*.md *.json"), ("All files", "*.*")],
         )
         if path:
             topology_var.set(path)

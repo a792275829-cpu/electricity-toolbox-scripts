@@ -110,6 +110,7 @@ class SectionAnalysisPageTests(unittest.TestCase):
         )
 
         actions = [widget.cget("text") for widget in page.actions.winfo_children()]
+        self.assertIn("拓扑编辑", actions)
         self.assertEqual(actions[-2:], ["开始分析", "打开结果目录"])
         self.assertFalse(hasattr(page, "open_latest_button"))
         self.assertFalse(hasattr(page, "threshold"))
@@ -121,6 +122,19 @@ class SectionAnalysisPageTests(unittest.TestCase):
         self.assertNotIn("--keep-processed", command)
         self.assertNotIn("--no-keep-processed", command)
         self.assertEqual(command[-1], "/tmp/prices.xlsx")
+
+    def test_editor_entry_reuses_open_window_and_applies_json_path(self) -> None:
+        from toolbox.section_analysis_page import SectionAnalysisPage
+        page = SectionAnalysisPage(self.root, self.paths, self.registry)
+        with patch('toolbox.topology_editor.TopologyEditor') as editor_class:
+            page.open_topology_editor()
+            callback = editor_class.call_args.kwargs['on_apply']
+            callback(Path('/tmp/applied.json'))
+            self.assertEqual(page.topology_path.get(), '/tmp/applied.json')
+            editor_class.return_value.winfo_exists.return_value = True
+            page.open_topology_editor()
+            editor_class.assert_called_once()
+            editor_class.return_value.lift.assert_called_once()
 
     def test_success_opens_all_generated_html_in_default_browser(self) -> None:
         from toolbox.section_analysis_page import SectionAnalysisPage, result_html_name

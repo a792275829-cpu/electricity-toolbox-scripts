@@ -59,3 +59,7 @@
 结果目录须不存在且位于应用包之外。`--isolate-bytecode-cache` 使用独立空缓存前缀并禁止写字节码，避免 `.pyc` 数量不同污染启动结论。结果 JSON 原子增量保存，保留逐次耗时、进程树 RSS、macOS 物理内存账本峰值、采样 CPU、输出一致性摘要及配对 bootstrap 区间。工作数据／浏览器 profile 用后清理；失败日志保留，超时仅终止本次工作进程组。可用 `--cases` 选择场景。
 
 物理内存账本不是整机内存压力；RSS 可能重复计算共享页，短命进程和瞬时峰值也可能漏采。OS 文件缓存不清空，不称为冷开机测试。预测线程固定为 4；合成离线结果不能代替真实网站、低内存 Mac、耗电及整个 Tauri 应用的业务验收。脚本仅用于开发验证，不进入发行 payload，也不新增用户端依赖。
+
+### 断面拓扑编辑的模块边界
+
+`toolbox_shared/section_schema.py` 统一现有拓扑解析、节点名称、电压和电价表头契约，原分析模块继续导出这些符号。`toolbox_shared/section_topology.py` 管理编辑节点库、Excel差异同步、版本检查和分析适配；`电力工具箱/toolbox/topology_editor.py` 只负责原生界面。编辑快照通过既有断面分析与HTML生成流程输出，不增加独立的判定算法。针对性验证使用 section 套件的 `test_topology_editor.py` 和 toolbox 套件的 `test_topology_editor_ui.py`。

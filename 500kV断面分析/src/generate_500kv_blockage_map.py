@@ -70,6 +70,8 @@ def _run_pipeline(
     html_path: Path,
     processed_price_path: Path,
 ) -> BlockageMapResult:
+    if topology_path.suffix.lower() == '.json':
+        return _run_editor_pipeline(topology_path, raw_price_path, output_dir, threshold, html_path)
     dedupe_result = process_workbook(
         raw_price_path,
         processed_price_path,
@@ -100,6 +102,28 @@ def _run_pipeline(
         flagged_intervals=analysis_result.flagged_intervals,
     )
 
+
+
+def _run_editor_pipeline(topology_path, raw_price_path, work_dir, threshold, html_path):
+    from toolbox_shared.section_topology import (
+        load_catalog, read_catalog, synchronize, materialize_analysis,
+    )
+    # Re-read each day's workbook; saved curves never stand in for new input data.
+    imported = read_catalog(raw_price_path)
+    current = synchronize(load_catalog(topology_path), imported)
+    from src.node_city_catalog import NODE_CITY
+    from toolbox_shared.section_schema import normalize_price_node_name
+    cities = {normalize_price_node_name(name): city for name, city in NODE_CITY.items()}
+    for node in current['nodes']:
+        if not node.get('city'):
+            node['city'] = cities.get(node['station'], '')
+    topology, processed, positions = materialize_analysis(current, work_dir / 'editor')
+    analysis = analyze_section_gaps(topology, processed, work_dir, threshold, export_workbook=False)
+    build_map_html(topology, raw_price_path, processed, analysis.output_path, html_path,
+                   node_positions_path=positions, analysis_data=analysis.data, threshold=threshold)
+    return BlockageMapResult(html_path, analysis.matched_nodes,
+                            max(0, imported['rows']-analysis.matched_nodes),
+                            analysis.flagged_edges, analysis.flagged_intervals)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="由原始节点电价Excel一键生成广东500kV阻塞断面地图。")

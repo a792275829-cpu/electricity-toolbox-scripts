@@ -72,7 +72,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="批量生成广东500kV节点断面分析网页。")
     parser.add_argument("raw_prices", nargs="+", type=Path, help="原始节点电价 Excel，可传多个")
     parser.add_argument("--output-root", required=True, type=Path, help="结果根目录")
-    parser.add_argument("--topology", default=DEFAULT_TOPOLOGY, type=Path, help="500kV拓扑 Markdown")
+    parser.add_argument("--topology", default=DEFAULT_TOPOLOGY, type=Path, help="拓扑 Markdown 或编辑器 JSON")
     parser.add_argument("--threshold", default=80.0, type=float, help="价差阈值，默认80元/MWh")
     args = parser.parse_args()
     run_many(

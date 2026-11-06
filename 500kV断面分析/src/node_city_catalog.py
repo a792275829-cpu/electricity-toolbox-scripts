@@ -43,8 +43,18 @@ CITY_NODES = {
 NODE_CITY = {node: city for city, names in CITY_NODES.items() for node in names.split("、")}
 
 
-def price_hierarchy(names):
+def price_hierarchy(names, city_overrides=None):
     names = set(names)
+    if city_overrides:
+        cities = {**NODE_CITY, **city_overrides}
+        result = [{"name": region, "cities": [
+            {"name": city, "nodes": sorted(n for n in names if cities.get(n) == city)}
+            for city in region_cities]} for region, region_cities in REGIONS]
+        known = {city for _, region_cities in REGIONS for city in region_cities}
+        unknown = sorted(n for n in names if cities.get(n) not in known)
+        if unknown:
+            result.append({"name": "未分类", "cities": [{"name": "待确认", "nodes": unknown}]})
+        return result
     result = [{"name": region, "cities": [
         {"name": city, "nodes": [n for n in CITY_NODES[city].split("、") if n in names]}
         for city in cities]} for region, cities in REGIONS]

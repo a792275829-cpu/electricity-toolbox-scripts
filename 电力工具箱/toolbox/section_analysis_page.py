@@ -7,6 +7,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from toolbox_shared.file_button import FileSelectButton
+from toolbox_shared.section_topology import applied_path
 
 from .file_dialogs import FileDialogState
 from .page_support import add_path_row, open_directory
@@ -40,7 +41,7 @@ class SectionAnalysisPage(ToolPage):
         )
         self.topology_path = tk.StringVar(
             master=self,
-            value=str(paths.section_analysis_topology),
+            value=str(applied_path() if applied_path().exists() else paths.section_analysis_topology),
         )
 
         self.add_button = FileSelectButton(self.actions, text="添加电价文件", command=self.add_files)
@@ -49,6 +50,8 @@ class SectionAnalysisPage(ToolPage):
         self.remove_button.pack(side="left", padx=(8, 0))
         self.clear_button = ttk.Button(self.actions, text="清空列表", command=self.clear_files)
         self.clear_button.pack(side="left", padx=(8, 0))
+        self.editor_button = ttk.Button(self.actions, text="拓扑编辑", command=self.open_topology_editor)
+        self.editor_button.pack(side="left", padx=(8, 0))
         self.run_button = ttk.Button(self.actions, text="开始分析", command=self.start_analysis)
         self.run_button.pack(side="left", padx=(16, 0))
         self.open_output_button = ttk.Button(
@@ -92,10 +95,29 @@ class SectionAnalysisPage(ToolPage):
             self.remove_button,
             self.clear_button,
             self.run_button,
+            self.editor_button,
             topology_button,
             output_button,
         )
         self.append_log("请添加日前或实时节点电价 Excel 后开始分析。")
+
+    def open_topology_editor(self) -> None:
+        from .topology_editor import TopologyEditor
+        editor = getattr(self, '_topology_editor', None)
+        if editor is not None and editor.winfo_exists():
+            editor.lift()
+            return
+        try:
+            self._topology_editor = TopologyEditor(
+                self, input_path=self.files[0] if len(self.files) == 1 else None,
+                on_apply=lambda path: self.topology_path.set(str(path)),
+            )
+        except (ValueError, OSError) as exc:
+            messagebox.showerror('拓扑编辑', str(exc), parent=self)
+
+    def confirm_close(self) -> bool:
+        editor = getattr(self, '_topology_editor', None)
+        return editor.close() if editor is not None and editor.winfo_exists() else True
 
     def set_files(self, paths: list[Path]) -> None:
         self.files = list(paths)
@@ -131,9 +153,9 @@ class SectionAnalysisPage(ToolPage):
 
     def choose_topology(self) -> None:
         selected = filedialog.askopenfilename(
-            title="选择500kV拓扑 Markdown",
+            title="选择拓扑 Markdown 或已应用的编辑拓扑 JSON",
             initialdir=str(Path(self.topology_path.get()).expanduser().parent),
-            filetypes=[("Markdown 文件", "*.md"), ("所有文件", "*.*")],
+            filetypes=[("拓扑文件", "*.md *.json"), ("所有文件", "*.*")],
             parent=self,
         )
         if selected:

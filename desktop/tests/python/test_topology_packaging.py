@@ -29,6 +29,9 @@ class TopologyPackagingTests(unittest.TestCase):
             files = {p.relative_to(source).as_posix(): prepare_workspace.digest(p)
                      for p in source.rglob("*") if p.is_file()}
             self.assertIn(TOPOLOGY.as_posix(), files)
+            for resource in ('toolbox_shared/section_schema.py', 'toolbox_shared/section_topology.py',
+                             '电力工具箱/toolbox/topology_editor.py'):
+                self.assertIn(resource, files)
             (payload / "manifest.json").write_text(json.dumps({
                 "layout": 2, "version": "test", "build": "topology-test", "files": files,
             }))
@@ -47,6 +50,9 @@ class TopologyPackagingTests(unittest.TestCase):
                 "from src.analyze_500kv_section_gaps import parse_topology_edges; "
                 "path = ToolPaths(Path.cwd()).section_analysis_topology; "
                 "edges, duplicates = parse_topology_edges(path); "
+                "from toolbox_shared.section_topology import seed_catalog, validate_catalog; "
+                "from toolbox.topology_editor import TopologyEditor; "
+                "validate_catalog(seed_catalog()); "
                 "assert edges; print(f'{len(edges)} edges, {len(duplicates)} duplicates')",
             ], cwd=installed, capture_output=True, text=True, check=True)
             self.assertIn("edges", result.stdout)
