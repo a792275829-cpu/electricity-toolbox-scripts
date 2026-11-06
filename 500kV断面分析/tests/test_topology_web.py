@@ -130,7 +130,7 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.errors, [])
 
     def matrix(self):
-        return self.page.locator('#view').evaluate('(g)=>{const m=g.transform.baseVal.consolidate().matrix;return {k:m.a,x:m.e,y:m.f};}')
+        return self.page.locator('#view').evaluate('(g)=>{const m=g.transform.baseVal.consolidate().matrix;return {k:Number(g.ownerSVGElement.dataset.viewScale),x:m.e,y:m.f};}')
 
     def wheel(self, dx, dy, ctrl=False):
         prevented = self.page.locator('#canvas').evaluate('''(e,payload)=>{const v=new WheelEvent('wheel',{bubbles:true,cancelable:true,...payload});e.dispatchEvent(v);return v.defaultPrevented;}''',
@@ -152,6 +152,38 @@ class BrowserTests(unittest.TestCase):
         self.assertAlmostEqual((py-before['y'])/before['k'], (py-after['y'])/after['k'], places=2)
         self.assertEqual(self.page.evaluate('window.devicePixelRatio'), 1)
         self.assertEqual(self.page.locator('body').evaluate('(e)=>getComputedStyle(e).zoom'), '1')
+
+    def test_zoom_preserves_node_text_and_line_sizes_and_model_coordinates(self):
+        def sizes():
+            return self.page.locator('#canvas').evaluate("""svg=>{
+                const circle=svg.querySelector('.node circle'), text=svg.querySelector('.node text');
+                const rect=circle.getBoundingClientRect(), line=svg.querySelector('.edge');
+                return {diameter:rect.width, font:parseFloat(getComputedStyle(text).fontSize),
+                        textScale:text.getScreenCTM().a, width:parseFloat(getComputedStyle(line).strokeWidth),
+                        lineScale:line.getScreenCTM().a,
+                        distance:Math.hypot(line.x2.baseVal.value-line.x1.baseVal.value,
+                                            line.y2.baseVal.value-line.y1.baseVal.value)};
+            }""")
+        before = sizes()
+        self.wheel(0, -35, True)
+        after = sizes()
+        self.assertGreater(after['distance'], before['distance'])
+        for field in ('diameter', 'font', 'textScale', 'width', 'lineScale'):
+            self.assertAlmostEqual(after[field], before[field], places=4, msg=field)
+        self.assertAlmostEqual(after['diameter'], 14)
+        self.assertAlmostEqual(after['font'], 12)
+        self.assertAlmostEqual(after['width'], 2)
+        self.page.locator('#canvas').dispatch_event('gesturestart', {'scale': 1})
+        self.page.locator('#canvas').evaluate("e=>{const v=new Event('gesturechange',{cancelable:true});v.scale=.8;e.dispatchEvent(v);}")
+        self.page.evaluate('()=>new Promise(requestAnimationFrame)')
+        self.page.locator('#canvas').dispatch_event('gestureend')
+        for field in ('diameter', 'font', 'textScale', 'width', 'lineScale'):
+            self.assertAlmostEqual(sizes()[field], before[field], places=4, msg=field)
+        self.page.locator('#save').click()
+        self.page.locator('#notice').filter(has_text='草稿已保存').wait_for()
+        saved = model.load_catalog()
+        self.assertEqual(saved['nodes'], self.data['nodes'])
+        self.assertEqual(saved['edges'], self.data['edges'])
 
     def test_two_finger_scroll_pans_without_zoom_and_full_map_resets(self):
         before = self.matrix(); self.wheel(37, 55); after = self.matrix()

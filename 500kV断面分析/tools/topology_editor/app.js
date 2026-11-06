@@ -88,11 +88,13 @@ function render() {
 }
 function draw() {
   if(!data)return;
-  $('view').setAttribute('transform',`translate(${view.x} ${view.y}) scale(${view.k})`);
+  // Project positions into screen pixels; glyphs and strokes never inherit camera scale.
+  $('view').setAttribute('transform',`translate(${view.x} ${view.y})`);
+  svg.dataset.viewScale=view.k;
   $('zoomValue').textContent=Math.round(view.k/fitScale*100)+'%';
   $('edges').replaceChildren();$('nodes').replaceChildren();$('preview').replaceChildren();
   for(const e of data.edges){const a=node(e.a),b=node(e.b);if(!visible(a)||!visible(b))continue;
-    const group=sEl('g',{'data-edge':key(e)}),attrs={x1:a.anchor.x,y1:a.anchor.y,x2:b.anchor.x,y2:b.anchor.y};
+    const group=sEl('g',{'data-edge':key(e)}),attrs={x1:a.anchor.x*view.k,y1:a.anchor.y*view.k,x2:b.anchor.x*view.k,y2:b.anchor.y*view.k};
     group.append(sEl('line',{...attrs,class:'edgeHit'}),sEl('line',{...attrs,class:'edge'+(edge===key(e)?' active':'')+(e.kind==='transformer'?' transformer':'')}));
     group.addEventListener('pointerdown',event=>{event.stopPropagation();if(mode==='select')chooseEdge(key(e));});$('edges').append(group);
   }
@@ -100,15 +102,15 @@ function draw() {
   values.sort((a,b)=>Number(![selected,source,pending?.b].includes(a.id))-Number(![selected,source,pending?.b].includes(b.id)));
   for(const n of values){const g=sEl('g',{class:'node'+([selected,source,pending?.b].includes(n.id)?' active':''),'data-node':n.id,tabindex:0,role:'button','aria-label':label(n)});
     const title=sEl('title',{});title.textContent=label(n);g.append(title);
-    g.append(sEl('circle',{cx:n.anchor.x,cy:n.anchor.y,r:7/view.k,fill:!n.present?'#aebac4':n.pending?'#d99a32':n.voltage===500?'#b54b6c':'#268c82',stroke:'white','stroke-width':2/view.k}));
+    g.append(sEl('circle',{cx:n.anchor.x*view.k,cy:n.anchor.y*view.k,r:7,fill:!n.present?'#aebac4':n.pending?'#d99a32':n.voltage===500?'#b54b6c':'#268c82',stroke:'white','stroke-width':2}));
     const x=n.anchor.x*view.k+view.x,y=n.anchor.y*view.k+view.y,w=measure.measureText(n.name).width,h=15;
     const candidates=[[x+11,y-h-3,x+11+w,y-3],[x+11,y+5,x+11+w,y+5+h],[x-11-w,y-h-3,x-11,y-3],[x-11-w,y+5,x-11,y+5+h]];
     const box=candidates.find(b=>b[0]>2&&b[2]<svg.clientWidth-2&&b[1]>2&&b[3]<svg.clientHeight-2&&!occupied.some(o=>overlaps(b,o))&&!placed.some(o=>o.id!==n.id&&overlaps(b,o.box)));
-    if(box){occupied.push(box);const text=sEl('text',{x:(box[0]-view.x)/view.k,y:(box[1]+12-view.y)/view.k,'font-size':12/view.k,'stroke-width':4/view.k});text.style.fontSize=12/view.k+'px';text.style.strokeWidth=4/view.k+'px';text.textContent=n.name;g.append(text);}
+    if(box){occupied.push(box);const text=sEl('text',{x:box[0]-view.x,y:box[1]+12-view.y,'font-size':12,'stroke-width':4});text.textContent=n.name;g.append(text);}
     g.addEventListener('pointerdown',event=>{event.stopPropagation();if(busy)return;const p=point(event);chooseNode(n.id);if(mode==='select'){drag={type:'node',id:n.id,start:p,before:clone(n.anchor),moved:false};svg.setPointerCapture(event.pointerId);}});
     g.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();chooseNode(n.id);}});$('nodes').append(g);
   }
-  if(source&&pending){const a=node(source),b=node(pending.b);$('preview').append(sEl('line',{x1:a.anchor.x,y1:a.anchor.y,x2:b.anchor.x,y2:b.anchor.y,class:'preview'}));}
+  if(source&&pending){const a=node(source),b=node(pending.b);$('preview').append(sEl('line',{x1:a.anchor.x*view.k,y1:a.anchor.y*view.k,x2:b.anchor.x*view.k,y2:b.anchor.y*view.k,class:'preview'}));}
 }
 function fit() {
   if(!data||svg.clientWidth<20||svg.clientHeight<20)return;
@@ -141,7 +143,7 @@ async function save(apply=false) {
   catch(e){notice(e.message);}finally{busy=false;renderButtons();}
 }
 svg.addEventListener('wheel',event=>{event.preventDefault();if(!data||gesture)return;const p=point(event),unit=event.deltaMode===1?16:event.deltaMode===2?svg.clientHeight:1;
-  if(event.ctrlKey||event.metaKey)zoom(Math.exp(Math.max(-1,Math.min(1,-event.deltaY*unit*.01))),p.x,p.y);
+  if(event.ctrlKey||event.metaKey)zoom(Math.exp(Math.max(-1,Math.min(1,-event.deltaY*unit*.003))),p.x,p.y);
   else{view.x-=event.deltaX*unit;view.y-=event.deltaY*unit;autoFit=false;scheduleDraw();}
 },{passive:false});
 svg.addEventListener('gesturestart',event=>{event.preventDefault();gesture={scale:event.scale||1};},{passive:false});
