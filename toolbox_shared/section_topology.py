@@ -19,7 +19,6 @@ import tempfile
 import unicodedata
 from uuid import uuid4
 
-from openpyxl import load_workbook
 from toolbox_shared.section_schema import (
     _column_map, normalize_price_node_name, parse_topology_edges, price_node_voltage,
 )
@@ -63,6 +62,10 @@ def _number(value):
 
 def read_catalog(path: Path) -> dict:
     """Read every eligible sheet; deduplicate by station, voltage and full curve."""
+    # 界面启动会导入本模块取 applied_path()；Excel 读取只在真正导入
+    # 拓扑工作簿时加载 openpyxl，避免在 UI 线程拉起重依赖。
+    from openpyxl import load_workbook
+
     book = load_workbook(path, read_only=True, data_only=True)
     headers = None
     unique = {}

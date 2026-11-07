@@ -77,7 +77,10 @@ class MaintenanceNextTests(unittest.TestCase):
         import re
         pattern = re.compile(r"sys\.path\.(?:insert|append)\([^)]*\)")
         duplicates = []
-        skip_roots = {"dist", ".toolbox", "logs", ".venv", ".git", "node_modules", "target", "__pycache__"}
+        # 本机下载的 PPOCR / 第三方 site-packages 不是本仓库源码，
+        # 其内部的 sys.path 调用不应算作本项目的重复注入。
+        skip_roots = {"dist", ".toolbox", "logs", ".venv", ".git", "node_modules",
+                      "target", "__pycache__", "site-packages"}
         for path in sorted(ROOT.rglob("*.py")):
             relative = path.relative_to(ROOT).as_posix()
             if skip_roots & set(Path(relative).parts):
