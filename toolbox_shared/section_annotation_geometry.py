@@ -254,6 +254,103 @@ def ring_dark_coverage(crop, x, y, radius, cv2):
     return float(np.mean(dark.any(axis=1)))
 
 
+def split_lobe_candidates(crop, cv2):
+    """Find a symmetric pair of enclosed colored lobes, not two fitted circles.
+
+    This diagram's split symbols have two equal, convex, half-ellipse interiors.
+    Require matching color, size, orientation and opposite centroid offsets.
+    The returned anchor is their symmetry midpoint; no circle error is claimed.
+    """
+    import numpy as np
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    dark = ((hsv[:, :, 2] < 110) & (hsv[:, :, 1] < 100)).astype(np.uint8)*255
+    contours, hierarchy = cv2.findContours(dark, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+    lobes = []
+    for i, contour in enumerate(contours):
+        if hierarchy[0][i][3] < 0 or len(contour) < 30:
+            continue
+        area = cv2.contourArea(contour)
+        if not 200 <= area <= 1500:
+            continue
+        _, axes, angle = cv2.fitEllipse(contour)
+        minor, major = sorted(axes)
+        if not (12 <= minor <= 32 and 25 <= major <= 65 and .4 <= minor/major <= .65):
+            continue
+        solidity = area/cv2.contourArea(cv2.convexHull(contour))
+        if solidity < .94:
+            continue
+        mask = np.zeros(dark.shape, dtype=np.uint8)
+        cv2.drawContours(mask, [contour], -1, 255, -1)
+        interior = mask.astype(bool)
+        colored = interior & (hsv[:, :, 1] > 80) & (hsv[:, :, 2] > 110)
+        if colored.sum()/interior.sum() < .4:
+            continue
+        moments = cv2.moments(contour)
+        x, y = moments['m10']/moments['m00'], moments['m01']/moments['m00']
+        bx, by, w, h = cv2.boundingRect(contour)
+        offset = np.array([x-bx-(w-1)/2, y-by-(h-1)/2])
+        if np.linalg.norm(offset) < 1.5:
+            continue
+        lobes.append(dict(x=x, y=y, area=area, major=major, angle=angle,
+                          solidity=solidity, offset=offset, hue=float(np.median(hsv[:, :, 0][colored])),
+                          box=(bx, by, bx+w, by+h)))
+    found = []
+    for i, a in enumerate(lobes):
+        for b in lobes[i+1:]:
+            size_agreement = min(a['area'], b['area'])/max(a['area'], b['area'])
+            separation = math.hypot(a['x']-b['x'], a['y']-b['y'])
+            scale = (a['major']+b['major'])/2
+            angle = abs(a['angle']-b['angle']) % 180
+            hue = abs(a['hue']-b['hue'])
+            opposition = float(np.dot(a['offset'], b['offset']) /
+                               (np.linalg.norm(a['offset'])*np.linalg.norm(b['offset'])))
+            if (size_agreement < .9 or not 1.0 <= separation/scale <= 1.5
+                    or min(angle, 180-angle) > 10 or min(hue, 180-hue) > 5 or opposition > -.8):
+                continue
+            span = max(max(a['box'][2], b['box'][2])-min(a['box'][0], b['box'][0]),
+                       max(a['box'][3], b['box'][3])-min(a['box'][1], b['box'][1]))
+            found.append(dict(x=(a['x']+b['x'])/2, y=(a['y']+b['y'])/2,
+                              radius=span/2, support=min(a['solidity'], b['solidity'], size_agreement)))
+    return found
+
+
+def generator_glyph_evidence(crop, x, y, radius, cv2):
+    """Require a central, single, hole-free sine stroke inside an intact ring."""
+    import numpy as np
+
+    left, top = max(0, math.floor(x-radius)), max(0, math.floor(y-radius))
+    view = crop[top:min(crop.shape[0], math.ceil(y+radius)+1),
+                left:min(crop.shape[1], math.ceil(x+radius)+1)]
+    if not view.size:
+        return None
+    hsv = cv2.cvtColor(view, cv2.COLOR_BGR2HSV)
+    cx, cy = x-left, y-top
+    yy, xx = np.ogrid[:view.shape[0], :view.shape[1]]
+    mask = ((hsv[:, :, 2] < 110) & (hsv[:, :, 1] < 100)
+            & ((xx-cx)**2+(yy-cy)**2 < (.75*radius)**2)).astype(np.uint8)*255
+    count, labels, stats, centers = cv2.connectedComponentsWithStats(mask)
+    components = [i for i in range(1, count) if stats[i, cv2.CC_STAT_AREA] >= 5]
+    if len(components) != 1:
+        return None
+    i = components[0]
+    bx, by, w, h, area = map(int, stats[i])
+    if not (1.2 <= w/radius <= 1.6 and .6 <= h/radius <= 1.05
+            and w/h >= 1.4 and .22 <= area/(w*h) <= .45
+            and math.hypot(centers[i][0]-cx, centers[i][1]-cy) < .15*radius):
+        return None
+    component = (labels == i).astype(np.uint8)*255
+    _, hierarchy = cv2.findContours(component, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    if hierarchy is None or any(item[3] >= 0 for item in hierarchy[0]):
+        return None
+    columns = [int(round(bx+q*(w-1))) for q in (0, .25, .75, 1)]
+    curve = [float(np.flatnonzero(component[:, col]).mean()) for col in columns]
+    if (curve[1]-curve[2] < .35*radius
+            or max(abs(curve[0]-cy), abs(curve[3]-cy)) > .3*radius):
+        return None
+    return dict(kind='sine-generator', stroke_fraction=round(area/(w*h), 3))
+
+
 def detect_circle_candidates(image, box: dict[str, float], cv2, *, refine=True, voltage=None) -> list[dict[str, float]]:
     import numpy as np
 
@@ -333,6 +430,21 @@ def detect_circle_candidates(image, box: dict[str, float], cv2, *, refine=True, 
                 "source": source,
             }
         )
+        if refine and voltage == 220 and refined and dark_coverage >= .9:
+            glyph = generator_glyph_evidence(crop, local_x, local_y, radius, cv2)
+            if glyph:
+                results[-1]['generator_glyph'] = glyph
+    if refine and voltage == 220:
+        for shape in split_lobe_candidates(crop, cv2):
+            x, y = shape['x']+left, shape['y']+top
+            distance = rectangle_distance(x, y, box)
+            if distance > 185 or distance == 0:
+                continue
+            results.append(dict(x=round(x, 2), y=round(y, 2), radius=round(shape['radius'], 2),
+                                label_distance=round(distance, 2), refined=True,
+                                score=round(.5*math.exp(-distance/80)+.5*shape['support'], 3),
+                                source='paired-lobe-contours', symbol_kind='split-lobes',
+                                symbol_support=round(shape['support'], 3)))
     results.sort(key=lambda item: (-int(item['refined']) if refine else 0, -item["score"], item["label_distance"]))
     unique = []
     for circle in results:

@@ -16,12 +16,54 @@ except ImportError:
 import numpy as np
 from PIL import Image
 from toolbox_shared import section_prelabel as auto
-from toolbox_shared.section_annotation_geometry import refine_circle, detect_circle_candidates, dark_ring_candidates
+from toolbox_shared.section_annotation_geometry import refine_circle, detect_circle_candidates, dark_ring_candidates, split_lobe_candidates, generator_glyph_evidence
 from toolbox_shared.section_vision_review import configured_reviewer, review_images, decisions_reviewer, review_key, circle_signature
 import test_topology_annotation as annotation
 
 
 class PrecisionTests(unittest.TestCase):
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_split_symbol_midpoint_and_rejection_of_missing_or_different_lobe(self):
+        image = cv2.imread(str(Path(__file__).resolve().parents[1]/'接线图.png'))
+        crop = image[1780:1870,2140:2280].copy()
+        found = split_lobe_candidates(crop, cv2)
+        self.assertEqual(len(found), 1)
+        self.assertLess(math.hypot(found[0]['x']+2140-2214, found[0]['y']+1780-1833), 2)
+        one = crop.copy(); one[:, 73:] = 255
+        self.assertEqual(split_lobe_candidates(one, cv2), [])
+        different = crop.copy(); hsv = cv2.cvtColor(different, cv2.COLOR_BGR2HSV)
+        colored = (hsv[:,:,1]>80) & (np.indices(hsv.shape[:2])[1]>73)
+        hsv[:,:,0][colored] = 60
+        different = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        self.assertEqual(split_lobe_candidates(different, cv2), [])
+
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_generator_glyph_rejects_node_line_and_battery(self):
+        for kind in ('sine', 'line', 'battery', 'empty'):
+            image = np.full((100,100,3), 255, dtype=np.uint8)
+            cv2.circle(image,(50,50),35,(0,0,0),5)
+            if kind == 'sine':
+                x=np.linspace(29,71,100);y=50+10*np.sin(np.linspace(0,2*np.pi,100))
+                cv2.polylines(image,[np.rint(np.column_stack((x,y))).astype(np.int32)],False,(0,0,0),4)
+            elif kind == 'line':
+                cv2.line(image,(29,50),(71,50),(0,0,0),4)
+            elif kind == 'battery':
+                cv2.rectangle(image,(30,40),(70,60),(0,0,0),3)
+            evidence = generator_glyph_evidence(image,50,50,30,cv2)
+            self.assertEqual(bool(evidence),kind=='sine',kind)
+
+    def test_factory_resolution_requires_one_unopposed_generator(self):
+        record=self.record('测试厂',.99);record['box']=dict(x=80,y=45,width=40,height=20)
+        symbol=dict(x=100,y=100,radius=25,refined=True,score=.75,label_distance=35,
+                    dark_ring_coverage=1,generator_glyph=dict(kind='sine-generator'))
+        self.assertIs(auto.factory_generator_candidate('测试厂',record,[symbol],[]),symbol)
+        self.assertIsNone(auto.factory_generator_candidate('测试站',record,[symbol],[]))
+        self.assertIsNone(auto.factory_generator_candidate('测试厂',record,[symbol,dict(symbol,x=130)],[]))
+        neighbor=self.record('别厂',.99);neighbor['id']='other';neighbor['box']=dict(x=90,y=105,width=30,height=20)
+        self.assertIsNone(auto.factory_generator_candidate('测试厂',record,[symbol],[('别厂',neighbor)]))
+        partial=dict(x=110,y=75,radius=20,refined=False,label_distance=0,edge_support=.9,dark_ring_coverage=.9)
+        self.assertIsNone(auto.factory_generator_candidate('测试厂',record,[symbol,partial],[]))
+
     @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
     def test_partial_symbol_conflict_abstains_without_promoting_unfitted_coordinates(self):
         data=annotation.annotated()

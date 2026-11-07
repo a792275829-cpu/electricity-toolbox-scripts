@@ -37,7 +37,7 @@ def deduplicate(records):
 
 OCR_RECIPE = 'native1500-retry2x-native-label-boundaries-v6'
 UPGRADABLE_OCR_RECIPES = {'native1500-baseline', 'native1500-retry2x-v2', 'native1500-retry2x-native-proposals-v3', 'native1500-retry2x-native-token-proposals-v4', 'native1500-retry2x-native-label-proposals-v5'}
-ALGORITHM_VERSION = 'station-ownership-label-boundaries-v10'
+ALGORITHM_VERSION = 'station-ownership-symbol-structure-v11'
 
 
 def competing_labels(chosen, record, station, labels):
@@ -71,6 +71,25 @@ def partial_symbol_conflicts(chosen, circles):
     return [c for c in circles if c.get('refined') is False
             and c.get('edge_support', 0) >= .75 and c.get('dark_ring_coverage', 0) >= .7
             and c.get('label_distance', float('inf')) + chosen['radius'] < chosen['label_distance']]
+
+
+def factory_generator_candidate(station, record, circles, labels):
+    """Resolve a contested nearest node only with an unopposed generator glyph.
+
+    This is a narrow diagram-specific proposal, never an inference of voltage.
+    Two nearby generators or any equally near station label remain unresolved.
+    """
+    if not station.endswith('厂'):
+        return None
+    generators = [c for c in circles if c.get('generator_glyph', {}).get('kind') == 'sine-generator'
+                  and c.get('refined') and c.get('dark_ring_coverage', 0) >= .9
+                  and c.get('label_distance', float('inf')) < 90]
+    if len(generators) != 1:
+        return None
+    candidate = generators[0]
+    if competing_labels(candidate, record, station, labels) or partial_symbol_conflicts(candidate, circles):
+        return None
+    return candidate
 
 
 def optional_runtime():
@@ -517,6 +536,12 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
                         row['competing_labels'] = owners
                         row['reason'] = '圆点附近有其他站名归属竞争，需视觉或人工核对'
                         chosen = None
+                        if group[1] == 220:
+                            alternative = factory_generator_candidate(group[0], text.record, circles, labels)
+                            if alternative:
+                                chosen = alternative
+                                row['ownership_resolution'] = '厂名、唯一正弦发电机图符及无竞争标签共同支持'
+                                row['reason'] = '发电机图符与站名归属一致，待人工核对'
                 if chosen:
                     row['ocr_record_id'] = text.record['id']
                     row['ocr_retried'] = text.record.get('ocr_retried', False)
@@ -524,8 +549,14 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
                     row['alternatives'] = text.record.get('alternatives', [])
                     row['point'] = {k: chosen[k] for k in ('x', 'y')}
                     row['circle_score'] = chosen['score']
-                    row['circle_refined'] = chosen.get('refined', False)
+                    row['circle_refined'] = bool(chosen.get('refined', False) and not chosen.get('symbol_kind'))
+                    row['symbol_refined'] = chosen.get('refined', False)
                     row['circle_support'] = chosen.get('edge_support')
+                    row['symbol_kind'] = chosen.get('symbol_kind', 'circle')
+                    row['symbol_support'] = chosen.get('symbol_support')
+                    if chosen.get('generator_glyph'):
+                        row['symbol_kind'] = 'sine-generator'
+                        row['generator_glyph'] = chosen['generator_glyph']
                     row['circle_margin'] = round(chosen['score']-max((c['score'] for c in circles if c is not chosen), default=0), 3)
             elif ambiguous:
                 row['reason'] = '同名多位置或跨电压，需人工定位'
@@ -535,6 +566,8 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
             candidate = dict(point=row['point'], text=row['text'], ocr_engine=engine,
                              vision_status=row['vision_status'], match_score=row['match_score'],
                              circle_score=row['circle_score'], circle_margin=row['circle_margin'])
+            if row.get('symbol_kind') != 'circle':
+                candidate['symbol_kind'] = row['symbol_kind']
             for n in result['nodes']:
                 if n['id'] in groups[group]:
                     n['map_candidate'] = deepcopy(candidate)
