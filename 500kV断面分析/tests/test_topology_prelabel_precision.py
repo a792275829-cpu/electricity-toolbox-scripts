@@ -15,12 +15,105 @@ except ImportError:
 import numpy as np
 from PIL import Image
 from toolbox_shared import section_prelabel as auto
-from toolbox_shared.section_annotation_geometry import refine_circle, detect_circle_candidates
+from toolbox_shared.section_annotation_geometry import refine_circle, detect_circle_candidates, dark_ring_candidates
 from toolbox_shared.section_vision_review import configured_reviewer, review_images, decisions_reviewer, review_key, circle_signature
 import test_topology_annotation as annotation
 
 
 class PrecisionTests(unittest.TestCase):
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_partial_symbol_conflict_abstains_without_promoting_unfitted_coordinates(self):
+        data=annotation.annotated()
+        for n in data['nodes']:n.pop('map_anchor',None)
+        data['nodes'][0]['voltage']=220;data['edges']=[]
+        record=self.record(data['nodes'][0]['station'],.99)
+        far=dict(x=200,y=150,radius=20,score=.9,refined=True,label_distance=75)
+        partial=dict(x=110,y=100,radius=28,score=.7,refined=False,label_distance=30,edge_support=.8,dark_ring_coverage=.8)
+        with tempfile.TemporaryDirectory() as folder:
+            image=Path(folder)/'map.png';Image.new('RGB',(1000,700),'white').save(image)
+            with patch.object(auto.maps,'asset_path',return_value=image),patch.object(auto,'detect_circle_candidates',return_value=[far,partial]):
+                result=auto.prelabel(data,records=[record],sample=[(data['nodes'][0]['station'],220)])
+        row=result['report']['rows'][0]
+        self.assertIsNone(row['point']);self.assertEqual(row['partial_symbol_conflicts'],[partial])
+        self.assertNotIn('map_candidate',result['data']['nodes'][0])
+        weak=deepcopy(partial);weak['edge_support']=.3
+        self.assertEqual(auto.partial_symbol_conflicts(far,[far,weak]),[])
+
+    def test_visual_candidate_filter_keeps_original_identity_and_skips_empty_requests(self):
+        env=dict(TOPOLOGY_VISION_MODEL='model',TOPOLOGY_VISION_BASE_URL='https://example.invalid/v1')
+        weak=dict(x=100,y=100,radius=30,refined=False,edge_support=.3,dark_ring_coverage=.4)
+        partial=dict(x=180,y=120,radius=30,refined=False,edge_support=.8,dark_ring_coverage=.8)
+        payload=dict(choices=[dict(message=dict(content='{"index":0}'))])
+        with patch.dict('os.environ',env), patch('toolbox_shared.section_vision_review.urlopen',return_value=BytesIO(json.dumps(payload).encode())) as fetch:
+            reviewer=configured_reviewer('qwen');image=Image.new('RGB',(300,200))
+            self.assertIsNone(reviewer(image,('目标',220),self.record(),[weak]))
+            self.assertEqual(reviewer.request_count,0);fetch.assert_not_called()
+            self.assertIs(reviewer(image,('目标',220),self.record(),[weak,partial]),partial)
+            self.assertEqual(reviewer.request_count,1)
+
+    def test_loopback_inference_bypasses_system_proxy_without_global_changes(self):
+        from types import SimpleNamespace
+        env=dict(TOPOLOGY_VISION_MODEL='model',TOPOLOGY_VISION_BASE_URL='http://127.0.0.1:19086/v1')
+        circles=[dict(x=200,y=80,radius=30)]
+        calls=[]
+        def direct(request, **kwargs):
+            calls.append(request.full_url)
+            return BytesIO(json.dumps(dict(choices=[dict(message=dict(content='{"index":0}'))])).encode())
+        with patch.dict('os.environ',env), patch('toolbox_shared.section_vision_review.build_opener',return_value=SimpleNamespace(open=direct)), patch('toolbox_shared.section_vision_review.urlopen',side_effect=AssertionError('must not use proxy opener')):
+            review=configured_reviewer('qwen')
+            self.assertIs(review(Image.new('RGB',(1000,700)),('目标',220),self.record(),circles),circles[0])
+        self.assertEqual(calls,['http://127.0.0.1:19086/v1/chat/completions'])
+
+    def test_loopback_vision_service_is_reported_as_local_without_credentials(self):
+        for endpoint, expected in [('http://127.0.0.1:19086/v1','local-http'),
+                                   ('https://example.invalid/v1','remote-api')]:
+            with patch.dict('os.environ',dict(TOPOLOGY_VISION_MODEL='model',TOPOLOGY_VISION_BASE_URL=endpoint,TOPOLOGY_VISION_API_KEY='secret')):
+                reviewer = configured_reviewer('qwen')
+                self.assertEqual(reviewer.inference_source, dict(provider='qwen',model='model',location=expected))
+
+    def test_wrapped_solar_label_keeps_facility_identity(self):
+        self.assertEqual(auto.vocabulary_hits('公子岭光伏', ['公子岭光伏电','公子岭']), {'公子岭光伏电'})
+        self.assertEqual(auto.vocabulary_hits('公子岭风电', ['公子岭光伏电']), set())
+        self.assertEqual(auto.vocabulary_hits('公子岭光伏电站', ['公子岭光伏电']), {'公子岭光伏电'})
+
+    def test_merged_bus_token_requires_actual_two_read_agreement(self):
+        record = self.record('88凯旋B', .99)
+        original = deepcopy(record)
+        views = []
+        def read(view):
+            views.append(view.size)
+            return [('凯旋B', .99)]
+        result = auto.recover_merged_labels(Image.new('RGB',(300,200)),[record],['凯旋'],read)
+        self.assertEqual(record, original)
+        self.assertEqual(len(views), 2)
+        self.assertEqual(result[0], original)
+        self.assertEqual(result[-1]['text'], '凯旋B')
+        self.assertEqual(result[-1]['proposal_engine'], 'ppocr-label-token')
+        self.assertEqual(result[-1]['source_record_id'], 'r')
+        self.assertLess(result[-1]['box']['width'], original['box']['width'])
+
+    def test_merged_token_cannot_turn_neighbor_text_into_target_name(self):
+        record = self.record('双岗B科然电', .99)
+        for values in ([('双岗B', .99), ('双安B', .99)], [('科然电', .99)]*2,
+                       [('双岗B', .99), ('双岗B', .7)]):
+            replies = iter(values)
+            result = auto.recover_merged_labels(Image.new('RGB',(300,200)),[record],['双岗','双安','科然电'],lambda _: [next(replies)])
+            self.assertEqual(result, [record])
+
+    def test_plain_short_names_and_bus_labels_do_not_create_fuzzy_proposals(self):
+        records = [self.record('双安B', .99),self.record('凯旅', .99),self.record('F1810', .99)]
+        self.assertEqual(auto.merged_label_proposals(records,['双岗','凯旋']), [])
+
+    def test_numeric_and_paired_names_need_exact_vocabulary_and_two_image_reads(self):
+        names=['丽晶','智合','建云','新平安','平安']
+        numeric=self.record('丽晶934',.99);paired=self.record('智合建云',.99)
+        proposals=auto.merged_label_proposals([numeric,paired,self.record('新平安',.99)],names)
+        self.assertEqual({p['text'] for p in proposals},{'丽晶','智合','建云'})
+        self.assertEqual({p['proposal_source']['kind'] for p in proposals},{'numeric','paired-names'})
+        result=auto.recover_merged_labels(Image.new('RGB',(300,200)),[paired],names,lambda _: [('智合',.99)])
+        # A read of the first half cannot manufacture the second station.
+        self.assertEqual([p['text'] for p in result],['智合建云','智合'])
+
     def test_combined_bus_suffix_is_exact_evidence_not_fuzzy_correction(self):
         self.assertEqual(auto.vocabulary_hits('盘允BY', ['盘允','盘龙']), {'盘允'})
         self.assertEqual(auto.vocabulary_hits('盘允XYZ', ['盘允']), set())
@@ -95,6 +188,69 @@ class PrecisionTests(unittest.TestCase):
         short = self.record('河山')
         auto.retry_difficult(Image.new('RGB', (300, 200)), [short], ['何山'], lambda _: calls.append(1))
         self.assertEqual(calls, [])
+
+    def test_secondary_boxes_require_two_exact_ppocr_reads_and_preserve_primary(self):
+        image = Image.new('RGB', (300, 200))
+        original = [self.record('其他', .99)]
+        proposals = [self.record('李朗B', .99)]
+        before = deepcopy(original)
+        result = auto.recover_text_proposals(image, original, ['李朗'], proposals, lambda _: [('李朗B', .98)])
+        self.assertEqual(original, before)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[-1]['text'], '李朗B')
+        self.assertTrue(result[-1]['ocr_recovered'])
+        self.assertEqual(result[-1]['proposal_engine'], 'macos-vision')
+        self.assertEqual(result[-1]['box'], proposals[0]['box'])
+
+    def test_secondary_box_disagreement_or_other_station_does_not_force_a_name(self):
+        image = Image.new('RGB', (300, 200))
+        proposal = self.record('李朗B', .99)
+        for answers in ([ [('李朗B', .99)], [('李朗B', .7)] ],
+                        [ [('李朗B', .99)], [('塘朗B', .99)] ],
+                        [ [('塘朗B', .99)], [('塘朗B', .99)] ]):
+            values = iter(answers)
+            result = auto.recover_text_proposals(image, [], ['李朗','塘朗'], [proposal], lambda _: next(values))
+            self.assertEqual(result, [])
+
+    def test_native_proposals_skip_low_confidence_and_existing_names(self):
+        calls = []
+        result = auto.recover_text_proposals(Image.new('RGB',(300,200)), [self.record('李朗B', .99)],
+                    ['李朗'], [self.record('李朗B', .99), self.record('李朗B', .3)], lambda _: calls.append(1))
+        self.assertEqual(len(result), 1)
+        self.assertEqual(calls, [])
+
+    def test_native_supplement_failure_keeps_primary_ocr(self):
+        records = [self.record()]
+        with patch.object(auto, 'recognize', side_effect=ValueError('not installed')):
+            with self.assertWarnsRegex(RuntimeWarning, '保留PP-OCRv6'):
+                self.assertIs(auto.supplement_native_boxes(Image.new('RGB',(300,200)),records,['长河岭'],lambda _: []),records)
+
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_black_ring_inner_contour_survives_outgoing_lines(self):
+        image = np.full((240, 320, 3),255,np.uint8)
+        cv2.circle(image,(130,110),32,(255,255,0),-1)
+        cv2.circle(image,(130,110),35,(0,0,0),8)
+        cv2.line(image,(0,110),(95,110),(0,0,0),5)
+        cv2.line(image,(165,110),(300,20),(0,0,0),5)
+        found = dark_ring_candidates(image,cv2)
+        self.assertTrue(any(math.hypot(x-130,y-110)<1 for x,y,_,_ in found))
+
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_black_ring_does_not_turn_open_lines_into_closed_symbols(self):
+        image = np.full((240,320,3),255,np.uint8)
+        cv2.line(image,(10,100),(300,100),(0,0,0),5)
+        cv2.line(image,(130,10),(130,230),(0,0,0),5)
+        self.assertEqual(dark_ring_candidates(image,cv2),[])
+
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_220_ranking_uses_ring_evidence_instead_of_colored_interior(self):
+        image = np.full((350,450,3),255,np.uint8)
+        cv2.circle(image,(150,120),34,(0,0,0),7)
+        cv2.circle(image,(260,120),40,(0,0,255),8)
+        candidates = detect_circle_candidates(image,dict(x=190,y=180,width=110,height=25),cv2,voltage=220)
+        self.assertTrue(candidates)
+        self.assertLess(math.hypot(candidates[0]['x']-150,candidates[0]['y']-120),2)
+        self.assertGreater(candidates[0]['dark_ring_coverage'],.8)
 
     def test_native_paddle_input_limit_is_explicit(self):
         import sys

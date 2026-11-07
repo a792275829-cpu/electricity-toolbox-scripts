@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from PIL import Image, ImageDraw, ImageFont
 from toolbox_shared import section_basemap as maps, section_topology as model
-from toolbox_shared.section_prelabel import OCR_RECIPE, recognize, prelabel
+from toolbox_shared.section_prelabel import OCR_RECIPE, UPGRADABLE_OCR_RECIPES, recognize, prelabel
 from toolbox_shared.section_vision_review import configured_reviewer, decisions_reviewer
 
 
@@ -33,14 +33,7 @@ def main():
     p.add_argument('--review-decisions', type=Path, help='Replay visual review of the exact numbered candidates; no API call')
     args = p.parse_args()
     reviewer = configured_reviewer(args.vision)
-    online_vision_calls = 0
-    if args.vision != 'none':
-        provider_reviewer = reviewer
-        def online_review(*values):
-            nonlocal online_vision_calls
-            online_vision_calls += 1
-            return provider_reviewer(*values)
-        reviewer = online_review
+    vision_source = getattr(reviewer, 'inference_source', dict(location='none'))
     if args.review_decisions and args.vision != 'none':
         p.error('本地复核文件与在线视觉复核只能选择一种')
     args.output_dir.mkdir(parents=True, exist_ok=False)
@@ -62,9 +55,11 @@ def main():
     recipe = 'native1500-baseline' if args.baseline else OCR_RECIPE
     if args.review_decisions:
         reviewer = decisions_reviewer(args.review_decisions, digest, recipe)
+        vision_source = dict(location='offline-decisions')
     if args.ocr_cache:
         cache = json.loads(args.ocr_cache.read_text())
-        if cache['image_sha256'] != digest or cache['engine'] != args.ocr_engine or cache.get('recipe') not in (recipe, 'native1500-baseline'):
+        allowed_recipes = {recipe} if args.baseline else {recipe, *UPGRADABLE_OCR_RECIPES}
+        if cache['image_sha256'] != digest or cache['engine'] != args.ocr_engine or cache.get('recipe') not in allowed_recipes:
             p.error('OCR缓存的底图、引擎或处理版本不匹配')
         records = cache['records']
         if cache.get('recipe') != recipe:
@@ -74,11 +69,14 @@ def main():
         records = recognize(image, args.ocr_engine, station_names=sorted({n['station'] for n in data['nodes']}), enhanced=not args.baseline)
     (args.output_dir/'ocr.json').write_text(json.dumps(dict(image_sha256=digest, engine=args.ocr_engine, recipe=recipe, records=records), ensure_ascii=False))
     result = prelabel(data, records=records, engine=args.ocr_engine, reviewer=reviewer, sample=sample, enhanced=not args.baseline)
+    vision_review_calls = getattr(reviewer, 'request_count', 0)
     report = result['report']; report['vision_provider'] = 'offline-decisions' if args.review_decisions else args.vision
     report['execution'] = dict(ocr_source='cache' if args.ocr_cache else 'actual-inference',
                               ocr_cache_upgraded=bool(args.ocr_cache and cache.get('recipe') != recipe),
-                              geometry='actual-algorithm', online_vision_api_called=online_vision_calls > 0,
-                              online_vision_calls=online_vision_calls,
+                              geometry='actual-algorithm', vision_backend=vision_source,
+                              online_vision_api_called=vision_review_calls > 0 and vision_source['location'] == 'remote-api',
+                              online_vision_calls=vision_review_calls if vision_source['location'] == 'remote-api' else 0,
+                              local_vision_calls=vision_review_calls if vision_source['location'] == 'local-http' else 0,
                               independent_human_ground_truth=False)
     if args.review_decisions:
         report['review_source'] = json.loads(args.review_decisions.read_text()).get('source', '本地视觉复核记录')

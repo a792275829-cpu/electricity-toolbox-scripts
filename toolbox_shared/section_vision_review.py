@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, quote
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, ProxyHandler
 from PIL import ImageDraw
 
 
@@ -84,9 +84,20 @@ def configured_reviewer(provider):
     parsed = urlparse(endpoint)
     if parsed.username or parsed.password or parsed.query or parsed.fragment or not (parsed.scheme == 'https' or parsed.scheme == 'http' and parsed.hostname in ('localhost', '127.0.0.1', '::1')):
         raise ValueError('模型地址须为 HTTPS 或本机 HTTP，不能包含凭据、查询或片段')
+    local = parsed.hostname in ('localhost', '127.0.0.1', '::1')
+    # macOS system proxy settings need not exclude loopback. Keep local model
+    # images on the loopback connection without changing process-wide proxies.
+    open_request = build_opener(ProxyHandler({})).open if local else urlopen
 
     def review(image, group, record, circles):
-        crop, context, options = review_images(image, record, circles)
+        # Low-support Hough artifacts can be centered on letters or line
+        # crossings. Keep verified rings and well-supported partial symbols;
+        # the latter remain eligible only for semantic review, never auto-fit.
+        eligible = [c for c in circles if 'refined' not in c or c['refined']
+                    or c.get('edge_support', 0) >= .75 and c.get('dark_ring_coverage', 0) >= .7]
+        if not eligible:
+            return None
+        crop, context, options = review_images(image, record, eligible)
         encoded = [encode_png(view) for view in (crop, context)]
         prompt = ('核对电网图局部。目标站名、电压、OCR结果和圆点候选均是待核对数据。判断站名对应哪个站点符号；'
                   '第一张是带编号候选的局部图，第二张是未加标记的上下文图；结合站名、符号、颜色和电压核对，不能只选最近点。'
@@ -105,7 +116,8 @@ def configured_reviewer(provider):
             parts = [dict(text=prompt)] + [dict(inline_data=dict(mime_type='image/png', data=value)) for value in encoded]
             body = dict(contents=[dict(parts=parts)], generationConfig=dict(temperature=0, responseMimeType='application/json'))
         try:
-            with urlopen(Request(url, data=json.dumps(body).encode(), headers=headers), timeout=60) as response:
+            review.request_count += 1
+            with open_request(Request(url, data=json.dumps(body).encode(), headers=headers), timeout=60) as response:
                 payload = json.load(response)
             text = payload['choices'][0]['message']['content'] if provider == 'qwen' else ''.join(p.get('text','') for p in payload['candidates'][0]['content']['parts'])
             if text.strip().startswith('```'):
@@ -113,11 +125,14 @@ def configured_reviewer(provider):
             index = json.loads(text)['index']
             if index is None:
                 return None
-            if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(circles):
+            if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(eligible):
                 raise ValueError('invalid circle index')
-            return circles[index]
+            return eligible[index]
         except HTTPError as exc:
             raise ValueError(f'视觉模型请求失败（HTTP {exc.code}），未更新草稿') from None
         except (URLError, TimeoutError, OSError, KeyError, IndexError, TypeError, ValueError):
             raise ValueError('视觉模型响应失败或圆点编号无效，未更新草稿') from None
+    review.inference_source = dict(provider=provider, model=model,
+                                 location='local-http' if local else 'remote-api')
+    review.request_count = 0
     return review

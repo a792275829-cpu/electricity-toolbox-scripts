@@ -6,9 +6,11 @@ from io import BytesIO
 import json
 import math
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
+import warnings
 
 from PIL import Image, ImageOps
 from toolbox_shared import section_basemap as maps, section_topology as model
@@ -33,10 +35,9 @@ def deduplicate(records):
     return result
 
 
-OCR_RECIPE = 'native1500-retry2x-v2'
-
-
-ALGORITHM_VERSION = 'station-ownership-abstention-bus-suffix-v6'
+OCR_RECIPE = 'native1500-retry2x-native-label-proposals-v5'
+UPGRADABLE_OCR_RECIPES = {'native1500-baseline', 'native1500-retry2x-v2', 'native1500-retry2x-native-proposals-v3', 'native1500-retry2x-native-token-proposals-v4'}
+ALGORITHM_VERSION = 'station-ownership-label-tokens-partial-v9'
 
 
 def competing_labels(chosen, record, station, labels):
@@ -57,6 +58,19 @@ def competing_labels(chosen, record, station, labels):
         if distance <= own_distance + tolerance:
             competitors.append(dict(station=name, record_id=other['id'], distance=round(distance, 2)))
     return sorted(competitors, key=lambda item: (item['distance'], item['station'], item['record_id']))
+
+
+def partial_symbol_conflicts(chosen, circles):
+    """A strong nearby partial ring contradicts assignment to a distant full ring.
+
+    Partial fits lack a trustworthy center. Preserve them as semantic-review
+    evidence, rather than silently replacing the station with a neighbor.
+    """
+    if not chosen.get('refined') or 'label_distance' not in chosen:
+        return []
+    return [c for c in circles if c.get('refined') is False
+            and c.get('edge_support', 0) >= .75 and c.get('dark_ring_coverage', 0) >= .7
+            and c.get('label_distance', float('inf')) + chosen['radius'] < chosen['label_distance']]
 
 
 def optional_runtime():
@@ -135,6 +149,125 @@ def retry_difficult(image, records, station_names, read_crop, limit=120):
     return records
 
 
+def recover_text_proposals(image, records, station_names, proposals, read_crop, limit=120, *, proposal_engine='macos-vision'):
+    """Use secondary boxes only after PP-OCR independently reads the exact name twice."""
+    names = sorted(set(station_names))
+    found = set()
+    for r in records:
+        if (r.get('ocr_conflict') or r.get('status') in ('ignored', 'omission')
+                or r.get('ocr_retried') and not r.get('retry_agreed')
+                or r.get('confidence', 0) < .8):
+            continue
+        found.update(vocabulary_hits(r['text'], names))
+        if r.get('retry_agreed'):
+            for a in r.get('alternatives', []):
+                found.update(vocabulary_hits(a['text'], names))
+    missing = set(names)-found
+    added = []
+    attempts = 0
+    for proposal in sorted(proposals, key=lambda p: -p['confidence']):
+        hits = vocabulary_hits(proposal['text'], names)
+        if proposal['confidence'] < .9 or len(hits) != 1 or not hits & missing:
+            continue
+        if attempts >= limit:
+            break
+        attempts += 1
+        b = proposal['box']
+        bounds = (max(0, int(b['x'])-6), max(0, int(b['y'])-6),
+                  min(image.width, math.ceil(b['x']+b['width'])+6),
+                  min(image.height, math.ceil(b['y']+b['height'])+6))
+        crop = image.crop(bounds)
+        if not crop.width or not crop.height:
+            continue
+        crop = crop.resize((crop.width*2, crop.height*2), Image.Resampling.LANCZOS)
+        alternatives = []
+        votes = []
+        for treatment, view in (('color2x', crop), ('gray2x', ImageOps.autocontrast(ImageOps.grayscale(crop)).convert('RGB'))):
+            accepted = {}
+            for value, score in read_crop(view):
+                alternatives.append(dict(text=value, confidence=float(score), treatment=treatment))
+                if score >= .9 and vocabulary_hits(value, names) == hits:
+                    accepted[value] = float(score)
+            votes.append(accepted)
+        agreed = set(votes[0]) & set(votes[1])
+        if len(agreed) != 1:
+            continue
+        text = agreed.pop()
+        added.append(dict(text=text, confidence=min(v[text] for v in votes), box=deepcopy(b),
+                          category='node', ocr_recovered=True, proposal_engine=proposal_engine,
+                          proposal_text=proposal['text'], source_record_id=proposal.get('source_record_id'), alternatives=alternatives,
+                          proposal_source=deepcopy(proposal.get('proposal_source')),
+                          ocr_retried=True, retry_agreed=True, ocr_conflict=False))
+    return records+added
+
+
+def merged_label_proposals(records, station_names):
+    """Propose crops at explicit token boundaries, never a fuzzy name edit.
+
+    A merged box may contain numeric bus graphics or adjacent labels. Estimated
+    character widths propose a region only; independent image reads must confirm
+    its text before it can participate in name matching or circle association.
+    """
+    proposals = []
+    index = {}
+    for name in station_names:
+        for variant in name_variants(name):
+            index.setdefault(variant, set()).add(name)
+    def hits(value):
+        return set().union(*(index.get(v, set()) for v in name_variants(value, ocr=True)))
+    for record in records:
+        raw = record['text']
+        if record.get('confidence', 0) < .9 or record.get('status') in ('ignored', 'omission'):
+            continue
+        spans = {(m.start(), m.end(), m.group(), 'bus')
+                 for m in re.finditer(r'[\u4e00-\u9fff]{2,8}[ABY]{1,2}', raw)}
+        spans.update((m.start(), m.end(), m.group(), 'numeric')
+                     for m in re.finditer(r'[\u4e00-\u9fff]{2,8}(?=\d)', raw))
+        # Split a Chinese-only merged box only when both halves independently
+        # identify catalog stations and the whole is not an established name.
+        if re.fullmatch(r'[\u4e00-\u9fff]{4,16}', raw) and not hits(raw):
+            for split in range(2, len(raw)-1):
+                if len(hits(raw[:split])) == len(hits(raw[split:])) == 1:
+                    spans.update(((0,split,raw[:split],'paired-names'),
+                                  (split,len(raw),raw[split:],'paired-names')))
+        for begin, finish, token, kind in sorted(spans):
+            if len(hits(token)) != 1 or (begin, finish) == (0, len(raw)):
+                continue
+            b = record['box']
+            weights = [1.0 if '\u4e00' <= c <= '\u9fff' else .6 for c in raw]
+            total = sum(weights)
+            start = sum(weights[:begin])/total
+            end = sum(weights[:finish])/total
+            # Two treatments of the source pixels must agree; the estimated
+            # token box itself is never a station coordinate.
+            box = dict(x=b['x']+b['width']*start, y=b['y'],
+                       width=b['width']*(end-start), height=b['height'])
+            boxes = [box]
+            if kind == 'numeric' and b['height'] > b['width']/total*1.25:
+                narrow = dict(box, height=b['width']/total*1.25)
+                boxes.insert(0, narrow)
+            for proposed in boxes:
+                proposals.append(dict(text=token, confidence=record['confidence'], box=proposed,
+                                      source_record_id=record.get('id'),
+                                      proposal_source=dict(id=record.get('id'), text=raw, box=deepcopy(b), kind=kind)))
+    return proposals
+
+
+def recover_merged_labels(image, records, station_names, read_crop):
+    proposals = merged_label_proposals(records, station_names)
+    return recover_text_proposals(image, records, station_names, proposals, read_crop,
+                                  limit=120, proposal_engine='ppocr-label-token')
+
+
+def supplement_native_boxes(image, records, station_names, read_crop):
+    try:
+        proposals = recognize(image, 'macos-vision', enhanced=False)
+    except ValueError:
+        warnings.warn('本机文字框补检不可用，保留PP-OCRv6原结果；需要macOS Command Line Tools', RuntimeWarning)
+        return records
+    return recover_text_proposals(image, records, station_names, proposals, read_crop)
+
+
 def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), enhanced=True, base_records=None):
     """OCR original-resolution tiles. macOS Vision is an explicitly named baseline."""
     records = [] if base_records is None else deepcopy(base_records)
@@ -193,6 +326,9 @@ def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), en
                     output = subprocess.run([str(binary), str(path)], check=True, capture_output=True, timeout=90)
                     return [(r['text'], r['confidence']) for r in json.loads(output.stdout)]
             records = retry_difficult(image, deduplicate(records), station_names, read_crop)
+            if paddle is not None:
+                records = supplement_native_boxes(image, records, station_names, read_crop)
+                records = recover_merged_labels(image, records, station_names, read_crop)
     for i, r in enumerate(records):
         r['id'] = str(i)
     return deduplicate(records)
@@ -287,7 +423,7 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
         row = dict(station=group[0], voltage=group[1], text=None, point=None, reason='未匹配站名', vision_status='未配置')
         if texts:
             text = texts[0]; row.update(text=text.matched_text, match_score=text.score, box=text.record['box'], reason='未找到圆点')
-            circles = detect_circle_candidates(pixels, text.record['box'], cv2, refine=enhanced)
+            circles = detect_circle_candidates(pixels, text.record['box'], cv2, refine=enhanced, voltage=group[1])
             # A repeated name at different locations or voltage groups is ambiguous.
             ambiguous = sum(t.score >= .9 for t in texts) > 1 or sum(g[0] == group[0] for g in groups) > 1
             conflict = text.record.get('ocr_conflict', False)
@@ -319,7 +455,7 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
                         for other in texts[1:4]:
                             if other.score < .9 or other.record.get('ocr_conflict'):
                                 continue
-                            alternatives = detect_circle_candidates(pixels, other.record['box'], cv2, refine=enhanced)
+                            alternatives = detect_circle_candidates(pixels, other.record['box'], cv2, refine=enhanced, voltage=group[1])
                             if not alternatives:
                                 continue
                             alternative = reviewer(image, group, other.record, alternatives)
@@ -334,6 +470,12 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
                     row['vision_status'] = '已复核' if chosen else '不一致'
                     if not chosen:
                         row['reason'] = '视觉复核未通过，需人工定位'
+                if chosen and enhanced and reviewer is None and group[1] == 220:
+                    partials = partial_symbol_conflicts(chosen, circles)
+                    if partials:
+                        row['partial_symbol_conflicts'] = partials
+                        row['reason'] = '邻近有高支持未拟合符号，不能强配远处圆点，需视觉或人工核对'
+                        chosen = None
                 if chosen and enhanced and reviewer is None:
                     competitors = competing_labels(chosen, text.record, group[0], labels)
                     owners = []
@@ -380,6 +522,7 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
     return dict(data=result, report=dict(engine=engine, algorithm_version=ALGORITHM_VERSION if enhanced else 'baseline', recipe=OCR_RECIPE if enhanced else 'native1500-baseline', tiles=len(tiles(*image.size)), ocr_boxes=len(records),
                                         ocr_retried=sum(bool(r.get('ocr_retried')) for r in records),
                                         ocr_conflicts=sum(bool(r.get('ocr_conflict')) for r in records),
+                                        ocr_recovered=sum(bool(r.get('ocr_recovered')) for r in records),
                                         sample_selection='fixed' if sample is not None else 'ocr-stratified-exploration', sampled=len(report),
                                         matched=sum(r['text'] is not None for r in report), candidates=sum(r['point'] is not None for r in report),
                                         vision_reviewed=sum(r['vision_status']=='已复核' for r in report), rows=report))

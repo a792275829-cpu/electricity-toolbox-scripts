@@ -364,6 +364,6 @@ $('acceptCandidate').onclick=async()=>{const n=node(selected);if(n?.map_candidat
 $('rejectCandidate').onclick=async()=>{const n=node(selected);if(n&&await transaction(d=>{for(const o of d.nodes.filter(o=>groupKey(o)===groupKey(n)))delete o.map_candidate;})){notice('初标已拒绝，可撤销；可继续人工标注。');$('nextCandidate').click();}};
 $('autoLabel').onclick=async()=>{
   if(busy||!await commitNode())return;busy=true;renderButtons();notice('正在按原始清晰度分块识别，并生成30站小样；请等待完成…');
-  try{const result=await api('auto-label',{data,engine:$('ocrEngine').value,provider:$('visionProvider').value});remember();data=result.data;step='map';$('filter').value='candidate';selected=null;edge=null;markDirty();render();fit();const r=result.report;notice(`小样完成：${r.sampled}站，站名匹配${r.matched}，初标${r.candidates}，未定位${r.sampled-r.candidates}，视觉复核${r.vision_reviewed}；匹配数不代表准确率。逐站接受、拖动或拒绝后保存草稿。`);}
+  try{const result=await api('auto-label',{data,engine:$('ocrEngine').value,provider:$('visionProvider').value});remember();data=result.data;step='map';$('filter').value='candidate';selected=null;edge=null;markDirty();render();fit();const r=result.report;notice(`小样完成：${r.sampled}站，站名匹配${r.matched}，初标${r.candidates}，未定位${r.sampled-r.candidates}，视觉复核${r.vision_reviewed}${r.ocr_recovered?`，全图文字补检${r.ocr_recovered}处`:""}；匹配数不代表准确率。逐站接受、拖动或拒绝后保存草稿。`);}
   catch(e){notice(e.message);}finally{busy=false;renderButtons();}
 };

@@ -44,6 +44,11 @@ def clean_text(text: object) -> str:
 def name_variants(text: object, *, ocr: bool = False) -> set[str]:
     value = clean_text(text)
     variants = {value}
+    # Workbook normalization can leave “光伏电” while a wrapped map label
+    # ends its first line at “光伏”. Retain the facility type in the alias.
+    solar = re.fullmatch(r"(.{2,})光伏(?:电站|电)?", value)
+    if solar:
+        variants.add(solar.group(1) + "光伏")
     for suffix in FACILITY_SUFFIXES:
         if value.endswith(suffix) and len(value) > len(suffix):
             variants.add(value[: -len(suffix)])
@@ -207,7 +212,49 @@ def refine_circle(gray, x, y, radius, cv2):
     return max(fits, key=lambda f: f[4]) if fits else (x, y, radius, False, best_support)
 
 
-def detect_circle_candidates(image, box: dict[str, float], cv2, *, refine=True) -> list[dict[str, float]]:
+def dark_ring_candidates(crop, cv2):
+    """Find the enclosed inner edge of black station rings despite outgoing lines."""
+    import numpy as np
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    mask = ((hsv[:, :, 2] < 110) & (hsv[:, :, 1] < 100)).astype(np.uint8)*255
+    contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    found = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if len(contour) < 40 or not 400 <= area <= 12000:
+            continue
+        perimeter = cv2.arcLength(contour, True)
+        if not perimeter or 4*math.pi*area/(perimeter*perimeter) < .75:
+            continue
+        (x, y), (a, b), _ = cv2.fitEllipse(contour)
+        if min(a, b) < 24 or max(a, b) > 125 or min(a, b)/max(a, b) < .88:
+            continue
+        radius = (a+b)/4
+        points = contour[:, 0, :].astype(float)
+        residual = np.abs(np.hypot(points[:, 0]-x, points[:, 1]-y)-radius)
+        support = float(np.mean(residual <= 1.8))
+        if support >= .9:
+            found.append((float(x), float(y), float(radius), support))
+    return found
+
+
+def ring_dark_coverage(crop, x, y, radius, cv2):
+    """Angular black-ring evidence, independent of colored sectors inside a symbol."""
+    import numpy as np
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    angles = np.linspace(0, 2*np.pi, 96, endpoint=False)[:, None]
+    radii = np.linspace(radius, radius*1.35, 8)[None, :]
+    xx = np.rint(x+np.cos(angles)*radii).astype(int)
+    yy = np.rint(y+np.sin(angles)*radii).astype(int)
+    valid = (xx >= 0) & (xx < crop.shape[1]) & (yy >= 0) & (yy < crop.shape[0])
+    xx = np.clip(xx, 0, crop.shape[1]-1); yy = np.clip(yy, 0, crop.shape[0]-1)
+    dark = valid & (hsv[yy, xx, 2] < 110) & (hsv[yy, xx, 1] < 100)
+    return float(np.mean(dark.any(axis=1)))
+
+
+def detect_circle_candidates(image, box: dict[str, float], cv2, *, refine=True, voltage=None) -> list[dict[str, float]]:
     import numpy as np
 
     height, width = image.shape[:2]
@@ -230,16 +277,19 @@ def detect_circle_candidates(image, box: dict[str, float], cv2, *, refine=True) 
         minRadius=18 if refine else 22,
         maxRadius=60 if refine else 45,
     )
-    if circles is None:
-        return []
+    measured = []
+    if refine and voltage == 220:
+        measured.extend((x, y, r, True, support, 'dark-ring-contour')
+                        for x, y, r, support in dark_ring_candidates(crop, cv2))
+    for x, y, radius in (() if circles is None else circles[0]):
+        if refine:
+            x, y, radius, refined, support = refine_circle(original_gray, float(x), float(y), float(radius), cv2)
+        else:
+            x, y, radius, refined, support = float(x), float(y), float(radius), False, 0.0
+        measured.append((x, y, radius, refined, support, 'hough'))
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     results = []
-    for local_x, local_y, radius in circles[0]:
-        local_x, local_y, radius = float(local_x), float(local_y), float(radius)
-        refined, support = False, 0.0
-        if refine:
-            local_x, local_y, radius, refined, support = refine_circle(
-                original_gray, local_x, local_y, radius, cv2)
+    for local_x, local_y, radius, refined, support, source in measured:
         x, y, radius = float(local_x + left), float(local_y + top), float(radius)
         if (
             float(box["x"]) - 4 <= x <= float(box["x"]) + float(box["width"]) + 4
@@ -264,6 +314,11 @@ def detect_circle_candidates(image, box: dict[str, float], cv2, *, refine=True) 
             radius_fit = max(radius_fit, 1-min(abs(radius-45)/16, 1))
             score = (.30*math.exp(-distance/80) + .30*min(saturation/150, 1)
                      + .25*support + .15*radius_fit)
+        dark_coverage = ring_dark_coverage(crop, local_x, local_y, radius, cv2) if refine else 0.0
+        if refine and voltage == 220:
+            # Diagram-specific candidate ranking evidence, never a voltage label.
+            # Cross-voltage names still require semantic review in the caller.
+            score = .5*math.exp(-distance/80) + .3*dark_coverage + .2*support
         results.append(
             {
                 "x": round(x, 2),
@@ -274,6 +329,8 @@ def detect_circle_candidates(image, box: dict[str, float], cv2, *, refine=True) 
                 "score": round(score, 3),
                 "refined": refined,
                 "edge_support": round(support, 3),
+                "dark_ring_coverage": round(dark_coverage, 3),
+                "source": source,
             }
         )
     results.sort(key=lambda item: (-int(item['refined']) if refine else 0, -item["score"], item["label_distance"]))
