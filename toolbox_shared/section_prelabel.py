@@ -35,9 +35,9 @@ def deduplicate(records):
     return result
 
 
-OCR_RECIPE = 'native1500-retry2x-native-label-boundaries-v6'
-UPGRADABLE_OCR_RECIPES = {'native1500-baseline', 'native1500-retry2x-v2', 'native1500-retry2x-native-proposals-v3', 'native1500-retry2x-native-token-proposals-v4', 'native1500-retry2x-native-label-proposals-v5'}
-ALGORITHM_VERSION = 'station-ownership-symbol-structure-v11'
+OCR_RECIPE = 'native1500-retry2x-spatial-labels-v7'
+UPGRADABLE_OCR_RECIPES = {'native1500-baseline', 'native1500-retry2x-v2', 'native1500-retry2x-native-proposals-v3', 'native1500-retry2x-native-token-proposals-v4', 'native1500-retry2x-native-label-proposals-v5', 'native1500-retry2x-native-label-boundaries-v6'}
+ALGORITHM_VERSION = 'station-ownership-spatial-labels-v12'
 
 
 def competing_labels(chosen, record, station, labels):
@@ -168,7 +168,7 @@ def retry_difficult(image, records, station_names, read_crop, limit=120):
     return records
 
 
-def recover_text_proposals(image, records, station_names, proposals, read_crop, limit=120, *, proposal_engine='macos-vision'):
+def recover_text_proposals(image, records, station_names, proposals, read_crop, limit=120, *, proposal_engine='macos-vision', min_proposal_confidence=.9):
     """Use secondary boxes only after PP-OCR independently reads the exact name twice."""
     names = sorted(set(station_names))
     found = set()
@@ -186,7 +186,7 @@ def recover_text_proposals(image, records, station_names, proposals, read_crop, 
     attempts = 0
     for proposal in sorted(proposals, key=lambda p: -p['confidence']):
         hits = vocabulary_hits(proposal['text'], names)
-        if proposal['confidence'] < .9 or len(hits) != 1 or not hits & missing:
+        if proposal['confidence'] < min_proposal_confidence or len(hits) != 1 or not hits & missing:
             continue
         if attempts >= limit:
             break
@@ -240,7 +240,7 @@ def recover_text_proposals(image, records, station_names, proposals, read_crop, 
     return records+added
 
 
-def merged_label_proposals(records, station_names):
+def merged_label_proposals(records, station_names, *, min_confidence=.9):
     """Propose crops at explicit token boundaries, never a fuzzy name edit.
 
     A merged box may contain numeric bus graphics or adjacent labels. Estimated
@@ -256,19 +256,26 @@ def merged_label_proposals(records, station_names):
         return set().union(*(index.get(v, set()) for v in name_variants(value, ocr=True)))
     for record in records:
         raw = record['text']
-        if record.get('confidence', 0) < .9 or record.get('status') in ('ignored', 'omission'):
+        if record.get('confidence', 0) < min_confidence or record.get('status') in ('ignored', 'omission'):
             continue
         spans = {(m.start(), m.end(), m.group(), 'bus')
                  for m in re.finditer(r'[\u4e00-\u9fff]{2,8}[ABY]{1,2}(?:电厂|厂|站)?', raw)}
         spans.update((m.start(), m.end(), m.group(), 'numeric')
                      for m in re.finditer(r'[\u4e00-\u9fff]{2,8}(?=\d)', raw))
+        spans.update((m.start(), m.end(), m.group(), 'letter-number')
+                     for m in re.finditer(r'[\u4e00-\u9fff]{2,8}(?=[A-Z]\d)', raw))
         # Split a Chinese-only merged box only when both halves independently
         # identify catalog stations and the whole is not an established name.
-        if re.fullmatch(r'[\u4e00-\u9fff]{4,16}', raw) and not hits(raw):
-            for split in range(2, len(raw)-1):
-                if len(hits(raw[:split])) == len(hits(raw[split:])) == 1:
-                    spans.update(((0,split,raw[:split],'paired-names'),
-                                  (split,len(raw),raw[split:],'paired-names')))
+        if not hits(raw):
+            for block in re.finditer(r'[\u4e00-\u9fff]{4,16}',raw):
+                value=block.group()
+                if hits(value):
+                    continue
+                for split in range(2,len(value)-1):
+                    if len(hits(value[:split])) == len(hits(value[split:])) == 1:
+                        start=block.start()
+                        spans.update(((start,start+split,value[:split],'paired-names'),
+                                      (start+split,block.end(),value[split:],'paired-names')))
         for begin, finish, token, kind in sorted(spans):
             if len(hits(token)) != 1 or (begin, finish) == (0, len(raw)):
                 continue
@@ -299,13 +306,139 @@ def recover_merged_labels(image, records, station_names, read_crop):
                                   limit=120, proposal_engine='ppocr-label-token')
 
 
-def supplement_native_boxes(image, records, station_names, read_crop):
+def joined_label_proposals(records, station_names):
+    """Adjacent fragments or a facility suffix propose pixels, never corrected text."""
+    index = {}
+    for name in station_names:
+        for variant in name_variants(name):
+            index.setdefault(variant, set()).add(name)
+    def hits(text):
+        return set().union(*(index.get(v, set()) for v in name_variants(text, ocr=True)))
+    eligible = [r for r in records if r.get('confidence', 0) >= .3
+                and r.get('status') not in ('ignored', 'omission') and not r.get('ocr_conflict')
+                and re.fullmatch(r'[\u4e00-\u9fff]{1,8}[ABY]?', r['text'])]
+    bins = {}
+    for r in eligible:
+        b = r['box']; bins.setdefault((int(b['x']//128), int(b['y']//128)), []).append(r)
+    proposals = []; seen = set()
+    for a in eligible:
+        first = a['box']; bx, by = int(first['x']//128), int(first['y']//128)
+        nearby = [r for x in range(bx-1,bx+2) for y in range(by-1,by+2) for r in bins.get((x,y), [])]
+        for b in nearby:
+            if a is b:
+                continue
+            second = b['box']; height = max(first['height'], second['height'])
+            if min(first['height'], second['height']) < .55*height:
+                continue
+            text = a['text']+b['text']; matched = hits(text)
+            gap = second['x']-first['x']-first['width']
+            aligned = abs(first['y']+first['height']/2-second['y']-second['height']/2) <= .35*height
+            horizontal = (len(a['text']) <= 2 and len(b['text']) <= 3 and len(matched) == 1
+                          and -.35*min(first['width'],second['width']) <= gap <= .4*height and aligned)
+            vertical_gap = second['y']-first['y']-first['height']
+            stacked = (b['text'] in ('储能站','光伏电站') and re.fullmatch(r'[\u4e00-\u9fff]{2,8}',a['text'])
+                       and -.35*height <= vertical_gap <= .7*height
+                       and abs(first['x']+first['width']/2-second['x']-second['width']/2)
+                       <= .5*max(first['width'],second['width']))
+            if not (horizontal or stacked):
+                continue
+            x, y = min(first['x'],second['x']), min(first['y'],second['y'])
+            box = dict(x=x,y=y,width=max(first['x']+first['width'],second['x']+second['width'])-x,
+                       height=max(first['y']+first['height'],second['y']+second['height'])-y)
+            key = (text, *(round(box[k]) for k in ('x','y','width','height')))
+            if key in seen:
+                continue
+            seen.add(key)
+            proposals.append(dict(text=text, box=box, parts=[a,b], layout='horizontal' if horizontal else 'stacked-facility',
+                                  exact_name=bool(matched), confidence=min(a['confidence'],b['confidence'])))
+    return sorted(proposals, key=lambda p: (-p['exact_name'], -p['confidence']))
+
+
+def recover_joined_labels(image, records, station_names, proposals, read_crop, *, limit=80):
+    """Confirm the whole horizontal name or both stacked lines in two treatments."""
+    names = sorted(set(station_names)); found = set()
+    for r in records:
+        if r.get('confidence',0) >= .8 and not r.get('ocr_conflict') and (not r.get('ocr_retried') or r.get('retry_agreed')):
+            found.update(vocabulary_hits(r['text'],names))
+    added = []; cache = {}; attempts = 0
+    for proposal in proposals:
+        if vocabulary_hits(proposal['text'],names) & found:
+            continue
+        if attempts >= limit:
+            break
+        attempts += 1; alternatives = []; votes = []
+        parts = [dict(box=proposal['box'])] if proposal['layout']=='horizontal' else proposal['parts']
+        for treatment in ('color2x','gray2x'):
+            strings = ['']; confidence = 1.0
+            for i, part in enumerate(parts):
+                padding = 3 if proposal['layout']=='horizontal' else 6
+                b = part['box']; bounds = (max(0,int(b['x'])-padding),max(0,int(b['y'])-padding),
+                    min(image.width,math.ceil(b['x']+b['width'])+padding),min(image.height,math.ceil(b['y']+b['height'])+padding))
+                key = (bounds,treatment)
+                if key not in cache:
+                    crop = image.crop(bounds); crop = crop.resize((crop.width*2,crop.height*2),Image.Resampling.LANCZOS)
+                    if treatment=='gray2x':
+                        crop = ImageOps.autocontrast(ImageOps.grayscale(crop)).convert('RGB')
+                    cache[key] = list(read_crop(crop))
+                reads = cache[key]
+                alternatives.extend(dict(text=t,confidence=float(s),treatment=treatment,part=i,crop_bounds=bounds) for t,s in reads)
+                good = [(t,float(s)) for t,s in reads if s >= .9 and re.fullmatch(r'[\u4e00-\u9fff]{1,12}[ABY]?',t)]
+                if len(good)!=1:
+                    strings = []; break
+                strings = [prefix+good[0][0] for prefix in strings];confidence=min(confidence,good[0][1])
+            votes.append({t:confidence for t in strings if len(vocabulary_hits(t,names))==1})
+        agreed = set(votes[0]) & set(votes[1])
+        if len(agreed)!=1:
+            continue
+        text = agreed.pop()
+        added.append(dict(text=text,confidence=min(v[text] for v in votes),box=deepcopy(proposal['box']),
+                          category='node',ocr_recovered=True,proposal_engine='ppocr-spatial-join',
+                          proposal_text=proposal['text'],proposal_source=dict(layout=proposal['layout'],parts=deepcopy(proposal['parts'])),
+                          part_reads=alternatives,
+                          alternatives=[dict(text=t,confidence=s,treatment=treatment) for treatment,vote in zip(('color2x','gray2x'),votes) for t,s in vote.items()],
+                          ocr_retried=True,retry_agreed=True,ocr_conflict=False))
+    return records+added
+
+
+def redetect_facility_lines(image, records, read_detection, *, limit=16):
+    """Re-detect only tall mixed facility boxes; all outputs remain proposals."""
+    if read_detection is None:
+        return []
+    proposals = []; count = 0
+    for r in sorted(records,key=lambda r:-r.get('confidence',0)):
+        b = r['box']; characters = max(1,len(r['text']))
+        if (r.get('status') in ('ignored','omission') or not re.search(r'储能站|光伏电站',r['text'])
+                or b['height'] <= 1.4*b['width']/characters):
+            continue
+        if count >= limit:
+            break
+        count += 1
+        left,top=max(0,int(b['x'])-8),max(0,int(b['y'])-8)
+        crop=image.crop((left,top,min(image.width,math.ceil(b['x']+b['width'])+8),min(image.height,math.ceil(b['y']+b['height'])+8)))
+        crop=crop.resize((crop.width*2,crop.height*2),Image.Resampling.LANCZOS)
+        for i,item in enumerate(read_detection(crop)):
+            box=item['box']
+            proposals.append(dict(item,id=f"local:{r.get('id')}:{i}",box=dict(x=left+box['x']/2,y=top+box['y']/2,width=box['width']/2,height=box['height']/2),
+                                  proposal_source=dict(engine='ppocr-local-detection',source_record_id=r.get('id'),box=deepcopy(b))))
+    return proposals
+
+
+def supplement_native_boxes(image, records, station_names, read_crop, read_detection=None):
     try:
         proposals = recognize(image, 'macos-vision', enhanced=False)
     except ValueError:
         warnings.warn('本机文字框补检不可用，保留PP-OCRv6原结果；需要macOS Command Line Tools', RuntimeWarning)
-        return records
-    return recover_text_proposals(image, records, station_names, proposals, read_crop)
+        if read_detection is None:
+            return records
+        proposals = []
+    records = recover_text_proposals(image, records, station_names, proposals, read_crop)
+    auxiliary = [dict(p,id='native:'+p['id']) for p in proposals]
+    tokens = merged_label_proposals(auxiliary,station_names,min_confidence=.3)
+    records = recover_text_proposals(image,records,station_names,auxiliary+tokens,read_crop,limit=80,
+                                    proposal_engine='native-low-confidence-proposal',min_proposal_confidence=.3)
+    auxiliary += redetect_facility_lines(image,records,read_detection)
+    joins = joined_label_proposals(records+auxiliary,station_names)
+    return recover_joined_labels(image,records,station_names,joins,read_crop)
 
 
 def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), enhanced=True, base_records=None):
@@ -367,7 +500,16 @@ def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), en
                     return [(r['text'], r['confidence']) for r in json.loads(output.stdout)]
             records = retry_difficult(image, deduplicate(records), station_names, read_crop)
             if paddle is not None:
-                records = supplement_native_boxes(image, records, station_names, read_crop)
+                def read_detection(view):
+                    path=root/'local-detection.png';view.save(path)
+                    found=[]
+                    for prediction in paddle.predict(str(path)):
+                        content=prediction.json['res']
+                        for value,score,box in zip(content['rec_texts'],content['rec_scores'],content['rec_boxes']):
+                            x0,y0,x1,y1=map(float,box)
+                            found.append(dict(text=value,confidence=float(score),box=dict(x=x0,y=y0,width=x1-x0,height=y1-y0)))
+                    return found
+                records = supplement_native_boxes(image, records, station_names, read_crop,read_detection)
                 records = recover_merged_labels(image, records, station_names, read_crop)
     for i, r in enumerate(records):
         r['id'] = str(i)
@@ -511,6 +653,11 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
                     if not chosen:
                         row['reason'] = '视觉复核未通过，需人工定位'
                 if chosen and enhanced and reviewer is None and group[1] == 220:
+                    if '光伏' in group[0] and not chosen.get('solar_glyph'):
+                        row['facility_symbol_conflict'] = dict(expected='solar-panel',point={k:chosen[k] for k in ('x','y')})
+                        row['reason'] = '光伏站名与候选图符类型未一致，需视觉或人工核对'
+                        chosen = None
+                if chosen and enhanced and reviewer is None and group[1] == 220:
                     partials = partial_symbol_conflicts(chosen, circles)
                     if partials:
                         row['partial_symbol_conflicts'] = partials
@@ -557,6 +704,9 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
                     if chosen.get('generator_glyph'):
                         row['symbol_kind'] = 'sine-generator'
                         row['generator_glyph'] = chosen['generator_glyph']
+                    if chosen.get('solar_glyph'):
+                        row['symbol_kind'] = 'solar-panel'
+                        row['solar_glyph'] = chosen['solar_glyph']
                     row['circle_margin'] = round(chosen['score']-max((c['score'] for c in circles if c is not chosen), default=0), 3)
             elif ambiguous:
                 row['reason'] = '同名多位置或跨电压，需人工定位'

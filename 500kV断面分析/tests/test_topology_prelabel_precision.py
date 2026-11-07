@@ -16,12 +16,90 @@ except ImportError:
 import numpy as np
 from PIL import Image
 from toolbox_shared import section_prelabel as auto
-from toolbox_shared.section_annotation_geometry import refine_circle, detect_circle_candidates, dark_ring_candidates, split_lobe_candidates, generator_glyph_evidence
+from toolbox_shared.section_annotation_geometry import refine_circle, detect_circle_candidates, dark_ring_candidates, split_lobe_candidates, generator_glyph_evidence, solar_glyph_evidence
 from toolbox_shared.section_vision_review import configured_reviewer, review_images, decisions_reviewer, review_key, circle_signature
 import test_topology_annotation as annotation
 
 
 class PrecisionTests(unittest.TestCase):
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_solar_panel_cells_reject_neighbor_wind_symbol(self):
+        image=cv2.imread(str(Path(__file__).resolve().parents[1]/'接线图.png'))
+        self.assertEqual(solar_glyph_evidence(image,388.87,3145.12,27.4,cv2),dict(kind='solar-panel',cells=4))
+        self.assertIsNone(solar_glyph_evidence(image,370.18,3049.56,27.32,cv2))
+
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_solar_name_cannot_accept_neighbor_circle_without_panel_evidence(self):
+        data=annotation.annotated()
+        for n in data['nodes']:n.pop('map_anchor',None)
+        data['nodes'][0].update(station='友好光伏电',voltage=220);data['edges']=[]
+        record=self.record('友好光伏电站',.99)
+        wrong=dict(x=200,y=150,radius=25,score=.9,refined=True)
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'map.png';Image.new('RGB',(1000,700),'white').save(path)
+            with patch.object(auto.maps,'asset_path',return_value=path),patch.object(auto,'detect_circle_candidates',return_value=[wrong]):
+                result=auto.prelabel(data,records=[record],sample=[('友好光伏电',220)])
+        self.assertIsNone(result['report']['rows'][0]['point'])
+        self.assertIn('facility_symbol_conflict',result['report']['rows'][0])
+
+    def test_horizontal_fragments_require_whole_name_reread(self):
+        a=self.record('华',.99);a['box']=dict(x=30,y=40,width=36,height=35)
+        b=self.record('圃',.798);b['id']='b';b['box']=dict(x=63,y=42,width=31,height=31)
+        original=deepcopy([a,b]);proposals=auto.joined_label_proposals([a,b],['华圃'])
+        self.assertEqual(len(proposals),1)
+        self.assertEqual(proposals[0]['layout'],'horizontal')
+        result=auto.recover_joined_labels(Image.new('RGB',(300,200)),[a,b],['华圃'],proposals,lambda _: [('华圃',.99)])
+        self.assertEqual(result[:2],original);self.assertEqual(result[-1]['text'],'华圃')
+        rejected=auto.recover_joined_labels(Image.new('RGB',(300,200)),[a,b],['华圃'],proposals,lambda _: [('华湖',.99)])
+        self.assertEqual(rejected,original)
+        b['box']['x']=200
+        self.assertEqual(auto.joined_label_proposals([a,b],['华圃']),[])
+
+    def test_stacked_facility_preserves_type_and_indexes_only_whole_reads(self):
+        a=self.record('友好',.3);a['box']=dict(x=50,y=40,width=60,height=30)
+        b=self.record('光伏电站',.99);b['id']='b';b['box']=dict(x=35,y=73,width=100,height=30)
+        proposals=auto.joined_label_proposals([a,b],['友好光伏电'])
+        replies=iter([('友好',.99),('光伏电站',.99)]*2)
+        result=auto.recover_joined_labels(Image.new('RGB',(300,200)),[a,b],['友好光伏电'],proposals,lambda _: [next(replies)])
+        self.assertEqual(result[-1]['text'],'友好光伏电站')
+        self.assertEqual({r['text'] for r in result[-1]['alternatives']},{'友好光伏电站'})
+        self.assertEqual(len(result[-1]['part_reads']),4)
+        replies=iter([('友好',.99),('风电站',.99)]*2)
+        self.assertEqual(auto.recover_joined_labels(Image.new('RGB',(300,200)),[a,b],['友好光伏电'],proposals,lambda _: [next(replies)]),[a,b])
+
+    def test_spatial_join_does_not_accept_cross_treatment_conflict_or_ignored_parts(self):
+        a=self.record('华',.99);a['box']=dict(x=30,y=40,width=36,height=35)
+        b=self.record('圃',.99);b['id']='b';b['box']=dict(x=63,y=42,width=31,height=31)
+        proposals=auto.joined_label_proposals([a,b],['华圃','华湖'])
+        replies=iter([('华圃',.99),('华湖',.99)])
+        result=auto.recover_joined_labels(Image.new('RGB',(300,200)),[a,b],['华圃','华湖'],proposals,lambda _: [next(replies)])
+        self.assertEqual(result,[a,b]);b['status']='ignored'
+        self.assertEqual(auto.joined_label_proposals([a,b],['华圃']),[])
+
+    def test_low_confidence_box_is_only_a_proposal_and_needs_two_strong_reads(self):
+        proposal=self.record('伯治',.3)
+        for score,accepted in [(.99,True),(.7,False)]:
+            result=auto.recover_text_proposals(Image.new('RGB',(300,200)),[],['伯治'],[proposal],lambda _: [('伯治',score)],min_proposal_confidence=.3)
+            self.assertEqual(bool(result),accepted)
+            if accepted:self.assertEqual(result[0]['confidence'],.99)
+        raw=self.record('伯治C3000',.5)
+        self.assertEqual(auto.merged_label_proposals([raw],['伯治']),[])
+        tokens=auto.merged_label_proposals([raw],['伯治'],min_confidence=.3)
+        self.assertEqual([r['text'] for r in tokens],['伯治'])
+        paired=self.record('1810掌洲立新B',.5)
+        tokens=auto.merged_label_proposals([paired],['掌洲','立新'],min_confidence=.3)
+        self.assertEqual({r['text'] for r in tokens},{'掌洲','立新'})
+
+    def test_local_redetection_maps_scaled_boxes_without_accepting_them(self):
+        record=self.record('储能站洪冠',.99);record['box']=dict(x=100,y=80,width=180,height=70)
+        calls=[]
+        def detect(view):
+            calls.append(view.size)
+            return [dict(text='储能站',confidence=.95,box=dict(x=20,y=30,width=100,height=40))]
+        result=auto.redetect_facility_lines(Image.new('RGB',(400,300)),[record,record],detect,limit=1)
+        self.assertEqual(len(calls),1);self.assertEqual(result[0]['box'],dict(x=102,y=87,width=50,height=20))
+        self.assertNotIn('ocr_recovered',result[0]);self.assertEqual(record['text'],'储能站洪冠')
+
     @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
     def test_split_symbol_midpoint_and_rejection_of_missing_or_different_lobe(self):
         image = cv2.imread(str(Path(__file__).resolve().parents[1]/'接线图.png'))

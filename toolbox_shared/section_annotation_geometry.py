@@ -351,6 +351,34 @@ def generator_glyph_evidence(crop, x, y, radius, cv2):
     return dict(kind='sine-generator', stroke_fraction=round(area/(w*h), 3))
 
 
+def solar_glyph_evidence(crop, x, y, radius, cv2):
+    """Four similarly sized panel cells distinguish this icon from wind blades."""
+    import numpy as np
+
+    left,top=max(0,math.floor(x-radius-3)),max(0,math.floor(y-radius-3))
+    view=crop[top:min(crop.shape[0],math.ceil(y+radius)+4),left:min(crop.shape[1],math.ceil(x+radius)+4)]
+    if not view.size:
+        return None
+    hsv=cv2.cvtColor(view,cv2.COLOR_BGR2HSV)
+    mask=((hsv[:,:,2]<110)&(hsv[:,:,1]<100)).astype(np.uint8)*255
+    contours,hierarchy=cv2.findContours(mask,cv2.RETR_CCOMP,cv2.CHAIN_APPROX_SIMPLE)
+    cells=[]
+    for i,c in enumerate(contours):
+        if hierarchy[0][i][3]<0:
+            continue
+        area=cv2.contourArea(c); perimeter=cv2.arcLength(c,True)
+        polygon=cv2.approxPolyDP(c,.04*perimeter,True)
+        if not (.08*radius**2 <= area <= .3*radius**2 and 4 <= len(polygon) <= 5
+                and cv2.isContourConvex(polygon)):
+            continue
+        m=cv2.moments(c);cx,cy=m['m10']/m['m00'],m['m01']/m['m00']
+        if math.hypot(cx-(x-left),cy-(y-top)) <= .95*radius:
+            cells.append(area)
+    if len(cells)==4 and min(cells)/max(cells)>=.8:
+        return dict(kind='solar-panel',cells=4)
+    return None
+
+
 def detect_circle_candidates(image, box: dict[str, float], cv2, *, refine=True, voltage=None) -> list[dict[str, float]]:
     import numpy as np
 
@@ -434,6 +462,9 @@ def detect_circle_candidates(image, box: dict[str, float], cv2, *, refine=True, 
             glyph = generator_glyph_evidence(crop, local_x, local_y, radius, cv2)
             if glyph:
                 results[-1]['generator_glyph'] = glyph
+            solar=solar_glyph_evidence(crop,local_x,local_y,radius,cv2)
+            if solar:
+                results[-1]['solar_glyph']=solar
     if refine and voltage == 220:
         for shape in split_lobe_candidates(crop, cv2):
             x, y = shape['x']+left, shape['y']+top
