@@ -35,9 +35,9 @@ def deduplicate(records):
     return result
 
 
-OCR_RECIPE = 'native1500-retry2x-native-label-proposals-v5'
-UPGRADABLE_OCR_RECIPES = {'native1500-baseline', 'native1500-retry2x-v2', 'native1500-retry2x-native-proposals-v3', 'native1500-retry2x-native-token-proposals-v4'}
-ALGORITHM_VERSION = 'station-ownership-label-tokens-partial-v9'
+OCR_RECIPE = 'native1500-retry2x-native-label-boundaries-v6'
+UPGRADABLE_OCR_RECIPES = {'native1500-baseline', 'native1500-retry2x-v2', 'native1500-retry2x-native-proposals-v3', 'native1500-retry2x-native-token-proposals-v4', 'native1500-retry2x-native-label-proposals-v5'}
+ALGORITHM_VERSION = 'station-ownership-label-boundaries-v10'
 
 
 def competing_labels(chosen, record, station, labels):
@@ -176,28 +176,48 @@ def recover_text_proposals(image, records, station_names, proposals, read_crop, 
         bounds = (max(0, int(b['x'])-6), max(0, int(b['y'])-6),
                   min(image.width, math.ceil(b['x']+b['width'])+6),
                   min(image.height, math.ceil(b['y']+b['height'])+6))
-        crop = image.crop(bounds)
-        if not crop.width or not crop.height:
-            continue
-        crop = crop.resize((crop.width*2, crop.height*2), Image.Resampling.LANCZOS)
+        regions = [('padded', bounds)]
+        # Character widths only propose bounded pixel regions. They never
+        # supply replacement text. A failed merged-token read can include a
+        # neighboring line number even with six pixels of usual padding.
+        unit = proposal.get('boundary_unit')
+        if unit:
+            for offset in (0, .12, -.12):
+                left = max(0, int(b['x']+offset*unit))
+                right = min(image.width, math.ceil(b['x']+b['width']+offset*unit))
+                regions.append((f'boundary:{offset}', (left, bounds[1], right, bounds[3])))
         alternatives = []
-        votes = []
-        for treatment, view in (('color2x', crop), ('gray2x', ImageOps.autocontrast(ImageOps.grayscale(crop)).convert('RGB'))):
-            accepted = {}
-            for value, score in read_crop(view):
-                alternatives.append(dict(text=value, confidence=float(score), treatment=treatment))
-                if score >= .9 and vocabulary_hits(value, names) == hits:
-                    accepted[value] = float(score)
-            votes.append(accepted)
-        agreed = set(votes[0]) & set(votes[1])
-        if len(agreed) != 1:
-            continue
-        text = agreed.pop()
-        added.append(dict(text=text, confidence=min(v[text] for v in votes), box=deepcopy(b),
-                          category='node', ocr_recovered=True, proposal_engine=proposal_engine,
-                          proposal_text=proposal['text'], source_record_id=proposal.get('source_record_id'), alternatives=alternatives,
-                          proposal_source=deepcopy(proposal.get('proposal_source')),
-                          ocr_retried=True, retry_agreed=True, ocr_conflict=False))
+        for variant, region in regions:
+            crop = image.crop(region)
+            if not crop.width or not crop.height:
+                continue
+            crop = crop.resize((crop.width*2, crop.height*2), Image.Resampling.LANCZOS)
+            votes = []
+            conflicting_read = False
+            for treatment, view in (('color2x', crop), ('gray2x', ImageOps.autocontrast(ImageOps.grayscale(crop)).convert('RGB'))):
+                accepted = {}
+                for value, score in read_crop(view):
+                    alternatives.append(dict(text=value, confidence=float(score), treatment=treatment,
+                                             crop_variant=variant, crop_bounds=region))
+                    read_hits = vocabulary_hits(value, names)
+                    if score >= .9 and read_hits and read_hits != hits:
+                        conflicting_read = True
+                    if score >= .9 and read_hits == hits:
+                        accepted[value] = float(score)
+                votes.append(accepted)
+            if conflicting_read:
+                break
+            agreed = set(votes[0]) & set(votes[1])
+            if len(agreed) != 1:
+                continue
+            text = agreed.pop()
+            added.append(dict(text=text, confidence=min(v[text] for v in votes), box=deepcopy(b),
+                              category='node', ocr_recovered=True, proposal_engine=proposal_engine,
+                              proposal_text=proposal['text'], source_record_id=proposal.get('source_record_id'), alternatives=alternatives,
+                              proposal_source=deepcopy(proposal.get('proposal_source')),
+                              crop_variant=variant, crop_bounds=region,
+                              ocr_retried=True, retry_agreed=True, ocr_conflict=False))
+            break
     return records+added
 
 
@@ -220,7 +240,7 @@ def merged_label_proposals(records, station_names):
         if record.get('confidence', 0) < .9 or record.get('status') in ('ignored', 'omission'):
             continue
         spans = {(m.start(), m.end(), m.group(), 'bus')
-                 for m in re.finditer(r'[\u4e00-\u9fff]{2,8}[ABY]{1,2}', raw)}
+                 for m in re.finditer(r'[\u4e00-\u9fff]{2,8}[ABY]{1,2}(?:电厂|厂|站)?', raw)}
         spans.update((m.start(), m.end(), m.group(), 'numeric')
                      for m in re.finditer(r'[\u4e00-\u9fff]{2,8}(?=\d)', raw))
         # Split a Chinese-only merged box only when both halves independently
@@ -248,6 +268,7 @@ def merged_label_proposals(records, station_names):
                 boxes.insert(0, narrow)
             for proposed in boxes:
                 proposals.append(dict(text=token, confidence=record['confidence'], box=proposed,
+                                      boundary_unit=b['width']/total,
                                       source_record_id=record.get('id'),
                                       proposal_source=dict(id=record.get('id'), text=raw, box=deepcopy(b), kind=kind)))
     return proposals

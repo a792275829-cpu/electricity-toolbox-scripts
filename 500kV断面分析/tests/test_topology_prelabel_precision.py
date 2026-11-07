@@ -1,5 +1,6 @@
 """Precision regressions: preserve abstention and measure geometry independently."""
 from copy import deepcopy
+from itertools import cycle
 from io import BytesIO
 import json
 import math
@@ -96,9 +97,47 @@ class PrecisionTests(unittest.TestCase):
         record = self.record('双岗B科然电', .99)
         for values in ([('双岗B', .99), ('双安B', .99)], [('科然电', .99)]*2,
                        [('双岗B', .99), ('双岗B', .7)]):
-            replies = iter(values)
+            replies = cycle(values)
             result = auto.recover_merged_labels(Image.new('RGB',(300,200)),[record],['双岗','双安','科然电'],lambda _: [next(replies)])
             self.assertEqual(result, [record])
+
+    def test_merged_factory_keeps_suffix_and_recovers_only_from_actual_boundary_reads(self):
+        record = self.record('迎宾N2830润洲B厂', .99)
+        record['box'] = dict(x=60, y=60, width=228, height=43)
+        original = deepcopy(record)
+        proposals = auto.merged_label_proposals([record], ['润洲B厂'])
+        self.assertEqual([p['text'] for p in proposals], ['润洲B厂'])
+        sizes = []
+        def read(view):
+            sizes.append(view.size)
+            return [('0润洲B厂' if len(sizes) <= 2 else '润洲B厂', .99)]
+        result = auto.recover_merged_labels(Image.new('RGB', (500,200)), [record], ['润洲B厂'], read)
+        self.assertEqual(record, original)
+        self.assertEqual(result[-1]['text'], '润洲B厂')
+        self.assertEqual(result[-1]['crop_variant'], 'boundary:0')
+        self.assertEqual(len(sizes), 4)
+        self.assertLess(sizes[2][0], sizes[0][0])
+        self.assertEqual(len(result[-1]['crop_bounds']), 4)
+
+    def test_boundary_search_never_accepts_consistent_neighbor_or_single_read(self):
+        record = self.record('迎宾N2830润洲B厂', .99)
+        for replies in ([('润洲A厂', .99)]*8,
+                        [('润洲B厂', .99), ('润洲B厂', .6)]*4):
+            values = iter(replies)
+            result = auto.recover_merged_labels(Image.new('RGB',(300,200)), [record],
+                                               ['润洲B厂','润洲A厂'], lambda _: [next(values)])
+            self.assertEqual(result, [record])
+
+    def test_boundary_search_stops_on_conflicting_station_evidence(self):
+        record = self.record('迎宾N2830润洲B厂', .99)
+        calls = []
+        def read(_):
+            calls.append(1)
+            return [('润洲A厂' if len(calls)==1 else '润洲B厂', .99)]
+        result = auto.recover_merged_labels(Image.new('RGB',(300,200)), [record],
+                                           ['润洲B厂','润洲A厂'], read)
+        self.assertEqual(result, [record])
+        self.assertEqual(len(calls), 2)
 
     def test_plain_short_names_and_bus_labels_do_not_create_fuzzy_proposals(self):
         records = [self.record('双安B', .99),self.record('凯旅', .99),self.record('F1810', .99)]
