@@ -134,8 +134,35 @@ def _energy_comparison_metrics(
     realtime_fee = None
     if ENERGY_METRICS_SHEET_NAME in workbook.sheetnames:
         sheet = workbook[ENERGY_METRICS_SHEET_NAME]
-        realtime_energy_parts = [_number(sheet[cell].value) for cell in ("F72", "F81")]
-        realtime_price_parts = [_number(sheet[cell].value) for cell in ("P72", "P81")]
+        _, realtime_range = _appendix_ranges(sheet)
+        _, start, _, end = range_boundaries(realtime_range)
+        labels = ("分公司火电", "分公司新能源")
+        rows = {
+            label: [row for row in range(start, end + 1)
+                    if _normalized_label(sheet.cell(row, 1).value) == label]
+            for label in labels
+        }
+        summary_row = rows[labels[0]][0] if len(rows[labels[0]]) == 1 else None
+        energy_column = (
+            _find_header_column_by_hierarchy(
+                sheet, "实时", ("电量",), before_row=summary_row, after_row=start
+            ) if summary_row is not None else None
+        )
+        price_column = None
+        if summary_row is not None:
+            for label in ("电能电价", "电能均价", "电能量均价（不含容量/机制）"):
+                price_column = _find_standalone_header_column(sheet, label, before_row=summary_row)
+                if price_column is not None:
+                    break
+        complete = all(len(rows[label]) == 1 for label in labels)
+        realtime_energy_parts = [
+            _number(sheet.cell(rows[label][0], energy_column).value)
+            if complete and energy_column is not None else None for label in labels
+        ]
+        realtime_price_parts = [
+            _number(sheet.cell(rows[label][0], price_column).value)
+            if complete and price_column is not None else None for label in labels
+        ]
         if all(energy is not None for energy in realtime_energy_parts):
             realtime_energy = 0.0
             realtime_amount = 0.0

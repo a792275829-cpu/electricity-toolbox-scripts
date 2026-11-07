@@ -372,6 +372,14 @@ class EnergyComparisonTests(unittest.TestCase):
         workbook = openpyxl.Workbook()
         sheet = workbook.active
         sheet.title = MODULE.ENERGY_METRICS_SHEET_NAME
+        sheet["A68"] = date(2026, 10, 11)
+        sheet["F70"] = "实时"
+        sheet.merge_cells("F70:G70")
+        sheet["F71"] = "电量"
+        sheet["G71"] = "电价"
+        sheet["P70"] = "电能均价"
+        sheet["A72"] = "分公司火电"
+        sheet["A81"] = "分公司新能源"
         sheet["F72"], sheet["P72"] = energy_one, price_one
         sheet["F81"], sheet["P81"] = energy_two, price_two
         return workbook

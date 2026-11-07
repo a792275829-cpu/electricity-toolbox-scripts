@@ -134,6 +134,9 @@ class ReportBuilder:
             self.hourly.update(self._parse_blocks("汕头", "汕头"))
             self.hourly.update(self._parse_blocks("海门", "海门"))
             self.hourly.update(self._parse_blocks("东莞", "东莞"))
+            for unit in ("海门#5机组", "海门#6机组"):
+                if unit in self.hourly and unit not in self.companies["海门"]:
+                    self.companies["海门"].append(unit)
             self._parse_renewables()
             self.compare_mode = "realtime_vs_dayahead" if self._has_realtime_data() else "dayahead_vs_ml"
             self._fill_dongguan_summary()
@@ -242,7 +245,7 @@ class ReportBuilder:
                 elif label in {"汕头", "海门", "东莞"}:
                     plant = label
                     name = label
-                elif not label and plant in {"汕头", "海门"} and re.fullmatch(r"#[1-4]机组", unit):
+                elif not label and plant in {"汕头", "海门"} and re.fullmatch(r"#\d+机组", unit):
                     name = f"{plant}{unit}"
                 else:
                     continue
@@ -252,15 +255,20 @@ class ReportBuilder:
             missing = set(summary_rows) - found.keys()
             if missing:
                 raise ValueError(f"新版交易汇总页缺少标签：{'、'.join(sorted(missing))}")
-            summary_rows = {name: found[name] for name in summary_rows}
+            summary_rows = {
+                name: row for name, row in found.items()
+                if name in summary_rows or re.fullmatch(r"海门#[56]机组", name)
+            }
+        self.companies["海门"] = [f"海门#{number}机组" for number in range(1, 7)
+                                   if f"海门#{number}机组" in summary_rows]
         for name, summary_row in summary_rows.items():
-            if name not in brief_rows:
+            brief_row = brief_rows.get(name)
+            if brief_row is None and not re.fullmatch(r"海门#[56]机组", name):
                 raise ValueError(f"快报汇总区缺少标签：{name}")
-            brief_row = brief_rows[name]
             self.summary[name] = {
-                "capacity_10mw": num(brief_value(brief_row, 3), None),
+                "capacity_10mw": num(brief_value(brief_row, 3), None) if brief_row else None,
                 "cost": cell_value(summary_row, 3),
-                "load_rate": num(brief_value(brief_row, 11), None),
+                "load_rate": num(brief_value(brief_row, 11), None) if brief_row else None,
                 "da_mwh": num(cell_value(summary_row, 7)) * 10,
                 "da_price": num(cell_value(summary_row, 8)),
                 "ml_mwh": num(cell_value(summary_row, 4)) * 10,
@@ -360,7 +368,7 @@ class ReportBuilder:
             if not isinstance(label, str):
                 continue
             clean = label.strip()
-            if not (clean in ["1号机", "2号机", "3号机", "4号机"] or (clean.startswith("#") and "机组" in clean)):
+            if not (re.fullmatch(r"[1-6]号机", clean) or (clean.startswith("#") and "机组" in clean)):
                 continue
             data = []
             ok = True

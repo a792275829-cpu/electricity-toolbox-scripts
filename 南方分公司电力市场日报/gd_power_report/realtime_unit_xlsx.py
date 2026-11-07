@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from gd_power_report.workbook_reader import load_value_workbook as load_workbook, reuse_workbook_inputs
+from gd_power_report.company_clearing_xlsx import _appendix_ranges, _date_in_range
 
 
 EXPECTED_UNITS = {
@@ -23,6 +24,10 @@ _METRICS = {
     "实时出清": "realtime_mwh",
     "实际上网电量": "actual_mwh",
 }
+
+# A recap can list commissioning units before their hourly sheets exist.
+# Include these units only when their own complete hourly blocks are present.
+OPTIONAL_UNITS = {"海门": {"5号机": "#5机组", "6号机": "#6机组"}}
 
 
 def _normal(value: Any) -> str:
@@ -83,13 +88,8 @@ def _realtime_date(workbook: Any, expected_date: date) -> date:
             )
         return detected
     sheet = workbook["新"]
-    detected = _as_date(sheet["A68"].value)
-    if detected is None:
-        for row in range(60, min(sheet.max_row, 100) + 1):
-            candidate = _as_date(sheet.cell(row, 1).value)
-            if candidate:
-                detected = candidate
-                break
+    _, realtime_range = _appendix_ranges(sheet)
+    detected = _date_in_range(sheet, realtime_range)
     if detected is None:
         raise ValueError("无法识别新工作表的实时复盘日期")
     if detected != expected_date:
@@ -167,6 +167,14 @@ def parse_realtime_unit_workbook(path: str | Path, expected_date: date) -> dict[
             raise ValueError(f"实时机组 Excel 缺少电厂工作表：{plant}")
         sheet = workbook[plant]
         blocks = _unit_blocks(sheet, plant)
+        optional = OPTIONAL_UNITS.get(plant, {})
+        present_titles = {
+            _normal(sheet.cell(row, 1).value) for row in range(1, sheet.max_row + 1)
+        } if optional else set()
+        unit_map = {**unit_map, **{
+            source_unit: unit for source_unit, unit in optional.items()
+            if source_unit in present_titles
+        }}
         units: list[dict[str, Any]] = []
         for source_unit, unit in unit_map.items():
             if source_unit not in blocks:

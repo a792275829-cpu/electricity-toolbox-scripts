@@ -199,9 +199,49 @@ class ReportSummaryTests(unittest.TestCase):
         self.assertEqual(builder.summary["海门#4机组"]["da_price"], 422)
         self.assertEqual(builder.summary["东莞"]["profit_wanyuan"], 2.5)
         self.assertEqual(builder.summary["分公司火电"]["da_mwh"], 200)
+        summary.insert_rows(23, 2)
+        brief.insert_rows(18, 2)
+        for row, number in ((23, 5), (24, 6)):
+            summary.cell(row, 2, f"#{number}机组")
+            summary.cell(row, 4, number * 10)
+            summary.cell(row, 7, "/")
+            summary.cell(row, 11, number / 10)
+        for row, number in ((18, 5), (19, 6)):
+            brief.cell(row, 2, f"#{number}机组")
+            brief.cell(row, 3, number * 100)
+        builder._parse_summary()
+        self.assertEqual(len(builder.companies["海门"]), 6)
+        self.assertEqual(builder.summary["海门#5机组"]["ml_mwh"], 500)
+        self.assertEqual(builder.summary["海门#6机组"]["capacity_10mw"], 600)
+        self.assertEqual(builder.summary["东莞"]["profit_wanyuan"], 2.5)
+        brief["B19"] = None
+        builder._parse_summary()
+        self.assertIsNone(builder.summary["海门#6机组"]["capacity_10mw"])
+        self.assertEqual(builder.summary["海门#6机组"]["profit_wanyuan"], 0.6)
         summary["B22"] = None
         with self.assertRaisesRegex(ValueError, "缺少标签.*海门#4机组"):
             builder._parse_summary()
+
+    def test_optional_haimen_hourly_blocks_are_parsed(self):
+        book = Workbook()
+        sheet = book.active
+        sheet.title = "海门"
+        for index, number in enumerate((5, 6)):
+            start = 1 + index * 30
+            sheet.cell(start, 1, f"{number}号机")
+            for hour in range(24):
+                row = start + 3 + hour
+                sheet.cell(row, 1, f"{hour}:00")
+                for column in (2, 3, 5, 6, 7, 8, 10):
+                    sheet.cell(row, column, number * 10)
+        sheet.cell(62, 1, "末尾")
+        builder = MODULE.ReportBuilder("unused.xlsx")
+        builder.wb = book
+        blocks = builder._parse_blocks("海门", "海门")
+        self.assertEqual(set(blocks), {"海门#5机组", "海门#6机组"})
+        self.assertEqual(len(blocks["海门#6机组"]), 24)
+        self.assertEqual(blocks["海门#5机组"][0]["da"], 50)
+        book.close()
 
 
 if __name__ == "__main__":
