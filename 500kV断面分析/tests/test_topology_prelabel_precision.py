@@ -22,6 +22,27 @@ import test_topology_annotation as annotation
 
 
 class PrecisionTests(unittest.TestCase):
+    def suffix_location_report(self, offset):
+        data=annotation.annotated();data['edges']=[]
+        for n in data['nodes']:n.pop('map_anchor',None)
+        data['nodes'][0].update(station='粤海厂',voltage=220)
+        first=self.record('粤海',.99);second=self.record('粤海厂',.98)
+        second['id']='full';second['box']['x']+=offset
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'map.png';Image.new('RGB',(1000,700),'white').save(path)
+            with patch.object(auto.maps,'asset_path',return_value=path),patch.object(auto,'detect_circle_candidates',return_value=[dict(x=120,y=120,radius=20,score=.95)]):
+                return auto.prelabel(data,records=[first,second],sample=[('粤海厂',220)])['report']
+
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_suffix_variants_at_same_location_are_one_station(self):
+        self.assertEqual(self.suffix_location_report(2)['candidates'],1)
+
+    @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
+    def test_suffix_variants_at_separate_locations_remain_unresolved(self):
+        report=self.suffix_location_report(150)
+        self.assertEqual(report['candidates'],0)
+        self.assertIn('同名多位置',report['rows'][0]['reason'])
+
     @unittest.skipUnless(cv2, 'optional OpenCV is not installed')
     def test_solar_panel_cells_reject_neighbor_wind_symbol(self):
         image=cv2.imread(str(Path(__file__).resolve().parents[1]/'接线图.png'))

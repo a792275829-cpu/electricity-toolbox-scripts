@@ -27,17 +27,112 @@ def tiles(width, height, size=1500, overlap=300):
 
 def deduplicate(records):
     result = []
-    for r in sorted(records, key=lambda r: -r['confidence']):
+    for r in sorted(records, key=lambda r: (not r.get('pre_recrop', False), -r['confidence'])):
         b = r['box']; x, y = b['x']+b['width']/2, b['y']+b['height']/2
         if any(r['text'] == o['text'] and math.hypot(x-o['box']['x']-o['box']['width']/2, y-o['box']['y']-o['box']['height']/2) < 30 for o in result):
+            existing = next(o for o in result if r['text'] == o['text'] and math.hypot(x-o['box']['x']-o['box']['width']/2, y-o['box']['y']-o['box']['height']/2) < 30)
+            existing.setdefault('views', []).extend(v for v in r.get('views', []) if v not in existing.get('views', []))
+            existing.setdefault('view_disagreements', []).extend(d for d in r.get('view_disagreements', []) if d not in existing.get('view_disagreements', []))
+            existing['ocr_conflict'] = existing.get('ocr_conflict', False) or r.get('ocr_conflict', False)
             continue
         result.append(r)
     return result
 
 
-OCR_RECIPE = 'native1500-retry2x-spatial-labels-v7'
-UPGRADABLE_OCR_RECIPES = {'native1500-baseline', 'native1500-retry2x-v2', 'native1500-retry2x-native-proposals-v3', 'native1500-retry2x-native-token-proposals-v4', 'native1500-retry2x-native-label-proposals-v5', 'native1500-retry2x-native-label-boundaries-v6'}
-ALGORITHM_VERSION = 'station-ownership-spatial-labels-v12'
+OCR_RECIPE = 'native1500-edge-budget-v8'
+UPGRADABLE_OCR_RECIPES = {'native1500-retry2x-spatial-labels-v7', 'native1500-baseline', 'native1500-retry2x-v2', 'native1500-retry2x-native-proposals-v3', 'native1500-retry2x-native-token-proposals-v4', 'native1500-retry2x-native-label-proposals-v5', 'native1500-retry2x-native-label-boundaries-v6'}
+ALGORITHM_VERSION = 'station-ownership-edge-evidence-v13-location-groups'
+
+
+def edge_supplement(image, records, read_detection, *, margin=100, budget=12, size=1500, station_names=()):
+    """Reuse complete neighboring views before bounded lossless re-detection.
+
+    Legacy provenance is geometric inference only. Geometry/symbol detection uses
+    the full image, so symbol ownership never triggers repeated OCR by itself.
+    """
+    records = deepcopy(records)
+    for record in records:
+        record['pre_recrop'] = True
+    bounds_list = tiles(*image.size, size=size)
+    proposals = []; used = {}; calls = 0
+    def contains(bounds, box, padding=0):
+        l,t,r,b = bounds
+        return l <= box['x']-padding and t <= box['y']-padding and r >= box['x']+box['width']+padding and b >= box['y']+box['height']+padding
+    for record in sorted(records, key=lambda r: not bool(re.search(r'[\u4e00-\u9fff]{2}', r['text']))):
+        box = record['box']
+        if not record.get('views'):
+            record['views'] = [dict(id=f'tile:{i}', bounds=list(bounds), scale=1,
+                                    provenance='inferred-legacy-containment')
+                               for i,bounds in enumerate(bounds_list) if contains(bounds,box)]
+        risks = []
+        for view in record['views']:
+            l,t,r,b = view['bounds']
+            distances = [box['x']-l,box['y']-t,r-box['x']-box['width'],b-box['y']-box['height']]
+            if min(distances) <= margin:
+                risks.append(view)
+        if not risks:
+            continue
+        proposal = dict(record_id=record.get('id'),text=record['text'],box=deepcopy(box),
+                        original_views=deepcopy(risks),reason='100px边缘风险（不等于已截断）',views=[])
+        proposals.append(proposal)
+        # Include a local symbol and wire context; no information beyond the map exists.
+        context = 120
+        if (box['x'] < context or box['y'] < context or
+            box['x']+box['width'] > image.width-context or box['y']+box['height'] > image.height-context):
+            proposal.update(status='physical-image-edge',reason='原图边缘上下文不足；补裁无法恢复图外信息')
+            continue
+        reusable = [dict(id=f'tile:{i}',bounds=list(b),scale=1) for i,b in enumerate(bounds_list) if contains(b,box,context)]
+        if reusable:
+            proposal.update(status='reused-neighbor',views=reusable[:1])
+            continue
+        shared = next((bounds for bounds in used if contains(bounds,box,context)), None)
+        if shared is not None:
+            proposal.update(status='reused-recrop',views=[dict(bounds=list(shared),scale=1)])
+            continue
+        cx,cy=box['x']+box['width']/2,box['y']+box['height']/2
+        l=max(0,min(image.width-size,int(cx-size/2)));t=max(0,min(image.height-size,int(cy-size/2)))
+        bounds=(l,t,min(image.width,l+size),min(image.height,t+size))
+        if bounds not in used:
+            if calls >= budget:
+                proposal.update(status='budget-exhausted',reason='补裁总预算耗尽，保持未决')
+                continue
+            calls += 1
+            used[bounds] = []
+            for item in read_detection(image.crop(bounds).convert('RGB')):
+                item=deepcopy(item); b=item['box']
+                item['box']=dict(x=l+b['x'],y=t+b['y'],width=b['width'],height=b['height'])
+                item.update(category='node',views=[dict(id=f'edge:{calls}',bounds=list(bounds),scale=1,provenance='actual-inference',text=item['text'],confidence=item['confidence'],box=deepcopy(item['box']))])
+                used[bounds].append(item)
+        proposal.update(status='centered-recrop',views=[dict(bounds=list(bounds),scale=1)])
+    additions=[r for values in used.values() for r in values]
+    # Preserve different strings at the same pixels, and make the ambiguity explicit.
+    combined=records+additions
+    for a in additions:
+        b=a['box'];cx=b['x']+b['width']/2;cy=b['y']+b['height']/2
+        for other in combined:
+            if other is a or other['text']==a['text']:
+                continue
+            c=other['box']
+            if math.hypot(cx-c['x']-c['width']/2,cy-c['y']-c['height']/2)<30:
+                # Fragments/substrings remain evidence, not rival facility names.
+                disagreement = dict(text=a['text'], other_text=other['text'],
+                                    box=deepcopy(b), other_box=deepcopy(c))
+                for target in (a,other):
+                    if disagreement not in target.setdefault('view_disagreements',[]):
+                        target['view_disagreements'].append(disagreement)
+                own_hits=vocabulary_hits(a['text'],station_names)
+                other_hits=vocabulary_hits(other['text'],station_names)
+                if own_hits and other_hits and own_hits != other_hits:
+                    a['ocr_conflict']=other['ocr_conflict']=True
+    combined=deduplicate(combined)
+    audit=dict(margin_px=margin,context_px=120,budget=budget,max_views_per_region=3,
+               actual_detection_calls=calls,proposals=proposals,
+               legacy_provenance_inferred=any(v.get('provenance','').startswith('inferred') for r in records for v in r.get('views',[])),
+               symbol_scope='full-original-image; no symbol tile truncation',
+               second_direction_calls=0)
+    if combined:
+        combined[0]['edge_audit']=audit
+    return combined
 
 
 def competing_labels(chosen, record, station, labels):
@@ -100,7 +195,7 @@ def optional_runtime():
     return next((path for path in (data_path(local), local) if path.is_file()), None)
 
 
-def external_recognize(image, station_names, enhanced, base_records=None):
+def external_recognize(image, station_names, enhanced, base_records=None, edge_only=False):
     """Run the same implementation in an explicitly configured optional environment."""
     runtime = optional_runtime()
     if runtime is None or not runtime.is_file():
@@ -108,7 +203,7 @@ def external_recognize(image, station_names, enhanced, base_records=None):
     with tempfile.TemporaryDirectory(prefix='topology-ppocr-') as folder:
         root = Path(folder)
         image.save(root/'image.png')
-        request = dict(image=str(root/'image.png'), station_names=list(station_names), enhanced=enhanced, base_records=base_records)
+        request = dict(image=str(root/'image.png'), station_names=list(station_names), enhanced=enhanced, base_records=base_records, edge_only=edge_only)
         (root/'request.json').write_text(json.dumps(request, ensure_ascii=False))
         env = dict(os.environ); env.pop('TOPOLOGY_OCR_PYTHON', None)
         # Source-debug launchers may set these for their bundled interpreter.
@@ -441,7 +536,7 @@ def supplement_native_boxes(image, records, station_names, read_crop, read_detec
     return recover_joined_labels(image,records,station_names,joins,read_crop)
 
 
-def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), enhanced=True, base_records=None):
+def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), enhanced=True, base_records=None, edge_only=False):
     """OCR original-resolution tiles. macOS Vision is an explicitly named baseline."""
     records = [] if base_records is None else deepcopy(base_records)
     paddle = None
@@ -456,7 +551,7 @@ def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), en
                                cpu_threads=4)
         except ImportError as exc:
             if optional_runtime() is not None:
-                return external_recognize(image, station_names, enhanced, base_records)
+                return external_recognize(image, station_names, enhanced, base_records, edge_only)
             raise ValueError('未安装可选 PP-OCRv6；请在独立环境安装 PaddleOCR 与 PaddlePaddle，或选择本机 OCR 基线') from exc
     elif engine != 'macos-vision':
         raise ValueError('未知 OCR 引擎')
@@ -470,6 +565,7 @@ def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), en
         for i, bounds in enumerate(tiles(*image.size) if base_records is None else []):
             tile = image.crop(bounds).convert('RGB'); path = root/'tile.png'; tile.save(path)
             left, top = bounds[:2]
+            first_record = len(records)
             if paddle is None:
                 try:
                     output = subprocess.run([str(binary), str(path)], check=True, capture_output=True, timeout=90)
@@ -485,6 +581,8 @@ def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), en
                     for text, score, box in zip(content['rec_texts'], content['rec_scores'], content['rec_boxes']):
                         x0, y0, x1, y1 = map(float, box)
                         records.append(dict(text=text, confidence=float(score), category='node', box=dict(x=left+x0, y=top+y0, width=x1-x0, height=y1-y0)))
+            for record in records[first_record:]:
+                record['views']=[dict(id=f'tile:{i}',bounds=list(bounds),scale=1,provenance='actual-inference',text=record['text'],confidence=record['confidence'],box=deepcopy(record['box']))]
         if enhanced and station_names:
             if paddle is not None:
                 from paddleocr import TextRecognition
@@ -498,7 +596,7 @@ def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), en
                     path = root/'retry.png'; view.save(path)
                     output = subprocess.run([str(binary), str(path)], check=True, capture_output=True, timeout=90)
                     return [(r['text'], r['confidence']) for r in json.loads(output.stdout)]
-            records = retry_difficult(image, deduplicate(records), station_names, read_crop)
+            records = deduplicate(records) if edge_only else retry_difficult(image, deduplicate(records), station_names, read_crop)
             if paddle is not None:
                 def read_detection(view):
                     path=root/'local-detection.png';view.save(path)
@@ -509,8 +607,10 @@ def recognize(image: Image.Image, engine='macos-vision', *, station_names=(), en
                             x0,y0,x1,y1=map(float,box)
                             found.append(dict(text=value,confidence=float(score),box=dict(x=x0,y=y0,width=x1-x0,height=y1-y0)))
                     return found
-                records = supplement_native_boxes(image, records, station_names, read_crop,read_detection)
-                records = recover_merged_labels(image, records, station_names, read_crop)
+                records = edge_supplement(image, records, read_detection, station_names=station_names)
+                if not edge_only:
+                    records = supplement_native_boxes(image, records, station_names, read_crop,read_detection)
+                    records = recover_merged_labels(image, records, station_names, read_crop)
     for i, r in enumerate(records):
         r['id'] = str(i)
     return deduplicate(records)
@@ -581,7 +681,17 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
         exact = {}
         for variant in name_variants(g[0]):
             exact.update(by_name.get(variant, {}))
-        matches[g] = match_text_candidates(g[0], list(exact.values()))
+        candidates = match_text_candidates(g[0], list(exact.values()))
+        # Established suffix variants at the same pixels are one location.
+        # Keep every OCR record for evidence/ownership, but do not turn a new
+        # full suffix into a fictitious second geographic station.
+        locations = []
+        for candidate in candidates:
+            b = candidate.record['box']
+            if not any(math.hypot(b['x']+b['width']/2-o.record['box']['x']-o.record['box']['width']/2,
+                                  b['y']+b['height']/2-o.record['box']['y']-o.record['box']['height']/2) < 30 for o in locations):
+                locations.append(candidate)
+        matches[g] = locations
 
     # Include protected and unsampled stations as competing evidence too.
     labels = []
@@ -609,6 +719,8 @@ def prelabel(data, *, limit=30, engine='macos-vision', records=None, reviewer=No
             # A repeated name at different locations or voltage groups is ambiguous.
             ambiguous = sum(t.score >= .9 for t in texts) > 1 or sum(g[0] == group[0] for g in groups) > 1
             conflict = text.record.get('ocr_conflict', False)
+            row['views'] = text.record.get('views', [])
+            row['view_disagreements'] = text.record.get('view_disagreements', [])
             row['ocr_retried'] = text.record.get('ocr_retried', False)
             row['ocr_conflict'] = conflict
             row['alternatives'] = text.record.get('alternatives', [])
@@ -736,5 +848,5 @@ if __name__ == '__main__':
     import sys
     request = json.loads(Path(sys.argv[1]).read_text())
     with Image.open(request['image']) as source:
-        records = recognize(source.convert('RGB'), 'ppocrv6', station_names=request['station_names'], enhanced=request['enhanced'], base_records=request.get('base_records'))
+        records = recognize(source.convert('RGB'), 'ppocrv6', station_names=request['station_names'], enhanced=request['enhanced'], base_records=request.get('base_records'), edge_only=request.get('edge_only',False))
     Path(sys.argv[2]).write_text(json.dumps(records, ensure_ascii=False))
