@@ -182,5 +182,64 @@ class LogArchiveTests(unittest.TestCase):
             self.assertTrue(outside.is_file())
 
 
+class PayloadTests(unittest.TestCase):
+    TARGET = "aarch64-apple-darwin"
+
+    def build_payload(self, base: Path, marker: str | None = None) -> Path:
+        payload = base / "payload"
+        (payload / "app" / "电力工具箱").mkdir(parents=True)
+        (payload / "app" / "电力工具箱" / "main.py").write_bytes(b"c" * 30)
+        (payload / "defaults").mkdir()
+        (payload / "defaults" / "config.json").write_bytes(b"d" * 10)
+        (payload / "bootstrap").mkdir()
+        (payload / "manifest.json").write_text("{}", encoding="utf-8")
+        (payload / "runtime" / "python").mkdir(parents=True)
+        (payload / "runtime" / "python" / "python3").write_bytes(b"p" * 1000)
+        if marker is not None:
+            (payload / "runtime" / "target.txt").write_text(marker, encoding="utf-8")
+        return payload
+
+    def test_reusable_runtime_survives_and_staging_siblings_go(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            payload = self.build_payload(base, self.TARGET)
+            names = {item.relative_to(payload).as_posix()
+                     for item in clean_workspace.payload_plan(payload, target=self.TARGET)}
+            self.assertEqual(names, {"app", "defaults", "bootstrap", "manifest.json"})
+            self.assertTrue(clean_workspace.reusable_runtime(payload, self.TARGET))
+
+    def test_marker_for_another_target_drops_the_whole_payload(self):
+        with tempfile.TemporaryDirectory() as folder:
+            payload = self.build_payload(Path(folder), "x86_64-apple-darwin")
+            self.assertEqual(
+                clean_workspace.payload_plan(payload, target=self.TARGET), [payload]
+            )
+
+    def test_missing_marker_or_drop_runtime_removes_everything(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            self.assertEqual(
+                clean_workspace.payload_plan(self.build_payload(base / "a"), target=self.TARGET),
+                [base / "a" / "payload"],
+            )
+            kept = self.build_payload(base / "b", self.TARGET)
+            self.assertEqual(
+                clean_workspace.payload_plan(kept, keep_runtime=False, target=self.TARGET),
+                [kept],
+            )
+
+    def test_apply_keeps_the_runtime_tree_but_not_the_rest(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            payload = self.build_payload(base, self.TARGET)
+            removed = clean_workspace.apply(
+                clean_workspace.payload_plan(payload, target=self.TARGET)
+            )
+            self.assertEqual(removed, 42)
+            self.assertFalse((payload / "app").exists())
+            self.assertTrue((payload / "runtime" / "python" / "python3").is_file())
+            self.assertTrue((payload / "runtime" / "target.txt").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

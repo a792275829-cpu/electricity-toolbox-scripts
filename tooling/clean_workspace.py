@@ -6,6 +6,13 @@ installers, their digests, ``updates/`` (incremental patches), ``tauri-build/``
 Anything else there is release staging left behind by a publish run and belongs
 under ``logs/release-<tag>/`` instead.
 
+Published installers live in GitHub Releases, so nothing here keeps the newest
+package: a local copy only goes stale. ``payload`` is staging plus one reusable
+piece -- ``payload/runtime`` is skipped by ``prepare_payload.py`` when its
+``target.txt`` still matches the build target -- so that directory survives and
+the regenerated siblings (``app``, ``defaults``, ``bootstrap``, manifests) are
+reclaimed. ``--drop-runtime`` removes it too.
+
 ``--archive-logs`` keeps the top of ``logs/`` readable: one-off verification
 reports and older ``release-v*`` copies are moved into
 ``logs/release-archive/`` (never deleted), keeping the archive itself, the test
@@ -18,8 +25,10 @@ to move).
 from __future__ import annotations
 
 import argparse
+import platform
 import re
 import shutil
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +40,8 @@ LOGS = ROOT / "logs"
 INSTALLER_RE = re.compile(r"^ElectricityToolbox-(\d+)\.(\d+)\.(\d+)-apple-silicon\.dmg$")
 RELEASE_DIR_RE = re.compile(r"^release-v(\d+)\.(\d+)\.(\d+)$")
 BUILD_DIRS = ("debug", "release", "aarch64-apple-darwin")
+# Staging subtree prepare_payload keeps across builds when target.txt matches.
+RUNTIME = "runtime"
 # Products other tooling depends on: patch index, download cache, migration samples.
 KEEP_NAMES = {"updates", "tauri-build"}
 KEEP_SUFFIXES = (".zip",)
@@ -66,7 +77,43 @@ def kept_installers(names, keep):
     return {versions[version] for version in ordered[:keep]}
 
 
-def plan(keep, *, dist=DIST, target=TARGET, payload=PAYLOAD):
+def host_target():
+    """Rust triple ``prepare_payload`` provisions a runtime for on this machine."""
+
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        return "aarch64-apple-darwin"
+    return None
+
+
+def reusable_runtime(payload, target=None):
+    """``payload/runtime`` when its marker still matches the build target."""
+
+    marker = payload / RUNTIME / "target.txt"
+    if not marker.is_file():
+        return None
+    expected = host_target() if target is None else target
+    if not expected:
+        return None
+    try:
+        if marker.read_text() != expected:
+            return None
+    except OSError:
+        return None
+    return payload / RUNTIME
+
+
+def payload_plan(payload, *, keep_runtime=True, target=None):
+    """Payload entries to delete; a reusable runtime survives by default."""
+
+    if not payload.exists():
+        return []
+    runtime = reusable_runtime(payload, target) if keep_runtime else None
+    if runtime is None:
+        return [payload]
+    return [child for child in sorted(payload.iterdir()) if child != runtime]
+
+
+def plan(keep, *, dist=DIST, target=TARGET, payload=PAYLOAD, keep_runtime=True):
     """List every path that :func:`apply` would delete."""
 
     items = []
@@ -91,8 +138,7 @@ def plan(keep, *, dist=DIST, target=TARGET, payload=PAYLOAD):
         candidate = target / name
         if candidate.exists():
             items.append(candidate)
-    if payload.exists():
-        items.append(payload)
+    items.extend(payload_plan(payload, keep_runtime=keep_runtime))
     return items
 
 
@@ -184,7 +230,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep", type=int, default=2, help="保留最新几个版本的安装包")
     parser.add_argument("--keep-build", action="store_true",
-                        help="保留 target 与 payload，只清理安装包与 dist 残留")
+                        help="保留 target 与整个 payload，只清理安装包与 dist 残留")
+    parser.add_argument("--drop-runtime", action="store_true",
+                        help="连 payload/runtime 一起清掉；默认保留可复用的运行时")
     parser.add_argument("--archive-logs", action="store_true",
                         help="只把 logs/ 顶层的一次性报告与旧版释放目录移入 logs/release-archive/")
     parser.add_argument("--keep-release", type=int, default=2,
@@ -205,10 +253,11 @@ def main(argv=None):
         print(f"已归档 {len(moved)} 项；logs/ 顶层剩余 {len(list(LOGS.iterdir()))} 项")
         return 0
 
-    items = plan(args.keep)
+    items = plan(args.keep, keep_runtime=not args.drop_runtime)
     if args.keep_build:
         items = [item for item in items
-                 if item != PAYLOAD and TARGET not in item.parents]
+                 if item != PAYLOAD and PAYLOAD not in item.parents
+                 and TARGET not in item.parents]
     total = sum(path_size(item) for item in items)
     for item in items:
         print(f"{human(path_size(item)):>7}  {item.relative_to(ROOT)}")

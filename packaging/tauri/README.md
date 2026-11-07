@@ -22,6 +22,7 @@
 - `transfer_asset.py`：大安装包切片补传。`gh release upload` 直传 700 MB 偶发中断时，`split` 把 DMG 切成同源分片（默认 16 个，写 `logs/release-<tag>/transfer/`，拒绝写进 `dist/`），`upload` 把分片作为草稿发布附件补传（已存在且摘要一致的跳过），`join` 在任意稳定网络环境合并并校验总摘要，`clean` 只在发布上出现摘要一致的完整包后删除分片资产与本地分片，否则保留并报错。
 - `dist/` 只放产物：`ElectricityToolbox-<版本>-apple-silicon.dmg` 及 `.sha256`、`updates/`、`tauri-build/`、迁移 `*.zip`。发布过程的日志、一次性脚本、分片与索引快照一律放 `logs/release-<tag>/`；`tooling/clean_workspace.py` 会按这个白名单清理 `dist/` 中的其它内容。
 - `build_updates.py`：为最近三个同主／次版本正式版生成文件增量包，每个补丁必须实际还原并验签；继承已校验的历史索引，保留跨多个维护版本的升级路径。每次都保留完整 DMG。
+- 补丁对照用的旧包一律从 GitHub Releases 下载，不依赖本地留存的安装包；重新下载发行附件需可用代理，直连 `github.com` 可能长时间无响应（设置见根 `README.md` 的代理说明）。
 - `desktop/python/delta_update.py`：版本绑定、文件／权限／链接校验和最小下载路径。客户端仅操作临时应用副本，借助共享 `installer_image.py` 生成本地安装镜像，继续复用原安装器。
 - 跨主／次版本默认全量；同系列重大更新用 `build_updates.py --full-only` 或手动发布的 `full_only`，清空本次补丁路径以重设基线。历史发行附件不清理。
 - 本地验证：先构建当前 DMG，再运行 `build_updates.py <当前.app> --base-app <只读旧版.app> --no-fetch-history --output dist`；不要用已改动的安装目录代替正式旧包。
