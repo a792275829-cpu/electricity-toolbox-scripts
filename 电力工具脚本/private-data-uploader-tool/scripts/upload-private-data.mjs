@@ -18,12 +18,16 @@ import {
   resolveTarget,
   sourceName,
   summarizeImport,
+  summarizeStatus,
 } from './batch-plan.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const dataDir = dataPath(rootDir);
 const defaultConfigPath = path.join(dataDir, 'upload.config.json');
+
+// 批量导入接口：一次请求携带本批全部 files 字段，不经过页面点击上传。
+const IMPORT_ENDPOINT = '/gdfire/api/data/personal/import';
 
 const targets = TARGETS;
 
@@ -464,7 +468,7 @@ async function uploadFile(page, filePath, current, total) {
   }, 15_000);
 
   const responsePromise = page.waitForResponse((response) => (
-    response.url().includes('/gdfire/api/data/personal/import') && response.request().method() === 'POST'
+    response.url().includes(IMPORT_ENDPOINT) && response.request().method() === 'POST'
   ), { timeout: 120_000 });
 
   try {
@@ -554,11 +558,12 @@ async function postBatch(context, config, batch, fields) {
     log(`服务器仍在处理${label}，已等待 ${elapsed} 秒`);
   }, 15_000);
   try {
-    const response = await context.request.post(`${config.baseUrl}/gdfire/api/data/personal/import`, {
+    const response = await context.request.post(`${config.baseUrl}${IMPORT_ENDPOINT}`, {
       headers: { 'content-type': contentType },
       data: body,
       timeout: 300_000,
     });
+    log(`   批量接口：POST ${IMPORT_ENDPOINT} → HTTP ${response.status()}（本批 ${batch.files.length} 个文件同一请求）`);
     const text = await response.text();
     let parsed;
     try {
@@ -622,13 +627,9 @@ async function logImportStatus(context, config, dates) {
     log('回读：数据状态查询接口暂不可用，已以导入接口返回结果为准。');
     return;
   }
-  const pending = rows.filter((row) => String(row.importStatus) !== '1');
-  const monthly = rows.some((row) => String(row.dataType ?? '').includes('月度'));
-  log(`回读 ${values.join('、')}：当日共 ${rows.length} 条记录${monthly ? '（含月度账单）' : ''}，当前已上传 ${rows.length - pending.length} 条、其余 ${pending.length} 条未上传。`);
-  if (pending.length > 0) log('   以下数据项仍为未上传（可能是本次没有准备的数据项）：');
-  for (const row of pending.slice(0, 20)) {
-    log(`   未上传：${formatStatusRow(row)}`);
-  }
+  const { uploaded } = summarizeStatus(rows);
+  log(`回读 ${values.join('、')}：网站已有 ${uploaded} 条已上传记录，本次上传结果以导入接口返回为准。`);
+  if (uploaded === 0) log('   注意：回读未发现已上传记录，请在网站数据导入页核对。');
 }
 
 function shanghaiToday() {

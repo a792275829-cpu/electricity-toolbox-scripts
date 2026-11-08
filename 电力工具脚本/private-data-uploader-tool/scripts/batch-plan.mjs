@@ -200,6 +200,15 @@ export function summarizeImport(payload) {
   return { items, succeeded, failed };
 }
 
+/** 上传后的状态快照只汇总已上传条数，未上传的其它数据项不属于本次上传结果。 */
+export function summarizeStatus(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  return {
+    total: list.length,
+    uploaded: list.filter((row) => String(row?.importStatus) === '1').length,
+  };
+}
+
 /** 接口没返回数据日期时，用 --date 或文件名里的 YYYYMMDD 兜底。 */
 export function inferDatesFromNames(files, date) {
   if (date) return [date];

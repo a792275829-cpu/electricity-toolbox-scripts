@@ -100,6 +100,16 @@ class BatchPlanNodeTests(unittest.TestCase):
         )
         self.assertEqual(result, {"a": "电力交易平台", "b": "国能日新", "c": "国能日新", "d": ""})
 
+    def test_status_summary_only_counts_uploaded_rows(self) -> None:
+        result = self.run_node(
+            "console.log(JSON.stringify({"
+            "mixed: m.summarizeStatus([{importStatus:'1'},{importStatus:0},{importStatus:'1'}]),"
+            "empty: m.summarizeStatus([]), invalid: m.summarizeStatus(undefined)}));"
+        )
+        self.assertEqual(result, {"mixed": {"total": 3, "uploaded": 2},
+                                  "empty": {"total": 0, "uploaded": 0},
+                                  "invalid": {"total": 0, "uploaded": 0}})
+
     def test_new_energy_source_map_covers_declare_and_raw(self) -> None:
         result = self.run_node(
             "console.log(JSON.stringify({\n"
@@ -158,6 +168,9 @@ class PrivateBatchCommandTests(unittest.TestCase):
         file = self.make_file("日前.xlsx")
         command = commands.private_batch(self.paths, "汕头", [file])
         self.assertIn("--batch", command)
+        # 目录模式是逐文件模拟页面上传，批量模块不能退化到那条路径。
+        self.assertNotIn("--execute", command)
+        self.assertNotIn("--source", command)
         self.assertEqual(command[command.index("--unit") + 1], "汕头")
         self.assertEqual(command[command.index("--files") + 1], str(file))
         self.assertNotIn("--summary-type", command)

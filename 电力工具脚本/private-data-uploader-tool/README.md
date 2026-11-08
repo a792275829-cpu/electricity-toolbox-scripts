@@ -40,7 +40,7 @@ node scripts/upload-private-data.mjs --batch --unit 汕头 \
 - `--date YYYY-MM-DD`：接口没回逐文件明细时，用它或文件名里的 `YYYYMMDD` 决定回读日期。
 - `--login --batch`：只登录并保存批量上传自己的登录态。
 
-上传直接 `POST /gdfire/api/data/personal/import`（multipart，`files` 字段重复出现，另带 `personalDataTypeSourceMap`），不经过“点按钮选文件”的界面操作。接口返回逐文件结果，`detail` 非空即该文件失败，脚本按文件汇报并在末尾汇总失败项；返回空数组时按整批成功处理，并用 `--date` 或文件名日期回读核对。
+上传直接 `POST /gdfire/api/data/personal/import`（multipart，`files` 字段重复出现，另带 `personalDataTypeSourceMap`），不经过“点按钮选文件”的界面操作；日志会打印实际调用的接口、HTTP 状态和本批文件数。接口返回逐文件结果，`detail` 非空即该文件失败，脚本按文件汇报并在末尾汇总失败项；返回空数组时按整批成功处理，并用 `--date` 或文件名日期回读核对。上传后的回读只输出一行已上传条数汇总，不逐条列出当日其它未上传的数据项。
 
 `personalDataTypeSourceMap` 是“数据类型 → 来源编码”的 JSON：新能源单元固定带 `DECLARE_POWER_PREDICT: DISPATCH_OPS_PLATFORM`，原始功率预测数据按 `--power-source` 填 `RAW_POWER_PREDICT`（东润 `BEIJING_DR_HN`、国能日新 `GUO_HN_RI_XIN`、南瑞 `NAN_RUI`、华软 `BEIJING_HR_HX`、其他 `OTHER`）。
 
