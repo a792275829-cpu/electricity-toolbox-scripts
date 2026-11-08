@@ -33,32 +33,58 @@ def rsa_encrypt_password(public_key: str, password: str) -> str:
     return base64.b64encode(key.encrypt(password.encode("utf-8"), padding.PKCS1v15())).decode("ascii")
 
 
+def _probe_failure_reason(exc) -> str:
+    """Only emit known categories; Playwright messages can contain cookies."""
+    text = str(exc).lower()
+    for signals, label in (
+        (("timeout", "timed out"), "请求超时"),
+        (("proxy", "tunnel"), "代理连接失败"),
+        (("enotfound", "eai_again", "name_not_resolved", "getaddrinfo"), "域名解析失败"),
+        (("certificate", "err_cert_"), "证书校验失败"),
+        (("econnrefused",), "连接被拒绝"),
+        (("econnreset", "socket hang up"), "连接中断"),
+    ):
+        if any(signal in text for signal in signals):
+            return label
+    return "网络请求失败"
+
+
 def check_session(request, *, base_url: str = BASE_URL) -> bool:
-    """Probe the lightweight user endpoint first, retaining the legacy fallback."""
+    """Probe both endpoints; retry one read only when both are unavailable."""
     from playwright.sync_api import Error as PlaywrightError
 
-    unavailable = 0
-    for path in ("/usercenter/web/pf/tenant/user/info", "/gdfire/api/pf/tenant/user/info"):
+    primary = "/usercenter/web/pf/tenant/user/info"
+    failures = []
+    for index, path in enumerate((primary, "/gdfire/api/pf/tenant/user/info", primary)):
+        if index == 2:
+            if len(failures) != 2:
+                break
+            print("登录检测接口均暂不可达，0.5 秒后仅重试一次登录状态读取。", flush=True)
+            time.sleep(0.5)
+        started = time.monotonic()
         try:
             response = request.get(base_url + path, timeout=8000)
-        except PlaywrightError:
-            unavailable += 1
-            continue
-        if response.status >= 500:
-            unavailable += 1
-            continue
-        if response.status != 200:
-            continue
-        try:
-            payload = response.json()
-        except (ValueError, PlaywrightError):
-            continue
-        if isinstance(payload, dict) and payload.get("retCode") == "T200":
-            data = payload.get("data")
-            if isinstance(data, dict) and data.get("tenantId"):
-                return True
-    if unavailable == 2:
-        raise LoginError("network", "登录服务暂不可达，请检查内网、VPN 或代理后重试。")
+        except PlaywrightError as exc:
+            reason = _probe_failure_reason(exc)
+        else:
+            if response.status < 500:
+                if response.status != 200:
+                    continue
+                try:
+                    payload = response.json()
+                except (ValueError, PlaywrightError):
+                    continue
+                if isinstance(payload, dict) and payload.get("retCode") == "T200":
+                    data = payload.get("data")
+                    if isinstance(data, dict) and data.get("tenantId"):
+                        return True
+                continue
+            reason = f"服务器错误 HTTP {response.status}"
+        detail = f"{path}：{reason}（{time.monotonic() - started:.1f} 秒）"
+        failures.append(detail)
+        print(f"登录状态检测失败：{detail}", flush=True)
+    if len(failures) == 3:
+        raise LoginError("network", "登录服务暂不可达；已重试一次。" + "；".join(failures))
     return False
 
 

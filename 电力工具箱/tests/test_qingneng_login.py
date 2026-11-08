@@ -108,6 +108,52 @@ class LoginPolicyTests(unittest.TestCase):
             login.check_session(request)
         self.assertEqual(caught.exception.kind, "network")
 
+    def test_probe_retries_one_read_after_both_endpoints_fail(self):
+        request = mock.Mock()
+        request.get.side_effect = [PlaywrightError("Timeout 8000ms exceeded"),
+                                   response({}, status=503),
+                                   response({"retCode": "T200", "data": {"tenantId": "unit"}})]
+        with mock.patch.object(login.time, "sleep") as sleep:
+            self.assertTrue(login.check_session(request))
+        sleep.assert_called_once_with(0.5)
+        self.assertEqual(request.get.call_count, 3)
+        self.assertEqual(request.get.call_args_list[0], request.get.call_args_list[2])
+        request.post.assert_not_called()
+
+    def test_probe_persistent_failure_reports_categories_without_sensitive_log(self):
+        request = mock.Mock()
+        request.get.side_effect = [PlaywrightError("Timeout secret-cookie"),
+                                   PlaywrightError("ERR_PROXY_CONNECTION_FAILED secret-cookie"),
+                                   response({}, status=502)]
+        with mock.patch.object(login.time, "sleep"), mock.patch("builtins.print") as output:
+            with self.assertRaises(login.LoginError) as caught:
+                login.check_session(request)
+        message = str(caught.exception)
+        for label in ("请求超时", "代理连接失败", "HTTP 502", "已重试一次"):
+            self.assertIn(label, message)
+        self.assertNotIn("secret-cookie", message + str(output.call_args_list))
+        self.assertEqual(request.get.call_count, 3)
+        self.assertIsNone(caught.exception.__context__)
+
+    def test_probe_does_not_retry_known_expired_session(self):
+        for replies in ((response({}, status=401), response({}, status=401)),
+                        (PlaywrightError("offline"), response({}, status=401)),
+                        (response({}, status=401), PlaywrightError("offline"))):
+            request = mock.Mock()
+            request.get.side_effect = replies
+            with mock.patch.object(login.time, "sleep") as sleep:
+                self.assertFalse(login.check_session(request))
+            sleep.assert_not_called()
+            self.assertEqual(request.get.call_count, 2)
+
+    def test_probe_retry_can_confirm_expired_session(self):
+        request = mock.Mock()
+        request.get.side_effect = [response({}, status=503), response({}, status=503),
+                                   response({}, status=401)]
+        with mock.patch.object(login.time, "sleep"):
+            self.assertFalse(login.check_session(request))
+        self.assertEqual(request.get.call_count, 3)
+
     def test_atomic_cookie_save_preserves_last_session_on_replace_failure(self):
         root = Path(__file__).resolve().parents[2]
         for index, script in enumerate(("上网电量抓取/export_online_energy.py", "集团每日上传/upload_daily_report.py")):
