@@ -237,7 +237,7 @@ def render_legacy_concise_report(
     )
     template = env.get_template("legacy_concise_report.html.j2")
     analysis_date = context["analysis_date"]
-    path = output_dir / f"{analysis_date.isoformat()}_南方分公司电力市场日报_手机预览版.html"
+    path = output_dir / f"{analysis_date.isoformat()}_南方分公司电力市场日报.html"
     rendered = template.render(**context)
     path.write_text(
         "\n".join(line.rstrip() for line in rendered.splitlines()) + "\n",
