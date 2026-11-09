@@ -61,13 +61,17 @@ class _LogBuffer:
 def explain_error(text: str) -> tuple[str, str] | None:
     """Use specific failure signals, never ordinary mentions of login/network."""
     lower = text.lower()
+    if re.search(r"(?:失败[：:]|(?:RuntimeError|ValueError)[：:]).*读取容量信息.*失败", text):
+        message = re.sub(r"^.*?(?:失败[：:]|(?:RuntimeError|ValueError)[：:])\s*", "", text).strip()
+        return (message[:500], "容量信息接口请求失败，请检查网站服务及本模块登录状态后重试；该错误与尚未出数的实时均价无关。")
     # Keep the concrete date/field from the business error instead of showing
     # the outer CalledProcessError and its command line.
     data_context = any(word in text for word in (
         "电量", "电价", "负荷", "出清", "开机台数", "市场行情", "运行日报", "数据", "时段"))
     missing = any(word in text for word in (
         "未填报", "无数据", "暂无数据", "未返回", "为空", "缺少", "缺失", "不足24", "不完整", "应有完整"))
-    if data_context and missing and not any(word in text for word in (
+    informational_price = bool(re.search(r"日均价[:：].*=.*差值=", text))
+    if data_context and missing and not informational_price and not any(word in text for word in (
         "Traceback", "CalledProcessError", "Command '[", "模板", "工作表 XML", "组件", "依赖", "字段名")):
         message = re.sub(r"^.*?(?:失败[：:]|(?:ValueError|RuntimeError|KeyError)[：:])\s*", "", text).strip()
         return (message[:500], "请核对提示中的日期、公司和字段，在来源网页或文件中确认是否已填报完整；数据补齐后重新运行。未填报值不能按 0 参与计算或覆盖已有数据。")

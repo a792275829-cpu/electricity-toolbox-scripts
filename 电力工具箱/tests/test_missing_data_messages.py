@@ -23,3 +23,10 @@ class MissingDataMessageTests(unittest.TestCase):
         self.assertIsNone(explain_error("账号和密码均不能为空"))
         self.assertIsNone(explain_error("模板行缺少单元格 E7"))
 
+    def test_unavailable_future_realtime_is_informational(self):
+        line = "[22:52:55] 实时日均价: 2026-11-10=无数据 2026-11-09=无数据 差值=无数据 厘/kWh"
+        self.assertIsNone(explain_error(line))
+        result = classify_error(ProcessExecutionError(1), line + "\n[22:53:35] 失败：读取容量信息 2026-11-10 失败：T100\nsubprocess.CalledProcessError: returned non-zero exit status 1")
+        self.assertEqual(result.summary, "读取容量信息 2026-11-10 失败：T100")
+        self.assertIn("容量信息接口", result.advice)
+

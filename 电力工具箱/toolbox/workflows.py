@@ -163,12 +163,15 @@ def plan(paths, tool_id, action, p):
     elif tool_id == "report":
         command_list = []
         report_day = day("report_date").isoformat()
-        if p["fetch_data"]:
+        if p["fetch_data"] and not p["generate_word"]:
             command_list.append(([py, str(paths.report_scripts_dir / "fetch_daily_data.py"), report_day], paths.report_scripts_dir))
         if p["generate_word"]:
             sources = [required_path(p, k) for k in ("online_workbook", "day_ahead_workbook", "daily_workbook")]
             template = required_path(p, "template_report") if p["template_report"] else None
-            command_list.append((commands.word_report(paths, report_day, *sources, template), paths.report_scripts_dir))
+            command = commands.word_report(paths, report_day, *sources, template)
+            if p["fetch_data"]:
+                command.append("--save-data-summary")
+            command_list.append((command, paths.report_scripts_dir))
         if not command_list:
             raise ValueError("请至少选择一个任务")
         return command_list

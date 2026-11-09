@@ -1948,8 +1948,10 @@ def generate(
     day_ahead_workbook: Path | None = None,
     daily_clearing_workbook: Path | None = None,
     prefer_previous_template: bool = True,
+    save_data_summary: bool = False,
 ) -> tuple[Path, Path]:
-    from fetch_daily_data import build_report_date_plan, run_daily_data
+    from fetch_daily_data import build_report_date_plan, run_daily_data, parse_subjects, save_output, print_result
+    from toolbox_shared.morning_prices import apply_brief_prices
 
     plan = build_report_date_plan(report_date)
     day_ahead_workbook = resolve_day_ahead_workbook(day_ahead_workbook, plan["dayAheadDate"])
@@ -1975,8 +1977,15 @@ def generate(
     payload = run_daily_data(
         selected_date=plan["loadAndPriceSelectedDate"],
         compare_date=plan["loadAndPriceCompareDate"],
-        subjects=LOAD_SUBJECT_CODES,
+        subjects=parse_subjects("all") if save_data_summary else LOAD_SUBJECT_CODES,
     )
+    market_price_sources = apply_brief_prices(
+        payload, day_ahead_workbook=day_ahead_workbook,
+        daily_clearing_workbook=daily_clearing_workbook, log=log,
+    )
+    if save_data_summary:
+        summary_path = save_output(payload, output_dir)
+        print_result(payload, summary_path)
     with clearing_input_cache():
         day_ahead_clearing = load_day_ahead_clearing_summary(plan["dayAheadDate"], day_ahead_workbook)
         online_prices = load_online_price_summary(plan["actualOnlineEnergyDate"], online_workbook)
@@ -2116,6 +2125,7 @@ def generate(
         log(f"以下小节共 {len(manual_sections)} 段沿用上一份报告，需人工核对：{'、'.join(names)}")
     audit = {
         "reportDate": report_date,
+        "marketPriceSources": market_price_sources,
         "datePlan": plan,
         "template": str(actual_template_path),
         "templateFallback": str(template_path) if actual_template_path != template_path else None,
@@ -2167,6 +2177,7 @@ def main() -> int:
     parser.add_argument("--online-workbook", default="", help="前一日报表 Excel，预留给上网电量段落")
     parser.add_argument("--day-ahead-workbook", default="", help="报告日报表 Excel，用于日前出清电量和日前价格")
     parser.add_argument("--daily-clearing-workbook", default="", help="前两日报表 Excel，预留给日清分表")
+    parser.add_argument("--save-data-summary", action="store_true", help="共用同次网站抓取结果保存数据汇总 Excel")
     args = parser.parse_args()
     try:
         if not args.report_date:
@@ -2184,6 +2195,7 @@ def main() -> int:
             day_ahead_workbook=Path(args.day_ahead_workbook) if args.day_ahead_workbook else None,
             daily_clearing_workbook=Path(args.daily_clearing_workbook) if args.daily_clearing_workbook else None,
             prefer_previous_template=not template_was_provided,
+            save_data_summary=args.save_data_summary,
         )
         log(f"已生成: {out_path}")
         log(f"审计说明: {audit_path}")

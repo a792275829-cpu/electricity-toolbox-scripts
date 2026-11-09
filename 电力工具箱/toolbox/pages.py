@@ -474,7 +474,7 @@ class ReportPage(ToolPage):
             return
 
         commands: list[list[str]] = []
-        if self.fetch_data.get():
+        if self.fetch_data.get() and not self.generate_word.get():
             commands.append(
                 [
                     python_executable(),
@@ -515,6 +515,8 @@ class ReportPage(ToolPage):
                     template,
                 )
             )
+            if self.fetch_data.get():
+                commands[-1].append("--save-data-summary")
         self.clear_log()
 
         def worker(token: CancellationToken) -> int:

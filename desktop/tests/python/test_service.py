@@ -19,6 +19,22 @@ from toolbox.workflows import validate, plan
 
 
 class HeadlessProtocolTests(unittest.TestCase):
+    def test_morning_summary_and_word_share_one_fetch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.xlsx"
+            source.touch()
+            values = dict(report_date="2026-11-10", fetch_data=True, generate_word=True,
+                          online_workbook=str(source), day_ahead_workbook=str(source),
+                          daily_workbook=str(source), template_report="")
+            commands = plan(ToolPaths(ROOT), "report", "run", values)
+            self.assertEqual(len(commands), 1)
+            self.assertIn("generate_red_marked_report.py", commands[0][0][1])
+            self.assertIn("--save-data-summary", commands[0][0])
+            values["fetch_data"] = False
+            self.assertNotIn("--save-data-summary", plan(ToolPaths(ROOT), "report", "run", values)[0][0])
+            values.update(fetch_data=True, generate_word=False)
+            self.assertIn("fetch_daily_data.py", plan(ToolPaths(ROOT), "report", "run", values)[0][0][1])
+
     def test_real_transport_has_no_tk_and_recovers_from_invalid_json(self):
         script = '''import sys, json
 from pathlib import Path

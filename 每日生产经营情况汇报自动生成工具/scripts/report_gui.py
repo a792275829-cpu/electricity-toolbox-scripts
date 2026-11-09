@@ -225,7 +225,7 @@ class ReportTool(tk.Tk):
 
     def _run_tasks(self, report_date: str) -> None:
         try:
-            if self.fetch_data.get():
+            if self.fetch_data.get() and not self.generate_word.get():
                 self._run_command([python_executable(), str(SCRIPT_DIR / "fetch_daily_data.py"), report_date])
             if self.generate_word.get():
                 command = [
@@ -240,6 +240,8 @@ class ReportTool(tk.Tk):
                     self.daily_clearing_workbook.get().strip(),
                 ]
                 template_path = self.template_report.get().strip()
+                if self.fetch_data.get():
+                    command.append("--save-data-summary")
                 if template_path:
                     command.extend(["--template", template_path])
                 self._run_command(command)
