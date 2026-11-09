@@ -363,6 +363,8 @@ def number_or_zero(value: Any) -> float:
 
 
 def online_energy_hours(values, *, label: str, allow_empty: bool = False) -> tuple[float | None, ...]:
+    if allow_empty and (values is None or values == []):
+        return (None,) * 24
     if not isinstance(values, list) or len(values) != 24:
         raise ValueError(f"{label} 应有完整24个小时电量，实际为 {len(values) if isinstance(values, list) else 0} 个，停止导出。")
     result = []
@@ -495,8 +497,9 @@ def collect_date_rows(run_date: str, context, companies: list[dict[str, str]],
                 raise ValueError(f"{company_name} / {unit_id} 返回日期与 {run_date} 不符，停止导出。")
             seen.add(unit_id)
         missing = set(unit_names) - seen
-        if missing:
-            raise ValueError(f"{company_name} 缺少机组数据：{'、'.join(unit_names[key] for key in sorted(missing))}，停止导出。")
+        for unit_id in sorted(missing, key=lambda key: unit_order[key]):
+            log(f"  提示：{run_date} {company_name} / {unit_names[unit_id]} 未返回机组数据，24个时段导出为空白。")
+            power_items.append({"unitId": unit_id, "runDate": run_date, "onlineEle": [None] * 24})
         power_items.sort(
             key=lambda item: (
                 unit_order.get(str(item.get("unitId") or ""), 999),
@@ -511,7 +514,7 @@ def collect_date_rows(run_date: str, context, companies: list[dict[str, str]],
                 label=f"{run_date} {company_name} / {unit_name}",
                 allow_empty=True)
             missing_hours = sum(value is None for value in values)
-            if missing_hours:
+            if missing_hours and unit_id not in missing:
                 log(f"  提示：{company_name} / {unit_name} 有 {missing_hours} 个时段实际上网电量未填报，导出为空白。")
             for hour, value in enumerate(values):
                 detail_rows.append(
