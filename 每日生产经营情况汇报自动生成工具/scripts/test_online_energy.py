@@ -5,11 +5,14 @@ import unittest
 from pathlib import Path
 
 from openpyxl import Workbook
+from docx import Document
+from docx.shared import RGBColor
 
 from generate_red_marked_report import (
     build_online_energy_text,
     load_online_energy_summary,
     load_online_price_summary,
+    fill_online_completion,
 )
 
 
@@ -82,11 +85,47 @@ class OnlineEnergyTests(unittest.TestCase):
                       "海上风电676厘、鮀莲598厘、归湖576厘/千瓦时。", text)
 
     def test_zero_realtime_sheet_yields_zero_total(self) -> None:
-        # 报告日当天的工作簿上网电量列尚未出数，整列为 0，调用方据此跳过。
+        # 报告日当天的工作簿上网电量列尚未出数，调用方只将电量标记待补。
         _build_workbook(self.path, fire=(0, 0, 0), qingyuan=0, offshore=0, tuolian=0, guihu=0)
         energy = load_online_energy_summary("2026-11-05", self.path)
 
         self.assertEqual(energy["total"], 0)
+
+    def test_missing_energy_updates_prices_and_explicit_colors_after_reopen(self) -> None:
+        _build_workbook(self.path, fire=(0, 0, 0), qingyuan=0, offshore=0, tuolian=0, guihu=0,
+                        prices=(409.57, -50, 434.26))
+        prices = load_online_price_summary("2026-11-09", self.path)
+        for color in ("000000", "FF0000"):
+            for energy in (None, load_online_energy_summary("2026-11-09", self.path)):
+                with self.subTest(template_color=color, energy=energy):
+                    doc = Document()
+                    paragraph = doc.add_paragraph()
+                    old = paragraph.add_run("11月3日分公司上网电量6228万千瓦时；分公司日前均价160厘/千瓦时。")
+                    old.font.color.rgb = RGBColor.from_string(color)
+                    old.font.name = "仿宋"
+                    fill_online_completion(paragraph, "2026-11-09", energy, prices)
+                    output = self.path.with_suffix(".docx")
+                    doc.save(output)
+                    actual = Document(output).paragraphs[0]
+                    self.assertEqual(actual.runs[0].text, "11月9日分公司上网电量待补；")
+                    self.assertEqual(str(actual.runs[0].font.color.rgb), "FF0000")
+                    self.assertEqual(str(actual.runs[1].font.color.rgb), "000000")
+                    self.assertEqual(actual.runs[1].font.name, "仿宋")
+                    self.assertIn("分公司日前均价300厘/千瓦时，其中汕头410厘、海门-50厘、东莞434厘", actual.text)
+                    self.assertNotIn("6228", actual.text)
+                    self.assertNotIn("160厘", actual.text)
+
+    def test_available_energy_and_prices_are_both_black(self) -> None:
+        _build_workbook(self.path, fire=(100, 200, 300), qingyuan=40, offshore=50, tuolian=6, guihu=7)
+        energy = load_online_energy_summary("2026-11-09", self.path)
+        prices = load_online_price_summary("2026-11-09", self.path)
+        doc = Document()
+        paragraph = doc.add_paragraph("旧内容")
+        paragraph.runs[0].font.color.rgb = RGBColor(255, 0, 0)
+        fill_online_completion(paragraph, "2026-11-09", energy, prices)
+        self.assertEqual(paragraph.text, build_online_energy_text("2026-11-09", energy, prices))
+        self.assertNotIn("待补", paragraph.text)
+        self.assertTrue(all(str(run.font.color.rgb) == "000000" for run in paragraph.runs))
 
 
 if __name__ == "__main__":
