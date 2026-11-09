@@ -172,7 +172,7 @@ class MaintenanceBrowserTests(unittest.TestCase):
         sheet = book.active
         sheet.title = '电价2026-11-10'
         sheet.append(['节点名称', '数据项', *[f'00:{i:02d}' for i in (0,15,30,45)]])
-        sheet.append(['胪岗站', '电价(元/MWh)', 200,200,200,200])
+        sheet.append(['胪岗站', '电价(元/MWh)', 200,210,220,230])
         sheet.append(['盘龙站', '电价(元/MWh)', -100,-100,-100,-100])
         raw = root/'prices.xlsx'
         book.save(raw);book.close()
@@ -194,7 +194,16 @@ class MaintenanceBrowserTests(unittest.TestCase):
             line = page.locator('.edge.maintenance')
             self.assertEqual(line.count(),1)
             self.assertEqual(line.evaluate('(e)=>getComputedStyle(e).stroke'),'rgb(0, 0, 0)')
-            self.assertIn('2026-10-03',page.locator('.maintenance-label').text_content())
+            self.assertNotIn('2026-',page.locator('.maintenance-label').text_content())
+            self.assertFalse(page.locator('#nodePriceTooltip').is_visible())
+            page.locator('.edge-hit').focus()
+            from playwright.sync_api import expect
+            expect(page.locator('#nodePriceTooltip')).to_be_visible()
+            self.assertIn('2026-10-03',page.locator('#mapPriceMaintenance').text_content())
+            self.assertIn('胪岗站：200.0000 元/MWh',page.locator('#nodePriceValue').text_content())
+            self.assertIn('盘龙站：-100.0000 元/MWh',page.locator('#nodePriceValue').text_content())
+            page.locator('.edge-hit').blur()
+            self.assertFalse(page.locator('#nodePriceTooltip').is_visible())
             page.locator('.node-group[data-node-name="盘龙站"]').press('Enter')
             self.assertEqual(line.evaluate('(e)=>getComputedStyle(e).stroke'),'rgb(0, 0, 0)')
             page.locator('#gapThreshold').fill('500')
@@ -207,6 +216,36 @@ class MaintenanceBrowserTests(unittest.TestCase):
             page.set_viewport_size(dict(width=390,height=844))
             self.assertLessEqual(page.evaluate('document.documentElement.scrollWidth'),390)
             self.assertEqual(errors,[])
+        finally:
+            page.close()
+
+    def test_pointer_hover_refreshes_price_and_start_time_then_hides_on_leave(self):
+        from playwright.sync_api import expect
+        page = self.browser.new_page(viewport=dict(width=1440,height=1000))
+        try:
+            page.goto(self.url)
+            self.assertNotIn('2026-',page.locator('#maintenanceLabels').text_content())
+            page.locator('.edge-hit').hover(force=True)
+            expect(page.locator('#nodePriceTooltip')).to_be_visible()
+            self.assertIn('开始：2026-10-03 00:00:00',page.locator('#mapPriceMaintenance').text_content())
+            self.assertIn('胪岗站：200.0000 元/MWh',page.locator('#nodePriceValue').text_content())
+            page.evaluate('setTopologyTime(1,false)')
+            self.assertIn('00:15',page.locator('#nodePriceValue').text_content())
+            self.assertIn('胪岗站：210.0000 元/MWh',page.locator('#nodePriceValue').text_content())
+            page.mouse.move(0,0)
+            expect(page.locator('#nodePriceTooltip')).to_be_hidden()
+        finally:
+            page.close()
+
+    def test_touch_tap_shows_price_and_maintenance_without_hover(self):
+        from playwright.sync_api import expect
+        page = self.browser.new_page(viewport=dict(width=390,height=844),has_touch=True)
+        try:
+            page.goto(self.url)
+            page.locator('.edge-hit').tap(force=True)
+            expect(page.locator('#nodePriceTooltip')).to_be_visible()
+            self.assertIn('2026-10-03',page.locator('#mapPriceMaintenance').text_content())
+            self.assertIn('元/MWh',page.locator('#nodePriceValue').text_content())
         finally:
             page.close()
 

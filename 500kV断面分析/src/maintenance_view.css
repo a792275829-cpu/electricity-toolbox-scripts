@@ -22,3 +22,7 @@ body[data-theme="light"] #edges .edge.maintenance,
 .maintenance-panel button { color: var(--blue); text-align: left; border: 0; background: none; cursor: pointer; padding: 4px 0; }
 .maintenance-panel button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .maintenance-date { color: var(--muted); }
+#nodePriceTooltip { max-width: min(420px, calc(100vw - 24px)); }
+#nodePriceValue { display: block; white-space: pre-line; }
+#mapPriceMaintenance { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; white-space: pre-line; overflow-wrap: anywhere; font-size: 12px; }
+#mapPriceMaintenance[hidden] { display: none; }

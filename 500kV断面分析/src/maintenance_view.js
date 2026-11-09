@@ -5,7 +5,7 @@
   const ns = 'http://www.w3.org/2000/svg';
   const layer = document.createElementNS(ns, 'g');
   layer.id = 'maintenanceLabels';
-  layer.setAttribute('aria-label', '500kV线路检修与开始日期');
+  layer.setAttribute('aria-label', '500kV线路检修回路');
   document.getElementById('mapViewport').appendChild(layer);
   const panel = document.createElement('details');
   panel.id = 'maintenancePanel';
@@ -14,18 +14,18 @@
   summary.textContent = `检修 ${maintenance.matched_edges} 条边 · ${maintenance.matched_records} 条记录`;
   panel.appendChild(summary);
   const description = document.createElement('p');
-  description.textContent = `运行日 ${maintenance.run_date} / 对比日 ${maintenance.compare_date}。黑色表示合并边含检修回路，具体回路及开始时间见线旁标签；不表示所有回路停运。`;
+  description.textContent = `运行日 ${maintenance.run_date} / 对比日 ${maintenance.compare_date}。黑色表示合并边含检修回路，不表示所有回路停运。开始时间默认隐藏，移到线路或节点上时与电价一起显示。`;
   panel.appendChild(description);
   const list = document.createElement('ul');
   const annotations = [];
   DATA.edges.filter(edge => edge.maintenance?.length).forEach(edge => {
     const line = edgeLines.get(edge.edge);
     line.classList.add('maintenance');
-    const title = document.createElementNS(ns, 'title');
-    title.textContent = edge.maintenance.map(record => `${record.elementName}，${record.startDate} 起`).join('\n');
-    line.appendChild(title);
     const hit = edgeHitLines.get(edge.edge);
-    hit.setAttribute('aria-label', `${hit.getAttribute('aria-label')}，${title.textContent}`);
+    const details = edge.maintenance.map(record => `${record.elementName}，${record.startDate} 起`).join('；');
+    hit.setAttribute('aria-label', `${hit.getAttribute('aria-label')}，${details}`);
+    [line, hit, flowArrowItems.get(edge.edge)?.group].filter(Boolean).forEach(element =>
+      bindNodePriceTooltip(element, nodeByName.get(edge.a), edge));
     const label = document.createElementNS(ns, 'text');
     label.setAttribute('class', 'maintenance-label');
     label.dataset.edge = edge.edge;
@@ -34,7 +34,7 @@
       const text = document.createElementNS(ns, 'tspan');
       text.setAttribute('x', 0);
       text.setAttribute('y', index * 14);
-      text.textContent = record.label;
+      text.textContent = record.label.split(' · ')[0];
       label.appendChild(text);
     });
     layer.appendChild(label);
@@ -42,7 +42,8 @@
     const item = document.createElement('li');
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = `${edge.edge}：${edge.maintenance.map(record => record.label).join('；')}`;
+    button.textContent = `${edge.edge}：${edge.maintenance.map(record => record.label.split(' · ')[0]).join('；')}`;
+    bindNodePriceTooltip(button, nodeByName.get(edge.a), edge);
     button.addEventListener('click', () => selectEdge(edge, line));
     item.appendChild(button);
     list.appendChild(item);

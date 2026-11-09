@@ -585,6 +585,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
   <div id="analysisLegend" class="analysis-legend" role="tooltip" aria-label="对比曲线逐时电价" hidden></div>
   <div id="nodePriceTooltip" class="curve-tooltip" role="tooltip" hidden>
     <b id="nodePriceValue"></b>
+    <div id="mapPriceMaintenance" hidden></div>
   </div>
   <script>
     const DATA = {json_data};
@@ -1126,36 +1127,55 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       nodePriceHover?.element.removeAttribute('aria-describedby');
       nodePriceHover = null;
     }}
-    function showNodePriceTooltip(node, element, clientX, clientY) {{
+    function showNodePriceTooltip(node, element, clientX, clientY, edge = null) {{
       const tooltip = document.getElementById('nodePriceTooltip');
       if (nodePriceHover?.element !== element) nodePriceHover?.element.removeAttribute('aria-describedby');
-      const cached = nodePriceHover?.node === node && nodePriceHover.element === element && nodePriceHover.slot === topologyTimeSlot && !tooltip.hidden;
+      const cached = nodePriceHover?.node === node && nodePriceHover.edge === edge && nodePriceHover.element === element && nodePriceHover.slot === topologyTimeSlot && !tooltip.hidden;
       let box = cached ? nodePriceHover.box : null;
       if (!cached) {{
         element.setAttribute('aria-describedby', 'nodePriceTooltip');
-        const price = node.prices[topologyTimeIndices[topologyTimeSlot]];
-        document.getElementById('nodePriceValue').textContent = Number.isFinite(price) ? price.toFixed(4) : '暂无数据';
+        const priceAt = n => n?.prices[topologyTimeIndices[topologyTimeSlot]];
+        const price = priceAt(node);
+        document.getElementById('nodePriceValue').textContent = edge
+          ? [topologyTimes[topologyTimeSlot], ...[edge.a, edge.b].map(name => {{
+              const value = priceAt(nodeByName.get(name));
+              return `${{name}}：${{Number.isFinite(value) ? value.toFixed(4) + ' 元/MWh' : '暂无数据'}}`;
+            }})].join('\\n')
+          : Number.isFinite(price) ? price.toFixed(4) : '暂无数据';
+        const records = edge ? (edge.maintenance || [])
+          : (edgesByNode.get(node.name) || []).flatMap(item => item.maintenance || []);
+        const maintenance = document.getElementById('mapPriceMaintenance');
+        maintenance.textContent = [...new Set(records.map(record => `${{record.elementName}}\n开始：${{record.startDate}}`))].join('\\n');
+        maintenance.hidden = !records.length;
         tooltip.hidden = false;
         box = tooltip.getBoundingClientRect();
       }}
-      nodePriceHover = {{node, element, clientX, clientY, box, slot:topologyTimeSlot}};
+      nodePriceHover = {{node, edge, element, clientX, clientY, box, slot:topologyTimeSlot}};
       const left = clientX + 16 + box.width < innerWidth - 12 ? clientX + 16 : clientX - box.width - 16;
       tooltip.style.left = `${{Math.max(12, Math.min(innerWidth - box.width - 12, left))}}px`;
       tooltip.style.top = `${{Math.max(12, Math.min(innerHeight - box.height - 12, clientY + 14))}}px`;
     }}
-    function bindNodePriceTooltip(element, node) {{
-      const show = event => showNodePriceTooltip(node, element, event.clientX, event.clientY);
+    function bindNodePriceTooltip(element, node, edge = null) {{
+      const show = event => showNodePriceTooltip(node, element, event.clientX, event.clientY, edge);
       element.addEventListener('pointerenter', show);
       element.addEventListener('pointermove', show);
-      element.addEventListener('pointerleave', hideNodePriceTooltip);
+      element.addEventListener('pointerleave', event => {{
+        if (event.pointerType !== 'touch') hideNodePriceTooltip();
+      }});
+      element.addEventListener('pointerup', event => {{
+        if (event.pointerType === 'touch') show(event);
+      }});
       element.addEventListener('focus', () => requestAnimationFrame(() => {{
         if (document.activeElement !== element) return;
         const box = element.getBoundingClientRect();
-        showNodePriceTooltip(node, element, box.x + box.width / 2, box.y + box.height / 2);
+        showNodePriceTooltip(node, element, box.x + box.width / 2, box.y + box.height / 2, edge);
       }}));
       element.addEventListener('blur', hideNodePriceTooltip);
     }}
     window.addEventListener('scroll', hideNodePriceTooltip, true);
+    document.addEventListener('pointerdown', event => {{
+      if (nodePriceHover && !nodePriceHover.element.contains(event.target)) hideNodePriceTooltip();
+    }});
     window.addEventListener('resize', hideNodePriceTooltip);
     document.getElementById('showRegionCurves').addEventListener('click', hideNodePriceTooltip);
     document.addEventListener('keydown', event => {{ if (event.key === 'Escape') hideNodePriceTooltip(); }});
@@ -1728,8 +1748,8 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       document.getElementById('topologyTimeLabel').textContent = time;
       syncTimeAxisLabels(slider, document.getElementById('topologyTimeLabel'), topologyTimeSlot);
       if (nodePriceHover) {{
-        const {{node, element, clientX, clientY}} = nodePriceHover;
-        showNodePriceTooltip(node, element, clientX, clientY);
+        const {{node, edge, element, clientX, clientY}} = nodePriceHover;
+        showNodePriceTooltip(node, element, clientX, clientY, edge);
       }}
       if (reveal) {{
         flowVisible = true;
