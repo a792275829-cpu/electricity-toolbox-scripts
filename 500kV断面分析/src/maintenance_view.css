@@ -8,13 +8,6 @@ body[data-theme="light"] #edges .edge.maintenance,
 }
 #edges .edge.maintenance.active, #edges .edge.maintenance.hover { stroke-width: 6 !important; }
 #edges .edge.maintenance.context-dimmed { opacity: .55; }
-.maintenance-label {
-  fill: #000; stroke: #fff; stroke-width: 4px; paint-order: stroke;
-  font-size: 10px; font-weight: 700; text-anchor: middle;
-  stroke-linejoin: round; pointer-events: none;
-}
-#maintenanceLabels[hidden] { display: none; }
-.maintenance-leader { stroke: #000; stroke-width: .8; opacity: .65; pointer-events: none; vector-effect: non-scaling-stroke; }
 .maintenance-panel { margin: 0 0 14px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
 .maintenance-panel summary { cursor: pointer; font-size: 13px; font-weight: 650; }
 .maintenance-panel p, .maintenance-panel li { font-size: 12px; line-height: 1.6; }

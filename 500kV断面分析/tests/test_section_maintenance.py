@@ -137,7 +137,7 @@ class MaintenanceTests(unittest.TestCase):
             html = result.html_path.read_text()
             self.assertIn('胪盘乙线检修 · 2026-10-03 起', html)
             self.assertIn('"matched_edges": 1', html)
-            self.assertIn('maintenanceLabels', html)
+            self.assertIn('maintenancePanel', html)
             with self.assertRaises(ValueError):
                 generate_blockage_map(topology, raw, Path(d)/'out', maintenance_data=dict(snapshot([]), run_date='2026-11-09'))
 
@@ -185,7 +185,7 @@ class MaintenanceBrowserTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.browser.close();cls.playwright.stop();cls.directory.cleanup()
 
-    def test_black_survives_section_style_selection_and_threshold_then_toggles_labels(self):
+    def test_black_survives_selection_and_threshold_without_persistent_labels(self):
         page = self.browser.new_page(viewport=dict(width=1440,height=1000))
         errors = []
         page.on('pageerror',lambda exc:errors.append(str(exc)))
@@ -194,7 +194,7 @@ class MaintenanceBrowserTests(unittest.TestCase):
             line = page.locator('.edge.maintenance')
             self.assertEqual(line.count(),1)
             self.assertEqual(line.evaluate('(e)=>getComputedStyle(e).stroke'),'rgb(0, 0, 0)')
-            self.assertNotIn('2026-',page.locator('.maintenance-label').text_content())
+            self.assertEqual(page.locator('.maintenance-label, .maintenance-leader, #toggleMaintenance').count(),0)
             self.assertFalse(page.locator('#nodePriceTooltip').is_visible())
             page.locator('.edge-hit').focus()
             from playwright.sync_api import expect
@@ -210,8 +210,7 @@ class MaintenanceBrowserTests(unittest.TestCase):
             page.locator('#gapThreshold').press('Enter')
             self.assertEqual(line.evaluate('(e)=>getComputedStyle(e).stroke'),'rgb(0, 0, 0)')
             self.assertIn('胪盘乙线',page.locator('.edge-hit').get_attribute('aria-label'))
-            page.locator('#toggleMaintenance').click()
-            self.assertFalse(page.locator('#maintenanceLabels').is_visible())
+            self.assertEqual(page.locator('.maintenance-label, .maintenance-leader').count(),0)
             self.assertEqual(line.evaluate('(e)=>getComputedStyle(e).stroke'),'rgb(0, 0, 0)')
             page.set_viewport_size(dict(width=390,height=844))
             self.assertLessEqual(page.evaluate('document.documentElement.scrollWidth'),390)
@@ -224,7 +223,7 @@ class MaintenanceBrowserTests(unittest.TestCase):
         page = self.browser.new_page(viewport=dict(width=1440,height=1000))
         try:
             page.goto(self.url)
-            self.assertNotIn('2026-',page.locator('#maintenanceLabels').text_content())
+            self.assertEqual(page.locator('#maintenanceLabels').count(),0)
             page.locator('.edge-hit').hover(force=True)
             expect(page.locator('#nodePriceTooltip')).to_be_visible()
             self.assertIn('开始：2026-10-03 00:00:00',page.locator('#mapPriceMaintenance').text_content())
