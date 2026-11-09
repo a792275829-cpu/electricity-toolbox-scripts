@@ -107,13 +107,29 @@ class OnlineEnergyTests(unittest.TestCase):
                     output = self.path.with_suffix(".docx")
                     doc.save(output)
                     actual = Document(output).paragraphs[0]
-                    self.assertEqual(actual.runs[0].text, "11月9日分公司上网电量待补；")
-                    self.assertEqual(str(actual.runs[0].font.color.rgb), "FF0000")
+                    self.assertEqual(actual.runs[0].text, "11月3日分公司上网电量6228万千瓦时；")
+                    self.assertEqual(str(actual.runs[0].font.color.rgb), color)
                     self.assertEqual(str(actual.runs[1].font.color.rgb), "000000")
                     self.assertEqual(actual.runs[1].font.name, "仿宋")
                     self.assertIn("分公司日前均价300厘/千瓦时，其中汕头410厘、海门-50厘、东莞434厘", actual.text)
-                    self.assertNotIn("6228", actual.text)
+                    self.assertIn("6228", actual.text)
+                    self.assertNotIn("待补", actual.text)
                     self.assertNotIn("160厘", actual.text)
+
+    def test_price_boundary_split_across_runs_preserves_energy_runs(self) -> None:
+        _build_workbook(self.path, fire=(0, 0, 0), qingyuan=0, offshore=0, tuolian=0, guihu=0)
+        prices = load_online_price_summary("2026-11-09", self.path)
+        doc = Document()
+        paragraph = doc.add_paragraph()
+        first = paragraph.add_run("11月3日分公司上网电量6228万千瓦时；分公司日前")
+        first.font.color.rgb = RGBColor(255, 0, 0)
+        first.bold = True
+        paragraph.add_run("均价160厘/千瓦时。")
+        fill_online_completion(paragraph, "2026-11-09", None, prices)
+        self.assertEqual(paragraph.runs[0].text, "11月3日分公司上网电量6228万千瓦时；")
+        self.assertTrue(paragraph.runs[0].bold)
+        self.assertEqual(str(paragraph.runs[0].font.color.rgb), "FF0000")
+        self.assertIn("分公司日前均价300厘/千瓦时", paragraph.text)
 
     def test_available_energy_and_prices_are_both_black(self) -> None:
         _build_workbook(self.path, fire=(100, 200, 300), qingyuan=40, offshore=50, tuolian=6, guihu=7)

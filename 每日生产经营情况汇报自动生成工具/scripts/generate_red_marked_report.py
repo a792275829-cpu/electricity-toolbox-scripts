@@ -829,15 +829,26 @@ def build_online_price_text(price_summary: dict[str, Any]) -> str:
 
 def fill_online_completion(paragraph, date_text: str, energy: dict[str, Any] | None,
                            price_summary: dict[str, Any]) -> None:
-    """Clear stale figures and explicitly color only the missing-energy notice red."""
+    """Keep the template energy text for manual entry and update prices separately."""
     if energy and energy["total"] > 0:
         replace_paragraph(paragraph, build_online_energy_text(date_text, energy, price_summary))
         return
-    replace_paragraph(paragraph, f"{date_label(date_text)}分公司上网电量待补；")
-    notice = paragraph.runs[0]
-    notice.font.color.rgb = RGBColor(0xFF, 0, 0)
+    boundary = paragraph.text.find("分公司日前均价")
+    if boundary < 0:
+        raise ValueError("近两日完成情况段落缺少「分公司日前均价」，无法保留模板电量并单独更新均价")
+    remaining = boundary
+    template_run = paragraph.runs[0] if paragraph.runs else None
+    for run in list(paragraph.runs):
+        length = len(run.text)
+        if remaining <= 0:
+            paragraph._element.remove(run._element)
+        else:
+            if length > remaining:
+                run.text = run.text[:remaining]
+            remaining -= length
     prices = paragraph.add_run(build_online_price_text(price_summary))
-    copy_run_format(notice, prices)
+    if template_run is not None:
+        copy_run_format(template_run, prices)
     prices.font.color.rgb = RGBColor(0, 0, 0)
 
 
@@ -2051,9 +2062,9 @@ def generate(
         if online_energy_error is None:
             online_energy_error = (
                 f"{date_label(plan['actualOnlineEnergyDate'])} 的上网电量为 0（尚未出数），"
-                "上网电量标记待补，日前均价独立更新"
+                "上网电量保留模板供人工填写，日前均价独立更新"
             )
-        log(f"上网电量未取数，已标记待补并独立更新日前均价：{online_energy_error}")
+        log(f"上网电量未取数，保留模板电量并独立更新日前均价：{online_energy_error}")
     fill_online_completion(online_paragraph, plan["actualOnlineEnergyDate"], online_energy, online_prices)
     replace_paragraph(day_ahead_paragraph, build_day_ahead_clearing_text(plan["dayAheadDate"], day_ahead_clearing))
 
@@ -2164,7 +2175,7 @@ def generate(
         "dailyClearingError": daily_clearing_error,
         "weatherError": weather_error,
         "knownGaps": [
-            "上网电量取 D-1 出清情况工作簿「快报」表：火电三厂与清远取 J 列，新能源取 K 列，总数为 J7＋新能源合计；D-1 尚未出数或读取失败时以红字标记电量待补，日前均价独立更新为黑字，不沿用旧电量。",
+            "上网电量取 D-1 出清情况工作簿「快报」表：火电三厂与清远取 J 列，新能源取 K 列，总数为 J7＋新能源合计；尚未出数或读取失败时保留模板电量原文和格式供人工填写，只将后半句日前均价独立更新为黑字。",
             "P14 日前出清电量和日前价格来自报告日出清情况 Excel；火电按厂名定位取快报（日前）F/G，新能源取 G/H，清远计划电量按基础信息清远上网电量区的合计行取 AA+AC 后除以10，并计入分公司总电量。",
             "P29 未来三天最高负荷来源尚未确认，暂不替换。",
             "日清分表取 D-2 日出清情况工作簿「快报」表；分公司现货偏差收益按各厂合计（汕头/东莞取现货偏差合计边际贡献，海门取三项偏差边际贡献之和）。",
