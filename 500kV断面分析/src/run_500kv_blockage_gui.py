@@ -32,6 +32,7 @@ def main() -> None:
     output_dir_var = tk.StringVar(value=str(DEFAULT_OUTPUT_DIR))
     selected_files: list[Path] = []
     running = tk.BooleanVar(value=False)
+    fetch_maintenance_var = tk.BooleanVar(value=False)
     ui_queue: queue.Queue[tuple[str, str, str | None]] = queue.Queue()
 
     frame = tk.Frame(root, padx=14, pady=14)
@@ -131,7 +132,7 @@ def main() -> None:
     def set_buttons_state(state: str) -> None:
         start_button.configure(state=state)
 
-    def run_batch(topology_text: str, output_dir_text: str, raw_files: list[Path]) -> None:
+    def run_batch(topology_text: str, output_dir_text: str, raw_files: list[Path], fetch_maintenance: bool) -> None:
         try:
             topology_path = Path(topology_text).expanduser()
             output_dir = Path(output_dir_text).expanduser()
@@ -143,6 +144,12 @@ def main() -> None:
             output_dir.mkdir(parents=True, exist_ok=True)
             write_log_async("")
             write_log_async("开始批量分析...")
+            snapshots = {}
+            if fetch_maintenance:
+                from toolbox_shared.section_maintenance import workbook_trade_date, collect_snapshots
+                days = {p: workbook_trade_date(p) for p in raw_files}
+                collected = collect_snapshots(list(days.values()))
+                snapshots = {p: collected[day] for p, day in days.items()}
             success = 0
             for index, raw_path in enumerate(raw_files, start=1):
                 write_log_async("")
@@ -152,6 +159,7 @@ def main() -> None:
                         topology_path=topology_path,
                         raw_price_path=raw_path,
                         output_dir=output_dir,
+                        maintenance_data=snapshots.get(raw_path),
                     )
                 except Exception as exc:
                     error_text = traceback.format_exc()
@@ -188,12 +196,14 @@ def main() -> None:
         set_buttons_state(tk.DISABLED)
         threading.Thread(
             target=run_batch,
-            args=(topology_text, output_dir_text, raw_files),
+            args=(topology_text, output_dir_text, raw_files, fetch_maintenance_var.get()),
             daemon=True,
         ).start()
 
     start_button = tk.Button(frame, text="开始分析", height=2, command=start)
-    start_button.grid(row=4, column=0, columnspan=3, sticky="ew")
+    tk.Checkbutton(frame, text='在线读取线路检修（Excel标题 D / D−1）',
+                   variable=fetch_maintenance_var).grid(row=4, column=0, columnspan=3, sticky='w')
+    start_button.grid(row=5, column=0, columnspan=3, sticky="ew")
 
     root.after(80, poll_ui_queue)
     root.mainloop()

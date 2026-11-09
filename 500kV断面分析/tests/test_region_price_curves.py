@@ -22,7 +22,9 @@ class RegionPriceCurvesTests(unittest.TestCase):
         nodes, _ = topology_inventory(ROOT / "500kV节点拓扑.md")
         self.assertEqual(nodes, set(NODE_CITY))
         self.assertEqual(len(nodes), sum(len(n.split("、")) for n in CITY_NODES.values()))
-        self.assertEqual(len(nodes), 120)
+        self.assertEqual(len(nodes), 122)
+        self.assertEqual({name: NODE_CITY[name] for name in ('广蓄A厂', '广蓄B厂')},
+                         {'广蓄A厂': '广州', '广蓄B厂': '广州'})
         self.assertEqual(USER_CONFIRMED_CITIES, {
             "徐闻开关站": "湛江", "玄陆升压站": "汕尾", "铜鼓电厂": "江门", "阳西A厂": "阳江",
         })

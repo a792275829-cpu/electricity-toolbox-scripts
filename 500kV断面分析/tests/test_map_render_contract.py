@@ -7,7 +7,7 @@ from src.build_500kv_map_html import _render_html
 
 
 class MapRenderContractTests(unittest.TestCase):
-    def test_extracted_view_keeps_byte_identical_output_and_script_escaping(self):
+    def test_view_keeps_reviewed_output_and_script_escaping(self):
         fixtures = json.loads(Path(__file__).with_name('map_render_contract.json').read_text())
         for fixture in fixtures:
             with self.subTest(data=fixture['data']):

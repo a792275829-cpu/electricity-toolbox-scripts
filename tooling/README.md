@@ -28,6 +28,7 @@
 - 市场日报的 Excel 显示值、主题颜色、单元格样式和合并区域布局位于 `gd_power_report/clearing_table_view.py`，业务指标解析仍在原模块；旧私有函数继续导出，百分比、日期、金额和合并单元格通过保存／重开回读验证。
 - 页面通过显式 `tool_id`、动作参数和 `page_contracts.py` 的字段契约路由业务，不以类名或提示文案推断动作。汇总文件路径由服务按复盘文件夹名称生成。
 - 清能共享登录检测位于 `toolbox_shared/qingneng_login.py`，仅在两个状态接口均不可达时补一次只读检测；诊断输出只使用已知错误类别，禁止输出可能含 Cookie 的 Playwright 原始请求日志。账号验证的取消与总超时仍由原有请求包装器控制。
+- 500kV 检修采集与映射位于 `toolbox_shared/section_maintenance.py`，复用统一登录并独占 `500kV断面分析/local_data/检修登录/` 的状态、锁和 profile；接口与日期口径、在线及快照操作见该工具 README。发行资源校验包含 `maintenance_view.js/css`。
 - 任务失败在原错误文字之外携带稳定的 `error_detail`，包含错误码、工具、动作、失败阶段、原异常类型及退出码；旧客户端继续使用原错误文字，未知类别保留unknown。
 - 新输出通过macOS `renamex_np(RENAME_EXCL)` 排他发布，文件系统不支持该能力时尝试硬链接；两者均不可用时保留现有文件并报错，禁止退化为有覆盖竞态的先检查后替换。
 - 新的稳定纯逻辑使用正常导入；`runtime.load_module` 保留为旧独立脚本的兼容适配器。公共模块通过 `toolbox_shared.<模块>` 导入，保持模块／类型／锁的唯一身份；工具目录的同名辅助模块继续隔离。避免新增依赖进程全局 `sys.path`／`sys.modules` 修改的业务逻辑。

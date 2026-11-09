@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 
 STATE_DIRS = {
+    'section-analysis': '500kV断面分析/local_data/检修登录',
     "online-energy": "上网电量抓取", "wind-forecast": "风力预测截图", "market-table": "市场表更新",
     "transaction-info": "交易系统信息更新", "power-benefit": "功率调整收益统计表更新", "spot-price": "现货价格更新",
     "daily-pdf-parser": "广东运行日报PDF解析", "report": "每日生产经营情况汇报自动生成工具/scripts",

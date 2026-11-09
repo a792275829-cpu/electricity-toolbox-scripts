@@ -10,6 +10,7 @@ READ_GET = frozenset({
     "/gdfire/api/data/net/load", "/gdfire/api/data/net/capacity", "/gdfire/api/data/spot/trade/unit",
     "/gdfire/api/pub/data/report", "/gdfire/api/spot/market/info", "/gdfire/api/cockpit/extremePrice",
     "/gdfire/api/data/price/avg/node/price",
+    '/gdfire/api/data/net/ptt/queryCompareInfo',
     "/usercenter/web/pf/tenant/user/application",
 })
 READ_POST = frozenset({"/gdfire/api/spot/clear/timeType/data/list", "/gdfire/api/data/personal/newEnergy/basic/query/v1"})

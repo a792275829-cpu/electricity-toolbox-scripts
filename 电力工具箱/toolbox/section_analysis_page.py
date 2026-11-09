@@ -34,6 +34,8 @@ class SectionAnalysisPage(ToolPage):
             title="500kV断面分析",
         )
         self.paths = paths
+        self.fetch_maintenance = tk.BooleanVar(master=self, value=False)
+        self.maintenance_json = tk.StringVar(master=self, value='')
         self.file_dialogs = FileDialogState(paths.file_dialog_settings)
         self.files: list[Path] = []
         self.output_root = tk.StringVar(
@@ -53,6 +55,8 @@ class SectionAnalysisPage(ToolPage):
         self.clear_button.pack(side="left", padx=(8, 0))
         self.browser_editor_button = ttk.Button(self.actions, text="浏览器编辑", command=self.open_browser_editor)
         self.browser_editor_button.pack(side="left", padx=(8, 0))
+        self.login_button = ttk.Button(self.actions, text='检修登录', command=self.start_login)
+        self.login_button.pack(side='left', padx=(8, 0))
         self.run_button = ttk.Button(self.actions, text="开始分析", command=self.start_analysis)
         self.run_button.pack(side="left", padx=(16, 0))
         self.open_output_button = ttk.Button(
@@ -91,7 +95,13 @@ class SectionAnalysisPage(ToolPage):
             command=self.choose_output_root,
             button_text="选择目录",
         )
+        maintenance_check = ttk.Checkbutton(settings, text='在线读取线路检修（Excel标题 D / D−1）',
+                                            variable=self.fetch_maintenance)
+        maintenance_check.grid(row=2, column=0, columnspan=3, sticky='w', pady=4)
+        maintenance_button = add_path_row(settings, row=3, label='本地检修快照（可选）',
+                                         variable=self.maintenance_json, command=self.choose_maintenance)
         self.register_busy_widgets(
+            maintenance_check, maintenance_button, self.login_button,
             self.add_button,
             self.remove_button,
             self.clear_button,
@@ -101,6 +111,14 @@ class SectionAnalysisPage(ToolPage):
             output_button,
         )
         self.append_log("请添加日前或实时节点电价 Excel 后开始分析。")
+        self.append_log('检修：可勾选在线读取，或选择同日期接口快照；不选时保持离线电价分析。')
+
+    def choose_maintenance(self) -> None:
+        selected = filedialog.askopenfilename(title='选择检修接口快照 JSON',
+                    filetypes=[('检修快照', '*.json')], parent=self)
+        if selected:
+            self.maintenance_json.set(selected)
+            self.fetch_maintenance.set(False)
 
     def confirm_close(self) -> bool:
         browser = getattr(self, '_browser_editor', None)
@@ -208,9 +226,13 @@ class SectionAnalysisPage(ToolPage):
         topology_path: Path,
         threshold: float = 80.0,
     ) -> list[str]:
-        return commands.section_analysis(self.paths, files, output_root, topology_path, threshold)
+        return commands.section_analysis(self.paths, files, output_root, topology_path, threshold,
+                    fetch_maintenance=self.fetch_maintenance.get(), maintenance_json=self.maintenance_json.get().strip())
 
     def start_analysis(self) -> None:
+        if self.fetch_maintenance.get() and self.maintenance_json.get().strip():
+            messagebox.showerror('检修数据来源', '在线读取与本地检修快照只能选择一种。', parent=self)
+            return
         if not self.files:
             messagebox.showwarning("缺少文件", "请先添加至少一个节点电价 Excel。", parent=self)
             return

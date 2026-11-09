@@ -37,6 +37,8 @@ REQUIRED_RUNTIME_ASSETS = tuple(map(Path, (
     "500kV断面分析/500kV节点拓扑.md",
     "500kV断面分析/src/region_curves.js",
     "500kV断面分析/src/region_curves.css",
+    '500kV断面分析/src/maintenance_view.js',
+    '500kV断面分析/src/maintenance_view.css',
     "500kV断面分析/data/500kv_node_positions.json",
     "500kV断面分析/data/500kv_node_position_candidates.json",
     "500kV断面分析/接线图.png",

@@ -48,10 +48,13 @@ def dated_range_script(script: Path, start_date: str, end_date: str) -> list[str
             "--start-date", start_date, "--end-date", end_date]
 
 
-def section_analysis(paths, files, output_root, topology_path, threshold):
+def section_analysis(paths, files, output_root, topology_path, threshold, *, fetch_maintenance=False, maintenance_json=''):
     return [python_executable(), str(paths.section_analysis_runner),
             "--output-root", str(output_root), "--topology", str(topology_path),
-            "--threshold", str(threshold), *(str(p) for p in files)]
+            "--threshold", str(threshold),
+            *(['--fetch-maintenance'] if fetch_maintenance else []),
+            *(['--maintenance-json', str(maintenance_json)] if maintenance_json else []),
+            *(str(p) for p in files)]
 
 
 def market_table(paths, run_date, workbook, *, overwrite=True, create_backup=False):

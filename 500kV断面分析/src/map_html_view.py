@@ -4,7 +4,8 @@ import json
 
 def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H: int,
                     DIAGRAM_PADDING_X: int, DIAGRAM_PADDING_Y: int,
-                    curve_css: str, curve_js: str, VIEW_HTML: str) -> str:
+                    curve_css: str, curve_js: str, VIEW_HTML: str,
+                    maintenance_css: str = '', maintenance_js: str = '') -> str:
     json_data = json.dumps(data, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
     diagram_mode = data.get("metadata", {}).get("coordinate_mode") == "wiring-diagram"
     try:
@@ -506,6 +507,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     }}
   </style>
   <style>{curve_css}</style>
+  <style>{maintenance_css}</style>
 </head>
 <body data-theme="light">
   <div class="app">
@@ -1865,6 +1867,8 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
         hit.setAttribute('aria-label', edge.is_section
           ? `${{edge.edge}}，最大价差 ${{edge.max_abs_diff.toFixed(0)}} 元每兆瓦时`
           : `${{edge.edge}}，500千伏拓扑线路`);
+        if (edge.maintenance?.length) hit.setAttribute('aria-label',
+          `${{hit.getAttribute('aria-label')}}，${{edge.maintenance.map(record => record.label).join('；')}}`);
       }});
       sectionEdgeLines.clear();
       DATA.edges.filter(edge => edge.is_section)
@@ -2236,6 +2240,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
   </script>
   {VIEW_HTML}
   <script>{curve_js}</script>
+  <script>{maintenance_js}</script>
 </body>
 </html>
 """

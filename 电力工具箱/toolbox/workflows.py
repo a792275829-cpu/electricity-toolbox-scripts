@@ -99,7 +99,12 @@ def plan(paths, tool_id, action, p):
         threshold = number(p["threshold"], "价差阈值")
         from toolbox_shared.trade_batch import plan_batch_outputs
         plan_batch_outputs(files, output, suffix="_500kV分析.html")
-        return [(commands.section_analysis(paths, files, output, topology, threshold), paths.section_analysis_dir)]
+        fetch_maintenance = p.get('fetch_maintenance', False)
+        maintenance_json = required_path(p, 'maintenance_json') if p.get('maintenance_json') else ''
+        if fetch_maintenance and maintenance_json:
+            raise ValueError('在线抓取检修与本地检修快照不能同时选择。')
+        return [(commands.section_analysis(paths, files, output, topology, threshold,
+                 fetch_maintenance=fetch_maintenance, maintenance_json=maintenance_json), paths.section_analysis_dir)]
     if tool_id == "trade-analysis":
         sources = selected_files(p)
         output = required_path(p, "output_dir", exists=False)

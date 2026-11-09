@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-19T12:10:38+08:00",
+  "updated_at": "2026-11-09T19:07:00+08:00",
   "image": {
     "path": "接线图.png",
     "width": 7111,
@@ -9,8 +9,8 @@
   },
   "topology": {
     "path": "500kV节点拓扑.md",
-    "nodes": 119,
-    "unique_edges": 152,
+    "nodes": 121,
+    "unique_edges": 157,
     "duplicate_edges": [
       [
         "嘉应站",
@@ -1209,6 +1209,26 @@
       "status": "verified",
       "source": "manual-calibration",
       "updated_at": "2026-07-18T11:38:36+08:00"
+    },
+    {
+      "name": "广蓄A厂",
+      "anchor": {
+        "x": 3384.0,
+        "y": 1526.0
+      },
+      "status": "verified",
+      "source": "wiring-diagram-review",
+      "updated_at": "2026-11-09T19:07:00+08:00"
+    },
+    {
+      "name": "广蓄B厂",
+      "anchor": {
+        "x": 3349.0,
+        "y": 1753.0
+      },
+      "status": "verified",
+      "source": "wiring-diagram-review",
+      "updated_at": "2026-11-09T19:07:00+08:00"
     }
   ]
 }

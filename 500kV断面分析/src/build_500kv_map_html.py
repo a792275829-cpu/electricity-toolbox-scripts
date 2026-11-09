@@ -198,6 +198,7 @@ def build_map_html(
     *,
     analysis_data: dict | None = None,
     threshold: float = 80.0,
+    maintenance_data: dict | None = None,
 ) -> None:
     topology_path = Path(topology_path)
     original_price_path = Path(original_price_path)
@@ -303,6 +304,9 @@ def build_map_html(
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if maintenance_data is not None:
+        from toolbox_shared.section_maintenance import attach_maintenance
+        attach_maintenance(data, maintenance_data)
     output_path.write_text(_render_html(data), encoding="utf-8")
 
 
@@ -724,7 +728,9 @@ def _render_html(data: dict[str, object]) -> str:
     curve_css, curve_js = view_assets()
     return render_map_html(data, outline=_outline_points(), SVG_W=SVG_W, SVG_H=SVG_H,
                            DIAGRAM_PADDING_X=DIAGRAM_PADDING_X, DIAGRAM_PADDING_Y=DIAGRAM_PADDING_Y,
-                           curve_css=curve_css, curve_js=curve_js, VIEW_HTML=VIEW_HTML)
+                           curve_css=curve_css, curve_js=curve_js, VIEW_HTML=VIEW_HTML,
+                           maintenance_css=Path(__file__).with_name('maintenance_view.css').read_text(encoding='utf-8'),
+                           maintenance_js=Path(__file__).with_name('maintenance_view.js').read_text(encoding='utf-8'))
 
 
 def main() -> None:
