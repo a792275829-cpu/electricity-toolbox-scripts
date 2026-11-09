@@ -73,8 +73,10 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - uses: astral-sh/setup-uv@v6
         with:
+          version: "0.13.7"
           python-version: "3.11.15"
           activate-environment: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
