@@ -53,7 +53,9 @@ class DatedInputsTests(unittest.TestCase):
 
     def test_bad_online_records_preserve_previous_export(self):
         valid = dict(unitId='u', runDate=str(DAY), onlineEle=[1]*24)
-        cases = ([dict(valid, runDate='2026-10-27')], [dict(valid, runDate=None)], [],
+        # 空数组（[]）与缺失机组自 2026-11 起按“整条未填报”导出为空白，不再中断导出；
+        # 这里只保留仍然必须中止的坏记录，空白导出由 test_online_energy_missing_units 覆盖。
+        cases = ([dict(valid, runDate='2026-10-27')], [dict(valid, runDate=None)],
                  [valid, valid], [dict(valid, unitId='unknown')])
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
@@ -63,8 +65,6 @@ class DatedInputsTests(unittest.TestCase):
                 with self.subTest(rows=rows), self.assertRaises(ValueError):
                     self.export(rows, [dict(id='u', name='#1')], folder)
                 self.assertEqual(target.read_bytes(), b'previous workbook')
-            with self.assertRaisesRegex(ValueError, '缺少机组'):
-                self.export([valid], [dict(id='u', name='#1'), dict(id='v', name='#2')], folder)
 
     def test_valid_online_export_reads_back_zero_negative_and_hours(self):
         with tempfile.TemporaryDirectory() as folder:
