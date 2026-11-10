@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""归湖、鮀莲补齐六列；海风按指定日期覆盖 C/R/N/M/O，保留其他 XLSX 部件。"""
+"""归湖、鮀莲补齐六列；海风按指定日期覆盖 C/R/L/N/M/O，保留其他 XLSX 部件。"""
 from __future__ import annotations
 
 import argparse
@@ -54,8 +54,8 @@ FIELDS = {"C": "原始功率", "J": "申报功率", "K": "日前电量",
           "L": "日前电价", "M": "上网电量", "N": "实时电价"}
 HAIFENG_WORKBOOK = DEFAULT_DIRECTORY / "海风博弈收益统计-新.xlsx"
 # 实际目标列 -> 既有采集字段；避免将海风 N 上网电量与原模板 N 实时电价混淆。
-HAIFENG_LAYOUT = {"C": "C", "R": "J", "N": "M", "M": "L", "O": "N"}
-HAIFENG_HEADERS = {"C": "功率预测", "R": "功率预测", "N": "上网电量", "M": "日前电价", "O": "实时电价"}
+HAIFENG_LAYOUT = {"C": "C", "R": "J", "L": "K", "N": "M", "M": "L", "O": "N"}
+HAIFENG_HEADERS = {"C": "功率预测", "R": "功率预测", "L": "日前电量", "N": "上网电量", "M": "日前电价", "O": "实时电价"}
 
 
 def column_layout(station: str) -> dict[str, str]:

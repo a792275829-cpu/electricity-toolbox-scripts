@@ -292,7 +292,7 @@ class PowerBenefitTests(unittest.TestCase):
         w.save(path); w.close()
         return path
 
-    def test_haifeng_overwrites_only_five_columns_in_selected_dates(self):
+    def test_haifeng_overwrites_only_six_columns_in_selected_dates(self):
         m = self.module
         with tempfile.TemporaryDirectory() as folder:
             path = self.haifeng_template(folder)
@@ -302,15 +302,15 @@ class PowerBenefitTests(unittest.TestCase):
             for backend in ("stream", "full"):
                 with patch.dict("os.environ", {"TOOLBOX_BENEFIT_INSPECT_BACKEND": backend}):
                     self.assertEqual(m.inspect_workbook(path,start_date=date(2026,10,16),end_date=date(2026,10,16)), plan)
-            self.assertEqual(len(plan.cells),120)
-            self.assertEqual({c.field for c in plan.cells},{"C","J","M","L","N"})
-            data = {date(2026,10,16): {col: (float(index),)*24 for index,col in enumerate(("C","J","M","L","N"), 1)}}
+            self.assertEqual(len(plan.cells),144)
+            self.assertEqual({c.field for c in plan.cells},{"C","J","K","M","L","N"})
+            data = {date(2026,10,16): {col: (float(index),)*24 for index,col in enumerate(("C","J","M","L","N","K"), 1)}}
             item = m.prepare_workbook(plan,data)
             w = openpyxl.load_workbook(item.temporary); s=w["10月份"]
-            for col,expected in (("C",1),("R",2),("N",3),("M",4),("O",5)):
+            for col,expected in (("C",1),("R",2),("L",6),("N",3),("M",4),("O",5)):
                 self.assertEqual(s[f"{col}4"].value,expected)
                 self.assertEqual(s[f"{col}4"].number_format,"0.0000")
-            for col in ("J","K","L","S","T","U","V"):
+            for col in ("J","K","S","T","U","V"):
                 self.assertEqual(s[f"{col}4"].value,777)
             self.assertEqual(s["C29"].value,99)
             self.assertEqual(s["M29"].value,"=T29")
@@ -322,6 +322,53 @@ class PowerBenefitTests(unittest.TestCase):
         self.assertIn(b'<c r="M4" s="1"><v>300</v></c>',result)
         self.assertIn(b'<f>U4</f><v>2</v>',result)
         self.assertIn(b'<f>V4</f><v>3</v>',result)
+
+    def test_haifeng_day_ahead_energy_units_zero_and_unpublished_roundtrip(self):
+        m = self.module
+        day = date(2026, 10, 16)
+        for backend in ("stream", "full"):
+            for published in (True, False):
+                with self.subTest(backend=backend, published=published), tempfile.TemporaryDirectory() as folder:
+                    path = self.haifeng_template(folder)
+                    book = openpyxl.load_workbook(path)
+                    book["10月份"]["L5"] = "=S5"
+                    book.save(path); book.close()
+                    before = path.read_bytes()
+                    row = dict(unitId="u", date=day.isoformat(), dataType=1,
+                               electricity=[0] + [2.761 + hour / 100 for hour in range(1, 24)]
+                               if published else [None] * 24, acPrice=[-25.89] * 24)
+                    series = m.parse_trade_payload({"data": {"unitDateList": [row]}},
+                                                  unit_id="u", expected_dates={day}, data_type=1)
+                    with patch.dict("os.environ", TOOLBOX_BENEFIT_INSPECT_BACKEND=backend,
+                                    TOOLBOX_BENEFIT_VERIFY_BACKEND=backend), \
+                            patch.object(m, "collect_data", return_value={"海风": series}):
+                        items = m.run_update((path,), start_date=day, end_date=day, create_backup=False)
+                    self.assertEqual(len(items[0].expectations), 48 if published else 24)
+                    book = openpyxl.load_workbook(path)
+                    sheet = book["10月份"]
+                    for hour in range(24):
+                        cell = sheet[f"L{4 + hour}"]
+                        expected = (0 if hour == 0 else (2.761 + hour / 100) * 10) if published else ("=S5" if hour == 1 else 777)
+                        if published:
+                            self.assertAlmostEqual(cell.value, expected, places=10)
+                        else:
+                            self.assertEqual(cell.value, expected)
+                        self.assertEqual(cell.number_format, "0.0000")
+                        self.assertEqual(sheet[f"M{4 + hour}"].value, -25.89)
+                    self.assertEqual(sheet["L29"].value, 777)
+                    book.close()
+                    # Other columns, dates, styles and XLSX parts remain intact.
+                    original = Path(folder) / "before.xlsx"
+                    original.write_bytes(before)
+                    a = openpyxl.load_workbook(original); b = openpyxl.load_workbook(path)
+                    changed = {cell.coordinate for cell, _ in items[0].expectations}
+                    for row in a["10月份"]:
+                        for cell in row:
+                            actual = b["10月份"][cell.coordinate]
+                            self.assertEqual(actual._style, cell._style)
+                            if cell.coordinate not in changed:
+                                self.assertEqual(actual.value, cell.value)
+                    a.close(); b.close()
 
 
 class PowerBenefitPageTests(unittest.TestCase):

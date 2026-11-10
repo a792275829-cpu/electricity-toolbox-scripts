@@ -38,7 +38,7 @@ def desktop_catalog(paths):
                               f("overwrite", "覆盖非空单元格", "boolean", True), backup], [("run", "开始更新")]),
         "power-benefit": ([workbook("guihu_workbook", "归湖工作簿", "功率预测调整收益统计-归湖.xlsx"), f("guihu_selected", "更新归湖", "boolean", False),
                            workbook("tuolian_workbook", "鮀莲工作簿", "功率预测调整收益统计-鮀莲(2)(2).xlsx"), f("tuolian_selected", "更新鮀莲", "boolean", False),
-                           workbook("haifeng_workbook", "海风工作簿", "海风博弈收益统计-新.xlsx"), f("haifeng_selected", "更新海风（覆盖五列）", "boolean", False),
+                           workbook("haifeng_workbook", "海风工作簿", "海风博弈收益统计-新.xlsx"), f("haifeng_selected", "更新海风（覆盖六列）", "boolean", False),
                            f("start_date", "开始日期（海风覆盖必填）", "date"), f("end_date", "截止日期 D", "date", day),
                            f("overwrite", "覆盖非空单元格", "boolean", True), backup], [("run", "抓取并更新")]),
         "spot-price": ([f("start_date", "开始日期", "date", yesterday), f("end_date", "结束日期", "date", day),
@@ -82,7 +82,7 @@ def desktop_catalog(paths):
     notes = {
         "section-analysis": "相邻节点一涨一跌＋价差严格大于阈值＋全天累计至少4个时点。",
         "transaction-info": "来源口径：日前 D、实际 D-3；目标 Sheet1。优先补已有日期组空值，保留非空值与公式，再从表尾接续。",
-        "power-benefit": "归湖/鮀莲：C 原始功率；J 申报功率；K 日前电量；L 日前电价；M 上网电量；N 实时电价。0–23 点，默认只补空白，勾选覆盖后覆盖已有数值（公式跳过）。海风：C 原始功率、R 申报功率、N 上网电量、M 日前电价、O 实时电价；覆盖所选日期内五列的值及公式，开始日期必填。",
+        "power-benefit": "归湖/鮀莲：C 原始功率；J 申报功率；K 日前电量；L 日前电价；M 上网电量；N 实时电价。0–23 点，默认只补空白，勾选覆盖后覆盖已有数值（公式跳过）。海风：C 原始功率、R 申报功率、L 日前电量、N 上网电量、M 日前电价、O 实时电价；覆盖所选日期内六列的值及公式，开始日期必填。",
         "report": "三个 Excel 来源日期依次为 D-1、D、D-2。",
     }
     return [dict(id=t.tool_id, name=t.name, category=t.category, description=t.description,
