@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 import json
 from pathlib import Path
 import re
@@ -23,6 +24,14 @@ LINE_ENDPOINTS = {
     '盘吉': ('盘龙站', '吉康站'),
 }
 DATE_RE = re.compile(r'(?<!\d)(20\d{2})[-/年.](\d{1,2})[-/月.](\d{1,2})(?:日)?(?!\d)')
+
+
+def _is_500kv(value) -> bool:
+    """The API encodes the same voltage as 500, 500.0 or numeric text."""
+    try:
+        return Decimal(str(value).strip()) == 500
+    except (InvalidOperation, ValueError):
+        return False
 
 
 def workbook_trade_date(path: Path) -> date:
@@ -136,10 +145,11 @@ def attach_maintenance(data: dict, snapshot: dict) -> None:
     for edge in data['edges']:
         edge['maintenance'] = []
     separate, unmatched, removed = [], [], []
-    line_count = 0
+    line_count = voltage_500_count = 0
     for record in snapshot['records']:
-        if str(record['voltageLevel']) != '500':
+        if not _is_500kv(record['voltageLevel']):
             continue
+        voltage_500_count += 1
         if record['diff'] in {'DELETE', 'DECREASE', 'REMOVE', 'REDUCE'}:
             removed.append(record)
             continue
@@ -172,7 +182,7 @@ def attach_maintenance(data: dict, snapshot: dict) -> None:
         edge['maintenance'].append(dict(record, label=f'{match.group()}{suffix} · {display_start} 起'))
     data['maintenance'] = dict(run_date=snapshot['run_date'], compare_date=snapshot['compare_date'],
         source=snapshot.get('source', ''), fetched_at=snapshot.get('fetched_at', ''),
-        total=len(snapshot['records']), line_records=line_count,
+        total=len(snapshot['records']), voltage_500=voltage_500_count, line_records=line_count,
         matched_records=sum(len(e['maintenance']) for e in data['edges']),
         matched_edges=sum(bool(e['maintenance']) for e in data['edges']),
         separate=separate, unmatched=unmatched, removed=removed)

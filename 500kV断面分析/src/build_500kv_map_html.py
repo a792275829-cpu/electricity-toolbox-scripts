@@ -307,6 +307,15 @@ def build_map_html(
     if maintenance_data is not None:
         from toolbox_shared.section_maintenance import attach_maintenance
         attach_maintenance(data, maintenance_data)
+        summary = data['maintenance']
+        print(
+            f"检修核对：运行日 {summary['run_date']}，对比日 {summary['compare_date']}；"
+            f"接口 {summary['total']} 条，500kV {summary['voltage_500']} 条；"
+            f"线路/线路开关 {summary['line_records']} 条，"
+            f"已匹配 {summary['matched_records']} 条记录 / {summary['matched_edges']} 条边；"
+            f"其他设备 {len(summary['separate'])} 条，未匹配 {len(summary['unmatched'])} 条，"
+            f"已减少 {len(summary['removed'])} 条。", flush=True,
+        )
     output_path.write_text(_render_html(data), encoding="utf-8")
 
 

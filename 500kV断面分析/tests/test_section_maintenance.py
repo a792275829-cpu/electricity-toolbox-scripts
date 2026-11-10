@@ -80,6 +80,20 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(data['maintenance']['unmatched'], [])
         self.assertTrue(all('2026-10-03 起' in r['label'] for e in data['edges'] for r in e['maintenance']))
 
+    def test_api_integer_float_and_decimal_text_voltages_select_the_same_lines(self):
+        for voltage in (500, 500.0, '500', '500.0', ' 500.00 '):
+            with self.subTest(voltage=voltage):
+                data = dict(edges=[dict(a='胪岗站', b='盘龙站')])
+                attach_maintenance(data, snapshot([record(voltage=voltage),record(voltage=220.0)]))
+                self.assertEqual(data['maintenance']['voltage_500'],1)
+                self.assertEqual(data['maintenance']['matched_records'],1)
+                self.assertEqual(data['maintenance']['matched_edges'],1)
+        for voltage in (220.0, '220.0', '500.1', None, 'invalid', 'NaN'):
+            with self.subTest(voltage=voltage):
+                data = dict(edges=[dict(a='胪岗站', b='盘龙站')])
+                attach_maintenance(data, snapshot([record(voltage=voltage)]))
+                self.assertEqual(data['maintenance']['matched_edges'],0)
+
     def test_removed_records_do_not_blacken_running_day(self):
         removed = record(diff='DELETE')
         removed['runDate'] = '2026-11-09 00:00:00'
