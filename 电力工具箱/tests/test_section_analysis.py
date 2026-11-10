@@ -39,6 +39,33 @@ class SectionAnalysisModuleTests(unittest.TestCase):
         self.assertEqual(descriptor.name, "500kV断面分析")
         self.assertEqual(descriptor.page_class, "SectionAnalysisPage")
 
+    def test_desktop_defaults_to_online_and_snapshot_needs_no_login(self) -> None:
+        from toolbox.page_contracts import PAGE_BINDINGS, requires_qingneng
+        from toolbox.runtime import ToolPaths
+        from toolbox.service_catalog import desktop_catalog
+        from toolbox.workflows import validate, plan
+
+        paths = ToolPaths(WORKSPACE)
+        tool = next(item for item in desktop_catalog(paths) if item['id'] == 'section-analysis')
+        self.assertNotIn('fetch_maintenance', [field['key'] for field in tool['fields']])
+        self.assertNotIn('fetch_maintenance', PAGE_BINDINGS['section-analysis'].fields)
+        with TemporaryDirectory() as tmp:
+            source = Path(tmp) / 'prices.xlsx'
+            source.touch()
+            snapshot = Path(tmp) / 'maintenance.json'
+            snapshot.write_text('{}')
+            values = dict(files=[str(source)], topology_path=str(paths.section_analysis_topology),
+                          output_root=str(Path(tmp) / 'output'))
+            online = validate(paths, 'section-analysis', 'run', values)
+            self.assertTrue(requires_qingneng('section-analysis', 'run', online))
+            self.assertIn('--fetch-maintenance', plan(paths, 'section-analysis', 'run', online)[0][0])
+            offline = validate(paths, 'section-analysis', 'run', dict(values, maintenance_json=str(snapshot)))
+            command = plan(paths, 'section-analysis', 'run', offline)[0][0]
+            self.assertNotIn('--fetch-maintenance', command)
+            self.assertIn('--maintenance-json', command)
+            self.assertFalse(requires_qingneng('section-analysis', 'run', offline))
+            self.assertTrue(requires_qingneng('section-analysis', 'login', offline))
+
     def test_runner_uses_source_based_html_names(self) -> None:
         runner = load_runner()
         self.assertEqual(
@@ -120,9 +147,23 @@ class SectionAnalysisPageTests(unittest.TestCase):
         self.assertEqual(Path(command[1]), self.paths.section_analysis_runner)
         self.assertIn("--threshold", command)
         self.assertIn("80.0", command)
+        self.assertIn("--fetch-maintenance", command)
+        self.assertFalse(hasattr(page, "fetch_maintenance"))
         self.assertNotIn("--keep-processed", command)
         self.assertNotIn("--no-keep-processed", command)
         self.assertEqual(command[-1], "/tmp/prices.xlsx")
+
+    def test_local_snapshot_replaces_online_fetch_and_clearing_restores_it(self) -> None:
+        from toolbox.section_analysis_page import SectionAnalysisPage
+
+        page = SectionAnalysisPage(self.root, self.paths, self.registry)
+        page.maintenance_json.set('/tmp/检修快照.json')
+        args = ([Path('/tmp/prices.xlsx')], Path('/tmp/results'), self.paths.section_analysis_topology)
+        command = page.build_command(*args)
+        self.assertNotIn('--fetch-maintenance', command)
+        self.assertEqual(command[command.index('--maintenance-json') + 1], '/tmp/检修快照.json')
+        page.maintenance_json.set('')
+        self.assertIn('--fetch-maintenance', page.build_command(*args))
 
     def test_browser_editor_entry_reuses_service_and_receives_applied_path(self) -> None:
         import queue

@@ -29,7 +29,7 @@ class ToolPage(ttk.Frame):
 
     def _save_login_draft(self, action):
         from .page_contracts import requires_qingneng
-        values = {key: getattr(self, key).get() for key in ("mode", "fetch_data") if hasattr(self, key)}
+        values = {key: getattr(self, key).get() for key in ("mode", "fetch_data", "maintenance_json") if hasattr(self, key)}
         if not requires_qingneng(getattr(self, "tool_id", None), action, values):
             return True
         panel = getattr(self.winfo_toplevel(), "credentials_panel", None)

@@ -6,7 +6,7 @@ from types import MappingProxyType
 def requires_qingneng(tool_id, action="run", values=None):
     values = values or {}
     if tool_id == 'section-analysis':
-        return action == 'login' or values.get('fetch_maintenance', False)
+        return action == 'login' or not str(values.get('maintenance_json', '')).strip()
     if tool_id in {"wps-writer", "trade-analysis"}:
         return False
     if tool_id == "daily-pdf-parser":
@@ -28,7 +28,7 @@ class PageBinding:
 PAGE_BINDINGS = MappingProxyType({
     'online-energy': PageBinding('online-energy', ('start_date', 'end_date')),
     'wind-forecast': PageBinding('wind-forecast', ('run_date',)),
-    'section-analysis': PageBinding('section-analysis', ('output_root', 'topology_path', 'threshold', 'fetch_maintenance', 'maintenance_json')),
+    'section-analysis': PageBinding('section-analysis', ('output_root', 'topology_path', 'threshold', 'maintenance_json')),
     'trade-analysis': PageBinding('trade-analysis', ('output_dir',)),
     'market-table': PageBinding('market-table', ('run_date', 'workbook', 'overwrite', 'create_backup')),
     'transaction-info': PageBinding('transaction-info', ('workbook', 'start_date', 'end_date', 'overwrite', 'create_backup')),
