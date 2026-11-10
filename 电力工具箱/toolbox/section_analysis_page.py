@@ -34,7 +34,6 @@ class SectionAnalysisPage(ToolPage):
             title="500kV断面分析",
         )
         self.paths = paths
-        self.maintenance_json = tk.StringVar(master=self, value='')
         self.file_dialogs = FileDialogState(paths.file_dialog_settings)
         self.files: list[Path] = []
         self.output_root = tk.StringVar(
@@ -94,10 +93,8 @@ class SectionAnalysisPage(ToolPage):
             command=self.choose_output_root,
             button_text="选择目录",
         )
-        maintenance_button = add_path_row(settings, row=2, label='本地检修快照（可选）',
-                                         variable=self.maintenance_json, command=self.choose_maintenance)
         self.register_busy_widgets(
-            maintenance_button, self.login_button,
+            self.login_button,
             self.add_button,
             self.remove_button,
             self.clear_button,
@@ -107,13 +104,7 @@ class SectionAnalysisPage(ToolPage):
             output_button,
         )
         self.append_log("请添加日前或实时节点电价 Excel 后开始分析。")
-        self.append_log('检修：默认按 Excel 标题 D / D−1 在线读取；选择本地快照时使用快照。')
-
-    def choose_maintenance(self) -> None:
-        selected = filedialog.askopenfilename(title='选择检修接口快照 JSON',
-                    filetypes=[('检修快照', '*.json')], parent=self)
-        if selected:
-            self.maintenance_json.set(selected)
+        self.append_log('检修：按 Excel 标题 D / D−1 自动在线读取。')
 
     def confirm_close(self) -> bool:
         browser = getattr(self, '_browser_editor', None)
@@ -221,8 +212,7 @@ class SectionAnalysisPage(ToolPage):
         topology_path: Path,
         threshold: float = 80.0,
     ) -> list[str]:
-        return commands.section_analysis(self.paths, files, output_root, topology_path, threshold,
-                    fetch_maintenance=not self.maintenance_json.get().strip(), maintenance_json=self.maintenance_json.get().strip())
+        return commands.section_analysis(self.paths, files, output_root, topology_path, threshold)
 
     def start_analysis(self) -> None:
         if not self.files:

@@ -99,9 +99,7 @@ def plan(paths, tool_id, action, p):
         threshold = number(p["threshold"], "价差阈值")
         from toolbox_shared.trade_batch import plan_batch_outputs
         plan_batch_outputs(files, output, suffix="_500kV分析.html")
-        maintenance_json = required_path(p, 'maintenance_json') if p.get('maintenance_json') else ''
-        return [(commands.section_analysis(paths, files, output, topology, threshold,
-                 fetch_maintenance=not maintenance_json, maintenance_json=maintenance_json), paths.section_analysis_dir)]
+        return [(commands.section_analysis(paths, files, output, topology, threshold), paths.section_analysis_dir)]
     if tool_id == "trade-analysis":
         sources = selected_files(p)
         output = required_path(p, "output_dir", exists=False)
