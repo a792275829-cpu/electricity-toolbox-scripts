@@ -32,6 +32,7 @@ if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
 from toolbox_shared.native_excel import load_value_workbook, prefetch_workbooks
 from toolbox_shared.native_write import save_workbook as save_native_workbook
+from toolbox_shared.node_prices import NODE_MARKETS, NodePrices, collect_node_prices
 
 FILE_TYPE_PATTERNS = {
     "realtime": "实时交易结果查询",
@@ -119,11 +120,12 @@ def run_summary(
 
     log(f"开始扫描文件夹：{input_dir}")
     units = collect_units(input_dir, log)
-    if not units:
-        raise ValueError("没有找到可汇总的 Excel 数据，请选择包含交易结果文件的场站文件夹或其上级文件夹。")
+    node_prices = collect_node_prices(input_dir, log)
+    if not units and not node_prices:
+        raise ValueError("没有找到可汇总的 Excel 数据，请选择包含交易结果或节点电价文件的文件夹。")
 
     log(f"共识别 {len(units)} 台机组，开始生成汇总表。")
-    final_output = write_workbook(units, output_path, log)
+    final_output = write_workbook(units, output_path, log, node_prices=node_prices)
     log(f"汇总完成：{final_output}")
     return final_output
 
@@ -333,6 +335,8 @@ def write_workbook(
     units: list[UnitData],
     output_path: Path,
     logger: Callable[[str], None],
+    *,
+    node_prices: dict[str, NodePrices] | None = None,
 ) -> Path:
     workbook = Workbook()
     grouped: dict[str, list[UnitData]] = {}
@@ -353,6 +357,31 @@ def write_workbook(
         write_station_block(worksheet, 1, station_name, grouped[station_name], include_station_title=False)
         set_widths(worksheet)
         logger(f"已生成工作表：{worksheet.title}")
+
+    if node_prices:
+        if first_sheet:
+            workbook.remove(workbook.active)
+        worksheet = workbook.create_sheet("海风汇总")
+        for market_index, market in enumerate(MARKET_ORDER):
+            title_row = market_index * 2 + 1
+            data = node_prices.get(market)
+            title = f"海风{NODE_MARKETS[market]}"
+            if data is not None:
+                title += f" {data.run_date.isoformat()}"
+            else:
+                logger(f"提示：缺少{title}节点电价文件，对应96点留空。")
+            worksheet.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=96)
+            style_header(worksheet.cell(title_row, 1, title))
+            # Keep the title visible at the left of the wide 96-point range.
+            worksheet.cell(title_row, 1).alignment = Alignment(horizontal="left", vertical="center")
+            for index in range(96):
+                cell = worksheet.cell(title_row + 1, index + 1,
+                                      data.quarter_averages[index] if data is not None else None)
+                style_body(cell, bold=False)
+                cell.number_format = "0.00"
+        set_widths(worksheet)
+        worksheet.column_dimensions["A"].width = 12
+        logger("已生成工作表：海风汇总（96点节点等权平均，00:00～23:45）")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     final_path = save_workbook_with_fallback(workbook, output_path)
@@ -562,6 +591,22 @@ def save_workbook_atomically(workbook: Workbook, output_path: Path) -> None:
         try:
             if not verification.sheetnames:
                 raise ValueError("生成的汇总工作簿不包含任何工作表")
+            if "海风汇总" in workbook.sheetnames:
+                expected = workbook["海风汇总"]
+                actual = verification["海风汇总"]
+                if verification.sheetnames[-1] != "海风汇总":
+                    raise ValueError("海风汇总须位于最后一个工作表")
+                for row, saved_row in enumerate(actual.iter_rows(min_row=1, max_row=4, max_col=96), 1):
+                    for col, saved_cell in enumerate(saved_row, 1):
+                        if row in (1, 3) and col > 1:
+                            continue
+                        source_cell = expected.cell(row, col)
+                        value = source_cell.value
+                        consistent = (math.isclose(saved_cell.value, value, rel_tol=1e-12, abs_tol=1e-12)
+                                      if isinstance(value, (int, float)) and isinstance(saved_cell.value, (int, float))
+                                      else saved_cell.value == value)
+                        if not consistent or saved_cell.number_format != source_cell.number_format:
+                            raise ValueError(f"海风汇总回读不一致：{source_cell.coordinate}")
         finally:
             verification.close()
         temporary_path.replace(output_path)

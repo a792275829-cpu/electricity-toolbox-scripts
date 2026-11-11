@@ -9,6 +9,7 @@ from typing import Callable
 
 from .file_rules import clearing_file_date
 from .tasks import CancellationToken
+from toolbox_shared.node_prices import is_node_price_file
 
 
 STATION_ALIASES = {
@@ -128,6 +129,9 @@ def prepare_review_folder(
             candidates.extend(_excel_files(folder, excluded_paths))
     for path in candidates:
         token.raise_if_cancelled()
+        if is_node_price_file(path):
+            logger(f"节点电价文件保留原位供汇总：{path.name}")
+            continue
         markets = [market for market in ("日前", "实时") if market in path.stem]
         if not markets:
             logger(f"跳过非日前/实时文件：{path.name}")
