@@ -329,11 +329,11 @@ def execute_wps(paths, action, p, log):
     for item in prepared:
         groups.setdefault(item.kdocs_url, []).append(item)
     for url, group in groups.items():
-        result = module.write_to_wps(url, group, log, browser_mode=mode, cdp_url=cdp)
+        result = module.write_to_wps(url, group, log, browser_mode=mode, cdp_url=cdp, overwrite=config["overwrite"])
         rows = {entry["index"]: entry for entry in result.get("results", [])}
         if not result.get("saved"):
             raise RuntimeError("WPS 未确认保存成功")
         for item in group:
-            if item.index not in rows or module.compare_matrix(item.values, rows[item.index].get("value"), item.rows, item.cols):
+            if item.index not in rows or module.compare_matrix(rows[item.index].get("expectedValues", item.values), rows[item.index].get("value"), item.rows, item.cols):
                 raise RuntimeError(f"回读不一致：{item.target_sheet}!{item.target_range}")
     return dict(message=f"{len(prepared)} 个区域已保存，回读核对一致")

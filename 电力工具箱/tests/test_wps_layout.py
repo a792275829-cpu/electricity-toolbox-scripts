@@ -15,6 +15,31 @@ def descendants(widget: tk.Misc):
 
 
 class WpsToolbarLayoutTests(unittest.TestCase):
+    def test_overwrite_checkbox_persists_and_restores_at_narrow_width(self) -> None:
+        from unittest import mock
+        from toolbox.runtime import ToolPaths, load_module
+        module = load_module("wps_overwrite_layout_test", ToolPaths(Path(__file__).resolve().parents[2]).wps_writer)
+        try:
+            root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(f"Tk unavailable: {exc}")
+        self.addCleanup(root.destroy)
+        root.geometry("520x720")
+        with mock.patch.object(module, "load_config", return_value={}), mock.patch.object(module, "save_config") as save:
+            frame = module.WpsWriterFrame(root)
+            self.addCleanup(frame.destroy)
+            frame.pack(fill="both", expand=True)
+            root.update_idletasks()
+            checkbox, = [w for w in descendants(frame)
+                         if isinstance(w, ttk.Checkbutton) and w.cget("text") == "覆盖非空单元格"]
+            self.assertTrue(frame.overwrite.get())
+            checkbox.invoke()
+            self.assertFalse(save.call_args.args[0]["overwrite"])
+            frame.apply_runtime_config({"overwrite": True})
+            self.assertTrue(frame.overwrite.get())
+            self.assertTrue(checkbox.winfo_ismapped())
+            self.assertLessEqual(checkbox.winfo_rootx() + checkbox.winfo_width(), frame.winfo_rootx() + frame.winfo_width())
+
     def test_toolbar_wraps_when_buttons_need_more_space(self) -> None:
         try:
             root = tk.Tk()

@@ -93,6 +93,32 @@ class GroupingTests(unittest.TestCase):
 
 
 class BrowserModeTests(unittest.TestCase):
+    def test_backend_forwards_overwrite_and_verifies_retained_values(self):
+        import json
+        from unittest import mock
+        from toolbox.workflows import execute_wps
+        from toolbox_shared import wps_service as module
+
+        item = module.PreparedMapping(index=1, kdocs_url="https://example.invalid/doc", workbook_path="fixture.xlsx",
+            source_sheet="来源", source_range="A1", target_sheet="目标", target_start="A1", target_range="A1",
+            rows=1, cols=1, values=[[99]])
+        config = {"overwrite": False, "configs": [{"kdocs_url": item.kdocs_url, "regions": [{}]}]}
+        result = {"saved": True, "results": [{"index": 1, "expectedValues": [[0]], "value": 0}]}
+        with mock.patch.object(module, "prepare_mappings", return_value=[item]), mock.patch.object(module, "write_to_wps", return_value=result) as write:
+            actual = execute_wps(None, "run", {"config": json.dumps(config), "selected_indexes": "1"}, lambda _: None)
+            self.assertFalse(write.call_args.kwargs["overwrite"])
+            self.assertIn("回读核对一致", actual["message"])
+            result["results"][0]["value"] = 7
+            with self.assertRaisesRegex(RuntimeError, "回读不一致"):
+                execute_wps(None, "run", {"config": json.dumps(config), "selected_indexes": "1"}, lambda _: None)
+
+    def test_overwrite_defaults_and_export_round_trip(self):
+        from toolbox_shared.wps_config import normalize_runtime_config, build_config_export, runtime_config_from_export_payload
+
+        self.assertTrue(normalize_runtime_config({})["overwrite"])
+        config = {"overwrite": False, "configs": [{"name": "测试", "regions": []}]}
+        self.assertFalse(runtime_config_from_export_payload(build_config_export(config))["overwrite"])
+
     def test_retired_and_unknown_modes_fall_back_to_managed_chrome(self):
         from toolbox_shared.wps_config import normalize_browser_mode, normalize_runtime_config
 

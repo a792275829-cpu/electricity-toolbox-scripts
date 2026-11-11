@@ -18,7 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR.parent) not in sys.path:
     sys.path.insert(0, str(BASE_DIR.parent))
 from toolbox_shared.log_console import LogConsole, explain_error, redact
-from toolbox_shared.choices import SegmentedGroup
+from toolbox_shared.choices import SegmentedGroup, SettingCheckbutton
 from toolbox_shared.file_button import FileSelectButton
 from toolbox_shared.wps_urls import url_choices
 from toolbox_shared.wps_paths import (
@@ -925,6 +925,7 @@ class WpsWriterFrame(ttk.Frame):
         self.recent_urls: list[str] = []
         self.document_titles: dict[str, str] = {}
         self.browser_mode = tk.StringVar(master=self, value="managed_cdp")
+        self.overwrite = tk.BooleanVar(master=self, value=True)
         self.cdp_url = tk.StringVar(master=self, value="http://127.0.0.1:9222")
         self.browser_status = tk.StringVar(master=self, value="尚未检查浏览器连接")
         self.login_status = tk.StringVar(master=self, value="尚未检查")
@@ -1105,6 +1106,10 @@ class WpsWriterFrame(ttk.Frame):
 
         self.execution_toolbar = ttk.Frame(mapping_frame)
         self.execution_toolbar.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
+        SettingCheckbutton(
+            mapping_frame, text="覆盖非空单元格", variable=self.overwrite,
+            command=self.save_current_config,
+        ).grid(row=3, column=0, sticky="w", padx=8, pady=(0, 8))
         self.selection_status = tk.StringVar(value="请先选择配置，再预览或写入。")
         ttk.Label(
             self.execution_toolbar,
@@ -1569,6 +1574,7 @@ class WpsWriterFrame(ttk.Frame):
         if config.get("kdocs_url"):
             self.recent_urls = update_recent_urls(self.recent_urls, config["kdocs_url"])
         self.browser_mode.set(normalize_browser_mode(config.get("browser_mode")))
+        self.overwrite.set(normalize_runtime_config(config)["overwrite"])
         self.cdp_url.set(config.get("cdp_url", "http://127.0.0.1:9222"))
         default_url = config.get("kdocs_url", "")
         default_file = config.get("excel_path", "")
@@ -1618,6 +1624,7 @@ class WpsWriterFrame(ttk.Frame):
                 "recent_urls": self.recent_urls,
                 "document_titles": self.document_titles,
                 "browser_mode": self.browser_mode.get(),
+                "overwrite": self.overwrite.get(),
                 "cdp_url": self.cdp_url.get(),
                 "configs": [
                     {
@@ -1638,6 +1645,7 @@ class WpsWriterFrame(ttk.Frame):
         self.recent_urls = runtime_config["recent_urls"]
         self.document_titles = runtime_config.get("document_titles", {})
         self.browser_mode.set(runtime_config["browser_mode"])
+        self.overwrite.set(runtime_config["overwrite"])
         self.cdp_url.set(runtime_config["cdp_url"])
         self.configs = [self.document_config_from_config(row) for row in runtime_config["configs"]]
         self.remember_mapping_urls()
@@ -1747,7 +1755,7 @@ class WpsWriterFrame(ttk.Frame):
         self.detail_log_prepared("WRITE PREPARED", prepared)
         self.worker = self._start_tracked_thread(
             self.write_worker,
-            args=(prepared, self.browser_mode.get(), self.cdp_url.get().strip()),
+            args=(prepared, self.browser_mode.get(), self.cdp_url.get().strip(), self.overwrite.get()),
             name="wps-write",
         )
 
@@ -1784,7 +1792,7 @@ class WpsWriterFrame(ttk.Frame):
                     self._remote_messages.put(("预览失败", str(exc)))
         self.worker = self._start_tracked_thread(worker, name="wps-preview" if preview else "wps-write")
 
-    def write_worker(self, prepared: list[PreparedMapping], browser_mode: str, cdp_url: str) -> None:
+    def write_worker(self, prepared: list[PreparedMapping], browser_mode: str, cdp_url: str, overwrite: bool = True) -> None:
         try:
             self.log(f"开始写入，共 {len(prepared)} 个区域。")
             self.detail_log(f"WRITE STARTED: browser_mode={browser_mode}; cdp_url={cdp_url}; regions={len(prepared)}")
@@ -1797,11 +1805,11 @@ class WpsWriterFrame(ttk.Frame):
 
             for url, group in groups.items():
                 self.detail_log(f"WRITE TARGET: url={url}; regions={len(group)}")
-                result = write_to_wps(url, group, self.log, browser_mode=browser_mode, cdp_url=cdp_url)
+                result = write_to_wps(url, group, self.log, browser_mode=browser_mode, cdp_url=cdp_url, overwrite=overwrite)
                 self.detail_log(f"WRITE TARGET RESULT: url={url}; saved={result.get('saved')}; returned={len(result.get('results', []))}")
                 for entry in result.get("results", []):
                     item = by_index[entry["index"]]
-                    mismatches = compare_matrix(item.values, entry.get("value"), item.rows, item.cols)
+                    mismatches = compare_matrix(entry.get("expectedValues", item.values), entry.get("value"), item.rows, item.cols)
                     if mismatches:
                         all_ok = False
                         self.detail_log(

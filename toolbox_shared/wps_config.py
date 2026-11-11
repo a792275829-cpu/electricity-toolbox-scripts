@@ -55,6 +55,7 @@ def normalize_runtime_config(data: dict[str, Any]) -> dict[str, Any]:
     config = {
         "recent_urls": _string_list(data.get("recent_urls", [])),
         "browser_mode": normalize_browser_mode(data.get("browser_mode")),
+        "overwrite": data.get("overwrite", True) is not False,
         "cdp_url": str(data.get("cdp_url", "http://127.0.0.1:9222") or "http://127.0.0.1:9222"),
         "configs": [
             _document_config_from_dict(row)

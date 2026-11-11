@@ -551,6 +551,7 @@ def write_to_wps(
     log,
     browser_mode: str = "managed_cdp",
     cdp_url: str = "http://127.0.0.1:9222",
+    overwrite: bool = True,
 ) -> dict[str, Any]:
     if sync_playwright is None:
         raise RuntimeError("缺少浏览器自动化组件，请运行工具箱目录中的 setup_macos.command 完成初始化。")
@@ -563,6 +564,7 @@ def write_to_wps(
             "rows": item.rows,
             "cols": item.cols,
             "values": item.values,
+            "overwrite": overwrite,
         }
         for item in prepared
     ]
@@ -592,6 +594,14 @@ def write_to_wps(
               }
               const results = [];
               const ranges = [];
+              const blankCells = [];
+              const expectedValues = [];
+              const formulas = [];
+              const matrixCell = (raw, row, col, rows) => {
+                if (!Array.isArray(raw)) return row === 0 && col === 0 ? raw : null;
+                if (rows === 1 && !Array.isArray(raw[0])) return raw[col];
+                return Array.isArray(raw[row]) ? raw[row][col] : (col === 0 ? raw[row] : null);
+              };
               // KDocs saves continuously, so resolve every target before the
               // first assignment: a typo in a later region must not leave the
               // earlier regions half-written.
@@ -609,6 +619,48 @@ def write_to_wps(
                   // WPS proxies resolve lazily; awaiting a property forces the
                   // lookup instead of accepting a placeholder object.
                   await range.MergeCells;
+                  if (!item.overwrite) {
+                    // Only assign individual blank cells. Reassigning a merged
+                    // matrix of old/new values would destroy existing formulas.
+                    const match = item.targetRange.match(/^([A-Z]+)([0-9]+)/i);
+                    let firstCol = 0;
+                    for (const letter of match[1].toUpperCase()) {
+                      firstCol = firstCol * 26 + letter.charCodeAt(0) - 64;
+                    }
+                    const cells = [];
+                    const expected = [];
+                    const currentValues = await range.Value;
+                    const currentFormulas = await range.Formula;
+                    for (let row = 0; row < item.rows; row++) {
+                      expected.push([]);
+                      for (let col = 0; col < item.cols; col++) {
+                        let number = firstCol + col;
+                        let letters = "";
+                        while (number > 0) {
+                          number--;
+                          letters = String.fromCharCode(65 + number % 26) + letters;
+                          number = Math.floor(number / 26);
+                        }
+                        const value = matrixCell(currentValues, row, col, item.rows);
+                        const formula = matrixCell(currentFormulas, row, col, item.rows);
+                        const blank = (value === null || value === undefined || value === "")
+                          && !(typeof formula === "string" && formula.startsWith("="));
+                        expected[row].push(blank ? item.values[row][col] : value);
+                        if (blank) {
+                          const cell = await sheet.Range(letters + (Number(match[2]) + row));
+                          await cell.MergeCells;
+                          cells.push({cell, value: item.values[row][col]});
+                        }
+                      }
+                    }
+                    blankCells.push(cells);
+                    expectedValues.push(expected);
+                    formulas.push(currentFormulas);
+                  } else {
+                    blankCells.push(null);
+                    expectedValues.push(null);
+                    formulas.push(null);
+                  }
                 } catch (error) {
                   const reason = error && error.message ? error.message : String(error);
                   throw new Error(
@@ -627,6 +679,12 @@ def write_to_wps(
               }
               for (let i = 0; i < payload.length; i++) {
                 const item = payload[i];
+                if (!item.overwrite) {
+                  for (const {cell, value} of blankCells[i]) cell.Value = value;
+                  results[i].expectedValues = expectedValues[i];
+                  results[i].skipped = item.rows * item.cols - blankCells[i].length;
+                  continue;
+                }
                 const assignment = item.rows === 1 && item.cols === 1 ? item.values[0][0] : item.values;
                 ranges[i].Value = assignment;
               }
@@ -638,13 +696,34 @@ def write_to_wps(
                 const sheet = await app.Worksheets(result.targetSheet);
                 const range = await sheet.Range(result.targetRange);
                 result.value = await range.Value;
+                if (result.expectedValues) {
+                  const position = results.indexOf(result);
+                  const savedFormulas = await range.Formula;
+                  for (let row = 0; row < result.rows; row++) {
+                    for (let col = 0; col < result.cols; col++) {
+                      const formula = matrixCell(formulas[position], row, col, result.rows);
+                      if (typeof formula === "string" && formula.startsWith("=")) {
+                        if (matrixCell(savedFormulas, row, col, result.rows) !== formula) {
+                          throw new Error("公式回读不一致：" + result.targetSheet + "!" + result.targetRange);
+                        }
+                        // Preserved formulas may recalculate after blanks are filled.
+                        result.expectedValues[row][col] = matrixCell(result.value, row, col, result.rows);
+                      }
+                    }
+                  }
+                }
               }
               return { saved: true, results };
             }
             """
             log(f"正在写入 {len(payload)} 个区域…")
+            log("覆盖非空单元格：" + ("是" if overwrite else "否（只补空白，保留已有值和公式）"))
             try:
-                return evaluate_wps_operation(page, writer_script, payload, log, 180)
+                result = evaluate_wps_operation(page, writer_script, payload, log, 180)
+                if not overwrite:
+                    skipped = sum(entry.get("skipped", 0) for entry in result.get("results", []))
+                    log(f"已保留 {skipped} 个已有值或公式单元格。")
+                return result
             except Exception as exc:
                 # Playwright prefixes evaluate errors; the GUI and the daily log
                 # should show the business message only.

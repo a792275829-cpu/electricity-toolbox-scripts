@@ -208,6 +208,119 @@ class WpsBrowserRecoveryTests(unittest.TestCase):
         info = self.module.read_online_document_info(self.page.url, "cdp", "", lambda _: None)
         self.assertEqual(info, {"title": "WPS regression fixture", "sheets": ["目标"]})
 
+    def install_blank_cell_fixture(self):
+        self.page.evaluate("""() => {
+          window.cells = {Z10: 0, AA10: false, AB10: '已有', AC10: '',
+                          Z11: null, AA11: '', AB11: 0.125, AC11: ' '};
+          window.formulas = {AA11: '=IF(TRUE,"",1)'};
+          window.formats = {AB11: '0.0%', Z11: 'yyyy-mm-dd'};
+          const original = window.testApp.Worksheets;
+          window.testApp.Worksheets = (name) => {
+            const sheet = original(name);
+            if (!sheet) return null;
+            sheet.Range = (address) => {
+              const parse = (text) => {
+                const [, letters, row] = text.match(/^([A-Z]+)([0-9]+)$/);
+                let col = 0;
+                for (const letter of letters) col = col * 26 + letter.charCodeAt(0) - 64;
+                return [col, Number(row)];
+              };
+              const [start, end = start] = address.split(':');
+              const [left, top] = parse(start), [right, bottom] = parse(end);
+              const keys = [];
+              for (let row = top; row <= bottom; row++) {
+                const line = [];
+                for (let col = left; col <= right; col++) {
+                  let n = col, text = '';
+                  while (n) { n--; text = String.fromCharCode(65 + n % 26) + text; n = Math.floor(n / 26); }
+                  line.push(text + row);
+                }
+                keys.push(line);
+              }
+              const read = (data) => keys.length === 1 && keys[0].length === 1
+                ? data[keys[0][0]] ?? null : keys.map(row => row.map(key => data[key] ?? null));
+              return {
+                MergeCells: false,
+                get Value() { return read(window.cells); },
+                get Formula() { return read(window.formulas); },
+                set Value(value) {
+                  window.writes++;
+                  keys.forEach((row, r) => row.forEach((key, c) => {
+                    window.cells[key] = Array.isArray(value) ? value[r][c] : value;
+                    delete window.formulas[key];
+                  }));
+                }
+              };
+            };
+            return sheet;
+          };
+        }""")
+        item = replace(self.mappings()[0], target_start="Z10", target_range="Z10:AC11",
+                       rows=2, cols=4, values=[[1, 2, 3, 4], ["2026-11-11", 6, 7, 8]])
+        return item
+
+    def test_skip_existing_fills_only_blanks_and_verifies_preserved_cells(self):
+        item = self.install_blank_cell_fixture()
+        result = self.module.write_to_wps(self.page.url, [item], lambda _: None,
+                                          browser_mode="cdp", overwrite=False)
+        entry, = result["results"]
+        expected = [[0, False, "已有", 4], ["2026-11-11", "", 0.125, " "]]
+        self.assertEqual(entry["value"], expected)
+        self.assertEqual(entry["expectedValues"], expected)
+        self.assertEqual(entry["skipped"], 6)
+        self.assertEqual(self.page.evaluate("() => [window.writes, window.saves]"), [2, 1])
+        self.assertEqual(self.page.evaluate("() => window.formulas.AA11"), '=IF(TRUE,"",1)')
+        self.assertEqual(self.page.evaluate("() => window.formats"), {"AB11": "0.0%", "Z11": "yyyy-mm-dd"})
+        self.page.reload()
+        self.assertEqual(self.page.evaluate("() => [window.cells.AC10, window.cells.Z11, window.cells.Z10]"),
+                         [4, "2026-11-11", 0])
+
+    def test_explicit_overwrite_keeps_full_region_assignment(self):
+        item = self.install_blank_cell_fixture()
+        result = self.module.write_to_wps(self.page.url, [item], lambda _: None,
+                                          browser_mode="cdp", overwrite=True)
+        self.assertEqual(result["results"][0]["value"], item.values)
+        self.assertEqual(self.page.evaluate("() => [window.writes, window.saves]"), [1, 1])
+
+    def test_skip_existing_single_cells_preserve_zero_false_and_empty_formula(self):
+        item = self.install_blank_cell_fixture()
+        addresses = ["Z10", "AA10", "AA11", "AC10"]
+        items = [replace(item, index=i, target_start=address, target_range=address,
+                         rows=1, cols=1, values=[[42]]) for i, address in enumerate(addresses, 1)]
+        result = self.module.write_to_wps(self.page.url, items, lambda _: None,
+                                          browser_mode="cdp", overwrite=False)
+        self.assertEqual([entry["value"] for entry in result["results"]], [0, False, "", 42])
+        self.assertEqual(self.page.evaluate("() => [window.writes, window.saves]"), [1, 1])
+
+    def test_preserved_formula_can_recalculate_after_filling_blanks(self):
+        item = self.install_blank_cell_fixture()
+        self.page.evaluate("""() => {
+          const save = window.WPSOpenApi.save;
+          window.WPSOpenApi.save = async () => { window.cells.AA11 = 123; await save(); };
+        }""")
+        result = self.module.write_to_wps(self.page.url, [item], lambda _: None,
+                                          browser_mode="cdp", overwrite=False)
+        entry, = result["results"]
+        self.assertEqual(entry["expectedValues"][1][1], 123)
+        self.assertEqual(self.module.compare_matrix(entry["expectedValues"], entry["value"], 2, 4), [])
+
+    def test_preserved_formula_change_fails_readback(self):
+        item = self.install_blank_cell_fixture()
+        self.page.evaluate("""() => {
+          window.WPSOpenApi.save = async () => { window.formulas.AA11 = '=1'; };
+        }""")
+        with self.assertRaisesRegex(RuntimeError, "公式回读不一致"):
+            self.module.write_to_wps(self.page.url, [item], lambda _: None,
+                                     browser_mode="cdp", overwrite=False)
+
+    def test_skip_existing_preflights_all_regions_before_filling_blanks(self):
+        item = self.install_blank_cell_fixture()
+        invalid = replace(item, index=2, target_sheet="不存在")
+        with self.assertRaisesRegex(RuntimeError, "WPS_TARGET_INVALID.*第 2 个区域"):
+            self.module.write_to_wps(self.page.url, [item, invalid], lambda _: None,
+                                     browser_mode="cdp", overwrite=False)
+        self.assertEqual(self.page.evaluate("() => [window.writes, window.saves]"), [0, 0])
+
     def test_batch_reads_saved_regions_using_one_connection(self) -> None:
         prepared = self.mappings()
         self.module.write_to_wps(self.page.url, prepared, lambda _: None, browser_mode="cdp")
