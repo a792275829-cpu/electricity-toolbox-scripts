@@ -354,8 +354,10 @@ class RegionDialog(tk.Toplevel):
             ttk.Label(self, text=label).grid(row=row, column=0, padx=10, pady=6, sticky="w")
             if key == "source_sheet":
                 entry = ttk.Combobox(self, textvariable=self.vars[key], values=local_sheets or [], width=42)
+                entry.configure(postcommand=lambda combo=entry: combo.configure(values=parent.local_sheets))
             elif key == "target_sheet":
                 entry = ttk.Combobox(self, textvariable=self.vars[key], values=online_sheets or [], width=42)
+                entry.configure(postcommand=lambda combo=entry: combo.configure(values=parent.online_sheets))
             else:
                 entry = ttk.Entry(self, textvariable=self.vars[key], width=44)
             entry.grid(row=row, column=1, padx=10, pady=6, sticky="ew")
@@ -423,6 +425,7 @@ class DocumentConfigDialog(tk.Toplevel):
         self.document_titles = document_titles if document_titles is not None else {}
         self.on_document_title = on_document_title
         self._updating_target_url = False
+        self._updating_source_url = False
         self.local_sheets: list[str] = list(
             dict.fromkeys(
                 region.source_sheet
@@ -454,10 +457,11 @@ class DocumentConfigDialog(tk.Toplevel):
         self.config_name = tk.StringVar(value=initial.name if initial else "")
         self.source_type = tk.StringVar(value=initial.source_type if initial else "excel")
         self.source_url = tk.StringVar(value=default_source_url)
+        self.source_url_display = tk.StringVar(value=default_source_url)
         self.kdocs_url = tk.StringVar(value=default_url)
         self.target_url_display = tk.StringVar(value=default_url)
         self.local_file = tk.StringVar(value=initial.local_file if initial else "")
-        self.source_doc_title = tk.StringVar(value="")
+        self.source_doc_title = tk.StringVar(value=self.document_titles.get(default_source_url, ""))
         self.target_doc_title = tk.StringVar(value=self.document_titles.get(default_url, ""))
         cached_sheet_count = len(self.online_sheets)
         cached_status = (
@@ -470,15 +474,18 @@ class DocumentConfigDialog(tk.Toplevel):
 
         self.create_widgets()
         self._refresh_target_url_choices()
+        self._refresh_source_url_choices()
         self.target_url_display.trace_add("write", self._target_url_edited)
         self.kdocs_url.trace_add("write", self._target_raw_url_changed)
+        self.source_url_display.trace_add("write", self._source_url_edited)
+        self.source_url.trace_add("write", self._source_raw_url_changed)
         # Editing an existing configuration should immediately restore the
-        # target document title and current sheet list. The read is asynchronous
+        # source/target document titles and current sheet lists. The read is asynchronous
         # and managed mode uses the saved profile in headless Chrome, so the
         # dialog remains responsive and no browser window is shown.
         if initial is not None and default_url:
             self.refresh_online_sheets(auto=True)
-        if self.source_type.get() == "excel":
+        if self.source_type.get() == "excel" or default_source_url:
             self.refresh_local_sheets(show_errors=False)
 
         self.transient(parent)
@@ -500,15 +507,20 @@ class DocumentConfigDialog(tk.Toplevel):
         ttk.Entry(docs, textvariable=self.config_name).grid(row=0, column=1, columnspan=2, padx=8, pady=6, sticky="ew")
 
         ttk.Label(docs, text="数据来源").grid(row=1, column=0, padx=8, pady=6, sticky="w")
-        source_frame = SegmentedGroup(docs, variable=self.source_type,
+        source_frame = SegmentedGroup(docs, variable=self.source_type, command=self.refresh_local_sheets,
                                       choices=(("excel", "本地表格"), ("kdocs", "金山文档")))
         source_frame.grid(row=1, column=1, columnspan=2, padx=8, pady=6, sticky="w")
 
         ttk.Label(docs, text="来源表格链接").grid(row=2, column=0, padx=8, pady=6, sticky="w")
-        source_url_combo = ttk.Combobox(docs, textvariable=self.source_url, values=self.recent_urls)
-        source_url_combo.grid(row=2, column=1, padx=8, pady=6, sticky="ew")
+        self.source_url_combo = ttk.Combobox(
+            docs, textvariable=self.source_url_display, postcommand=self._refresh_source_url_choices
+        )
+        self.source_url_combo.grid(row=2, column=1, padx=8, pady=6, sticky="ew")
+        self.source_url_combo.bind("<<ComboboxSelected>>", lambda _event: self.refresh_source_sheets())
+        self.source_url_combo.bind("<FocusOut>", lambda _event: self._refresh_source_url_choices())
+        self.source_url_combo.bind("<Return>", lambda _event: self.refresh_source_sheets())
         self.refresh_source_button = ttk.Button(
-            docs, text="刷新来源工作表", command=self.refresh_local_sheets
+            docs, text="刷新来源工作表", command=self.refresh_source_sheets
         )
         self.refresh_source_button.grid(row=2, column=2, padx=8, pady=6)
 
@@ -581,6 +593,7 @@ class DocumentConfigDialog(tk.Toplevel):
         )
         if path:
             self.local_file.set(path)
+            self.source_type.set("excel")
             self.refresh_local_sheets(show_errors=True)
 
     def refresh_local_sheets(self, show_errors: bool = True) -> None:
@@ -610,6 +623,47 @@ class DocumentConfigDialog(tk.Toplevel):
             self.local_sheets = []
             if show_errors:
                 messagebox.showerror("读取来源工作表失败", str(exc), parent=self)
+
+    def refresh_source_sheets(self) -> None:
+        """The link's refresh button always reads the linked online source."""
+        if not self.source_url.get().strip():
+            messagebox.showerror("请填写表格链接", "请填写来源表格链接。", parent=self)
+            return
+        if self.source_type.get() != "kdocs":
+            self.local_sheets = []
+        self.source_type.set("kdocs")
+        self.refresh_local_sheets()
+
+    def _refresh_source_url_choices(self) -> None:
+        url = self.source_url.get().strip()
+        choices = url_choices(self.recent_urls + ([url] if url else []), self.document_titles, url)
+        self.source_url_combo.configure(values=[option["label"] for option in choices["options"]])
+        self._updating_source_url = True
+        try:
+            self.source_url_display.set(choices["label"])
+        finally:
+            self._updating_source_url = False
+
+    def _source_url_edited(self, *_args) -> None:
+        if self._updating_source_url:
+            return
+        choices = url_choices(self.recent_urls, self.document_titles, self.source_url_display.get())
+        if choices["url"] != self.source_url.get():
+            self._updating_source_url = True
+            try:
+                self.source_url.set(choices["url"])
+            finally:
+                self._updating_source_url = False
+
+    def _source_raw_url_changed(self, *_args) -> None:
+        self._request_ids["source"] += 1
+        self._pending_online_reads.pop("source", None)
+        self.refresh_source_button.configure(state="normal")
+        if self.source_type.get() == "kdocs":
+            self.local_sheets = []
+        self.source_doc_title.set(self.document_titles.get(self.source_url.get().strip(), ""))
+        if not self._updating_source_url:
+            self._refresh_source_url_choices()
 
     def _refresh_target_url_choices(self) -> None:
         url = self.kdocs_url.get().strip()
@@ -733,6 +787,8 @@ class DocumentConfigDialog(tk.Toplevel):
             button.configure(state="normal")
             if kind == "target" and url != self.kdocs_url.get().strip():
                 continue
+            if kind == "source" and (self.source_type.get() != "kdocs" or url != self.source_url.get().strip()):
+                continue
             if error is not None:
                 if kind == "source":
                     self.source_doc_title.set("读取失败")
@@ -761,6 +817,7 @@ class DocumentConfigDialog(tk.Toplevel):
                 self.target_doc_title.set(document_title)
                 self.last_online_sheet_url = url
             self._refresh_target_url_choices()
+            self._refresh_source_url_choices()
             self.read_status.set(f"已读取 {len(sheets)} 个工作表。")
 
         if self._pending_online_reads:
