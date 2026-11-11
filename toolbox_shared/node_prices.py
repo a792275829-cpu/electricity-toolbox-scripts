@@ -22,6 +22,7 @@ class NodePrices:
     run_date: date
     nodes: tuple[str, ...]
     quarter_averages: tuple[float, ...]
+    province_prices: tuple[float, ...] | None = None
 
 
 def _sheet_date(title: str) -> date:
@@ -32,7 +33,7 @@ def _sheet_date(title: str) -> date:
 
 
 def read_node_prices(path: Path) -> NodePrices:
-    """Filter named nodes only; auxiliary numeric/province sheets are ignored."""
+    """Average selected nodes and read the labeled province row separately."""
     from .native_excel import load_value_workbook
 
     markets = [key for key, label in NODE_MARKETS.items() if label in path.stem]
@@ -43,6 +44,7 @@ def read_node_prices(path: Path) -> NodePrices:
     nodes = set()
     dates = set()
     prices = []
+    province_prices = None
     try:
         for sheet in workbook.worksheets:
             sheet.reset_dimensions()
@@ -63,9 +65,12 @@ def read_node_prices(path: Path) -> NodePrices:
             dates.add(sheet_date)
             for row in rows:
                 name = str(row[node_col] or "").strip() if len(row) > node_col else ""
-                if not any(word in name for word in ("海风", "升压站")):
+                is_province = name == "全省" and "全省" in sheet.title
+                if not is_province and not any(word in name for word in ("海风", "升压站")):
                     continue
-                if name in nodes:
+                if is_province and province_prices is not None:
+                    raise ValueError(f"{path.name} / {sheet.title}：全省电价来源重复")
+                if not is_province and name in nodes:
                     raise ValueError(f"{path.name} / {sheet.title}：节点重复 {name}")
                 if len(row) <= item_col or str(row[item_col]).strip() != "电价(元/MWh)":
                     raise ValueError(f"{path.name} / {name}：数据项须为电价(元/MWh)")
@@ -81,8 +86,11 @@ def read_node_prices(path: Path) -> NodePrices:
                     except (IndexError, ValueError, TypeError) as exc:
                         raise ValueError(f"{path.name} / {name} / {slot}：电价缺失或无效") from exc
                     values.append(value)
-                nodes.add(name)
-                prices.append(values)
+                if is_province:
+                    province_prices = tuple(values)
+                else:
+                    nodes.add(name)
+                    prices.append(values)
     finally:
         workbook.close()
     if not nodes:
@@ -90,7 +98,8 @@ def read_node_prices(path: Path) -> NodePrices:
     if len(dates) != 1:
         raise ValueError(f"{path.name}：节点电价工作表日期不唯一")
     return NodePrices(market, dates.pop(), tuple(sorted(nodes)),
-                      tuple(math.fsum(row[i] for row in prices) / len(prices) for i in range(96)))
+                      tuple(math.fsum(row[i] for row in prices) / len(prices) for i in range(96)),
+                      province_prices)
 
 
 def collect_node_prices(folder: Path, logger) -> dict[str, NodePrices]:
@@ -106,4 +115,6 @@ def collect_node_prices(folder: Path, logger) -> dict[str, NodePrices]:
         result[data.market] = data
         sources[data.market] = path
         logger(f"节点电价：{path.name}，表内日期 {data.run_date}，筛选 {len(data.nodes)} 个海风/升压站节点")
+        if data.province_prices is None:
+            logger(f"提示：{path.name} 缺少全省电价明细，全省汇总对应96点留空。")
     return result

@@ -361,27 +361,29 @@ def write_workbook(
     if node_prices:
         if first_sheet:
             workbook.remove(workbook.active)
-        worksheet = workbook.create_sheet("海风汇总")
-        for market_index, market in enumerate(MARKET_ORDER):
-            title_row = market_index * 2 + 1
-            data = node_prices.get(market)
-            title = f"海风{NODE_MARKETS[market]}"
-            if data is not None:
-                title += f" {data.run_date.isoformat()}"
-            else:
-                logger(f"提示：缺少{title}节点电价文件，对应96点留空。")
-            worksheet.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=96)
-            style_header(worksheet.cell(title_row, 1, title))
-            # Keep the title visible at the left of the wide 96-point range.
-            worksheet.cell(title_row, 1).alignment = Alignment(horizontal="left", vertical="center")
-            for index in range(96):
-                cell = worksheet.cell(title_row + 1, index + 1,
-                                      data.quarter_averages[index] if data is not None else None)
-                style_body(cell, bold=False)
-                cell.number_format = "0.00"
-        set_widths(worksheet)
-        worksheet.column_dimensions["A"].width = 12
-        logger("已生成工作表：海风汇总（96点节点等权平均，00:00～23:45）")
+        for label, field in (("海风", "quarter_averages"), ("全省", "province_prices")):
+            worksheet = workbook.create_sheet(f"{label}汇总")
+            for market_index, market in enumerate(MARKET_ORDER):
+                title_row = market_index * 2 + 1
+                data = node_prices.get(market)
+                values = getattr(data, field) if data is not None else None
+                title = f"{label}{NODE_MARKETS[market]}"
+                if data is not None:
+                    title += f" {data.run_date.isoformat()}"
+                if values is None:
+                    logger(f"提示：缺少{title}电价，对应96点留空。")
+                worksheet.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=96)
+                style_header(worksheet.cell(title_row, 1, title))
+                # Keep the title visible at the left of the wide 96-point range.
+                worksheet.cell(title_row, 1).alignment = Alignment(horizontal="left", vertical="center")
+                for index in range(96):
+                    cell = worksheet.cell(title_row + 1, index + 1,
+                                          values[index] if values is not None else None)
+                    style_body(cell, bold=False)
+                    cell.number_format = "0.00"
+            set_widths(worksheet)
+            worksheet.column_dimensions["A"].width = 12
+            logger(f"已生成工作表：{label}汇总（96点，00:00～23:45）")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     final_path = save_workbook_with_fallback(workbook, output_path)
@@ -591,11 +593,12 @@ def save_workbook_atomically(workbook: Workbook, output_path: Path) -> None:
         try:
             if not verification.sheetnames:
                 raise ValueError("生成的汇总工作簿不包含任何工作表")
-            if "海风汇总" in workbook.sheetnames:
-                expected = workbook["海风汇总"]
-                actual = verification["海风汇总"]
-                if verification.sheetnames[-1] != "海风汇总":
-                    raise ValueError("海风汇总须位于最后一个工作表")
+            summary_names = [name for name in ("海风汇总", "全省汇总") if name in workbook.sheetnames]
+            if summary_names and verification.sheetnames[-len(summary_names):] != summary_names:
+                raise ValueError("海风汇总、全省汇总须依次位于工作簿末尾")
+            for sheet_name in summary_names:
+                expected = workbook[sheet_name]
+                actual = verification[sheet_name]
                 for row, saved_row in enumerate(actual.iter_rows(min_row=1, max_row=4, max_col=96), 1):
                     for col, saved_cell in enumerate(saved_row, 1):
                         if row in (1, 3) and col > 1:
@@ -606,7 +609,7 @@ def save_workbook_atomically(workbook: Workbook, output_path: Path) -> None:
                                       if isinstance(value, (int, float)) and isinstance(saved_cell.value, (int, float))
                                       else saved_cell.value == value)
                         if not consistent or saved_cell.number_format != source_cell.number_format:
-                            raise ValueError(f"海风汇总回读不一致：{source_cell.coordinate}")
+                            raise ValueError(f"{sheet_name}回读不一致：{source_cell.coordinate}")
         finally:
             verification.close()
         temporary_path.replace(output_path)

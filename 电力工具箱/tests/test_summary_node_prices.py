@@ -113,7 +113,7 @@ class SummaryNodePriceTests(unittest.TestCase):
         output = self.module.run_summary(self.root, self.root / "汇总.xlsx")
         book = load_workbook(output, data_only=True)
         try:
-            self.assertEqual(book.sheetnames, ["海门", "海风汇总"])
+            self.assertEqual(book.sheetnames, ["海门", "海风汇总", "全省汇总"])
             sheet = book["海风汇总"]
             self.assertEqual((sheet.max_row, sheet.max_column), (4, 96))
             self.assertEqual(sheet["A1"].value, "海风日前 2026-11-12")
@@ -126,15 +126,78 @@ class SummaryNodePriceTests(unittest.TestCase):
         finally:
             book.close()
 
+    def test_province_row_is_copied_by_time_labels_without_node_averaging(self):
+        path = self.source()
+        book = load_workbook(path)
+        province = book.worksheets[1]
+        # Moving the province tab must not change which data are read.
+        book.move_sheet(province, offset=1)
+        slots = list(reversed(QUARTER_SLOTS))
+        for col, slot in enumerate(slots, 3):
+            province.cell(1, col, slot)
+            province.cell(2, col, str(95 - (col - 3) - 50.125))
+        book.save(path)
+        book.close()
+        output = self.module.run_summary(self.root, self.root / "汇总.xlsx")
+        book = load_workbook(output, data_only=True)
+        try:
+            self.assertEqual(book.sheetnames[-1], "全省汇总")
+            sheet = book["全省汇总"]
+            self.assertEqual(sheet["A1"].value, "全省日前 2026-11-12")
+            self.assertEqual(sheet["A3"].value, "全省实时")
+            for col in range(1, 97):
+                self.assertEqual(sheet.cell(2, col).value, col - 1 - 50.125)
+                self.assertEqual(sheet.cell(2, col).number_format, "0.00")
+                self.assertIsNone(sheet.cell(4, col).value)
+        finally:
+            book.close()
+
+    def test_bad_province_price_preserves_previous_output(self):
+        for bad in (None, "nan", True):
+            path = self.source()
+            book = load_workbook(path)
+            book.worksheets[1]["H2"] = bad
+            book.save(path)
+            book.close()
+            output = self.root / "汇总.xlsx"
+            output.write_bytes(b"previous")
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "全省.*01:15.*电价缺失或无效"):
+                self.module.run_summary(self.root, output)
+            self.assertEqual(output.read_bytes(), b"previous")
+
+    def test_missing_province_row_leaves_blank_points(self):
+        self.source(auxiliary=False)
+        output = self.module.run_summary(self.root, self.root / "汇总.xlsx")
+        book = load_workbook(output, data_only=True)
+        try:
+            self.assertEqual(book.sheetnames[-1], "全省汇总")
+            self.assertEqual(book["全省汇总"]["A1"].value, "全省日前 2026-11-12")
+            self.assertTrue(all(cell.value is None for row in (2, 4) for cell in book["全省汇总"][row]))
+        finally:
+            book.close()
+
+    def test_duplicate_province_row_is_rejected(self):
+        path = self.source()
+        book = load_workbook(path)
+        sheet = book.worksheets[1]
+        sheet.append([cell.value for cell in sheet[2]])
+        book.save(path)
+        book.close()
+        with self.assertRaisesRegex(ValueError, "全省电价来源重复"):
+            read_node_prices(path)
+
     def test_node_only_folder_with_one_market_leaves_other_96_blank(self):
         self.source("实时", "2026-11-10")
         output = self.module.run_summary(self.root, self.root / "汇总.xlsx")
         book = load_workbook(output, data_only=True)
         try:
-            self.assertEqual(book.sheetnames, ["海风汇总"])
+            self.assertEqual(book.sheetnames, ["海风汇总", "全省汇总"])
             sheet = book.active
             self.assertEqual(sheet["A1"].value, "海风日前")
             self.assertTrue(all(cell.value is None for cell in sheet[2]))
             self.assertEqual(sheet["CR4"].value, 75)
+            province = book["全省汇总"]
+            self.assertEqual(province["A3"].value, "全省实时 2026-11-10")
+            self.assertTrue(all(cell.value == 9999 for cell in province[4]))
         finally:
             book.close()
