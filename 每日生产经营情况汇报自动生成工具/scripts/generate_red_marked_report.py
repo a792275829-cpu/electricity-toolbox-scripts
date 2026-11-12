@@ -855,7 +855,7 @@ def fill_online_completion(paragraph, date_text: str, energy: dict[str, Any] | N
 def _cell_number(sheet, row: int, column: int) -> float | None:
     value = sheet.cell(row, column).value
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
+        return float(value) if math.isfinite(value) else None
     return None
 
 
@@ -889,7 +889,7 @@ def _locate_row(sheet, *, label: str | None = None, sublabel: str | None = None,
 
 def _clear_int(value: float | None) -> str:
     """按 0 位小数格式化；负值四舍五入到 0 时保留 -0，与 Excel 显示一致。"""
-    if value is None:
+    if value is None or not math.isfinite(value):
         return "/"
     negative = value < 0
     rounded = int(abs(value) + 0.5)
@@ -899,26 +899,39 @@ def _clear_int(value: float | None) -> str:
 
 
 def _add(*values: float | None) -> float | None:
-    if any(value is None for value in values):
+    if any(value is None or not math.isfinite(value) for value in values):
         return None
-    return sum(values)  # type: ignore[arg-type]
+    return math.fsum(values)
+
+
+def _energy_denominator(values: list[float | None]) -> float | None:
+    """Reject missing energy and cancellation residue, without rounding real energy."""
+    total = _add(*values)
+    if total is None:
+        return None
+    scale = math.fsum(abs(value) for value in values)
+    if abs(total) <= max(1e-9, scale * 1e-12):
+        return None
+    return total
 
 
 def _weighted_price(pairs: list[tuple[float | None, float | None]]) -> float | None:
-    usable = [(weight, price) for weight, price in pairs if weight and price is not None]
-    total = sum(weight for weight, _ in usable)
-    if not total:
+    if any(price is None or not math.isfinite(price) for _, price in pairs):
         return None
-    return sum(weight * price for weight, price in usable) / total
+    total = _energy_denominator([weight for weight, _ in pairs])
+    if total is None:
+        return None
+    return math.fsum(weight * price for weight, price in pairs) / total
 
 
 def _energy_price(total_fee: float | None, capacity_fee: float | None,
                   online_energy: float | None) -> float | None:
-    if not online_energy:
-        return 0.0
-    if total_fee is None:
+    denominator = _energy_denominator([online_energy])
+    if denominator is None or total_fee is None or capacity_fee is None:
         return None
-    return (total_fee - (capacity_fee or 0.0)) / online_energy * 1000
+    if not math.isfinite(total_fee) or not math.isfinite(capacity_fee):
+        return None
+    return (total_fee - capacity_fee) / denominator * 1000
 
 
 def _fire_row(sheet, row: int) -> dict[str, float | None]:
@@ -934,7 +947,7 @@ def _fire_table_values(source: dict[str, float | None], *, spot_income: float | 
                        composite_price: float | None, blank_online: bool = False,
                        spot_blank: bool = False) -> dict[int, str]:
     long_term_income = source.get("中长期收益")
-    returns = None if spot_income is None else spot_income + (long_term_income or 0.0)
+    returns = _add(spot_income, long_term_income)
     return {
         3: _clear_int(source.get("中长期电量")),
         4: _clear_int(source.get("中长期电价")),
@@ -964,7 +977,7 @@ def _fire_table_values(source: dict[str, float | None], *, spot_income: float | 
 def _renewable_table_values(source: dict[str, float | None]) -> dict[int, str]:
     long_term_income = source.get("中长期收益")
     spot_income = source.get("现货收益")
-    returns = None if spot_income is None else spot_income + (long_term_income or 0.0)
+    returns = _add(spot_income, long_term_income)
     return {
         3: _clear_int(source.get("中长期电量")),
         4: _clear_int(source.get("中长期电价")),
@@ -1025,8 +1038,10 @@ def load_daily_clearing_inputs(date_text: str,
                 (shantou_2.get(weight_name), shantou_2.get(name)),
                 (shantou_3.get(weight_name), shantou_3.get(name)),
             ])
-        denominator = _add(shantou_3.get("中长期电量"), shantou_3.get("现货电量"),
-                           shantou_2.get("中长期电量"), shantou_2.get("现货电量"))
+        denominator = _energy_denominator([
+            shantou_3.get("中长期电量"), shantou_3.get("现货电量"),
+            shantou_2.get("中长期电量"), shantou_2.get("现货电量"),
+        ])
         if denominator and shantou_2.get("总电费") is not None and shantou_3.get("总电费") is not None:
             combined["综合电价"] = (shantou_2["总电费"] + shantou_3["总电费"]) / denominator * 1000
         else:
@@ -1083,8 +1098,9 @@ def load_daily_clearing_inputs(date_text: str,
                 composite_price=dongguan.get("综合电价"))),
             ("清远", None, _fire_table_values(
                 qingyuan, spot_income=None, total_fee=qingyuan.get("总电费"),
-                energy_price=0.0,
-                composite_price=qingyuan.get("综合电价") or 0.0,
+                energy_price=_energy_price(qingyuan.get("总电费"), qingyuan.get("容量电费"),
+                                           qingyuan.get("上网电量")),
+                composite_price=qingyuan.get("综合电价"),
                 blank_online=True, spot_blank=True)),
         ]
 

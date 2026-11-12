@@ -6,10 +6,14 @@ import unittest
 from pathlib import Path
 
 from docx import Document
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from generate_red_marked_report import (
     LOCAL_TEMPLATE_PATH,
+    _weighted_price,
+    _energy_price,
+    _clear_int,
+    _cell_number,
     build_spot_deviation_texts,
     fill_daily_clearing_table,
     fill_spot_deviation_analysis,
@@ -152,13 +156,91 @@ class DailyClearingFillTests(unittest.TestCase):
         self.assertEqual(values[23], "559")  # (350-12)/605*1000
         self.assertEqual(values[24], "640")
 
-    def test_qingyuan_row_keeps_slash_and_zero_price(self) -> None:
+    def test_qingyuan_row_keeps_missing_price_as_slash(self) -> None:
         values = self.rows[("清远", None)]
         self.assertEqual(values[9], "/")
         self.assertEqual(values[20], "/")
         self.assertEqual(values[21], "2")
-        self.assertEqual(values[23], "0")
+        self.assertEqual(values[23], "/")
         self.assertEqual(values[24], "400")
+
+    def _changed_rows(self, changes):
+        book = load_workbook(self.workbook_path)
+        for cell, value in changes.items():
+            book["快报"][cell] = value
+        book.save(self.workbook_path)
+        book.close()
+        data = load_daily_clearing_inputs("2026-11-02", self.workbook_path)
+        return {(label, sub): values for label, sub, values in data["rows"]}
+
+    def test_qingyuan_invalid_composite_price_is_not_zero(self):
+        for invalid in (None, "/", "#DIV/0!"):
+            with self.subTest(invalid=invalid):
+                rows = self._changed_rows({"L25": invalid})
+                self.assertEqual(rows[("清远", None)][24], "/")
+        rows = self._changed_rows({"L25": 0})
+        self.assertEqual(rows[("清远", None)][24], "0")
+
+    def test_returns_require_both_incomes_except_qingyuan(self):
+        for invalid in (None, "/", "#VALUE!"):
+            for cell, key in (("O8", ("汕头", None)), ("AA8", ("汕头", None)),
+                              ("P31", ("分公司新能源", None)),
+                              ("AB31", ("分公司新能源", None))):
+                with self.subTest(cell=cell, invalid=invalid):
+                    _build_workbook(self.workbook_path)
+                    rows = self._changed_rows({cell: invalid})
+                    self.assertEqual(rows[key][21], "/")
+        rows = self._changed_rows({"O25": None})
+        self.assertEqual(rows[("清远", None)][21], "/")
+
+    def test_weighted_prices_require_complete_finite_pairs(self):
+        for pairs in ([(10, 400), (None, 500)], [(10, 400), (20, None)],
+                      [(10, 400), (float("nan"), 500)],
+                      [(10, 400), (20, float("inf"))], [(10, 400), (0, None)]):
+            with self.subTest(pairs=pairs):
+                self.assertIsNone(_weighted_price(pairs))
+        self.assertEqual(_weighted_price([(10, 0), (10, 400)]), 200)
+        self.assertEqual(_weighted_price([(0, 100), (10, 400)]), 400)
+        self.assertEqual(_weighted_price([(0.0001, 400)]), 400)
+        self.assertEqual(_weighted_price([(100, 400), (-90, 500)]), -500)
+
+    def test_energy_prices_require_fee_capacity_and_nonzero_energy(self):
+        for args in ((10, 0, None), (10, 0, 0), (10, 0, 1e-12),
+                     (None, 0, 10), (10, None, 10), (10, float("inf"), 10)):
+            with self.subTest(args=args):
+                self.assertIsNone(_energy_price(*args))
+        self.assertEqual(_energy_price(0, 0, 10), 0)
+        self.assertEqual(_energy_price(10, 0, 10), 1000)
+
+    def test_nonfinite_cell_and_display_values_are_missing(self):
+        book = Workbook()
+        for value in (float("nan"), float("inf"), -float("inf")):
+            book.active["A1"] = value
+            self.assertIsNone(_cell_number(book.active, 1, 1))
+            self.assertEqual(_clear_int(value), "/")
+        book.close()
+
+    def test_cancellation_prices_read_back_as_slash_in_word(self):
+        rows = self._changed_rows({
+            "D10": 100.1, "D11": -100.0999999999999,
+            "E10": 400, "E11": 500, "Y10": 0, "Y11": 0,
+            "M10": 10, "M11": 20, "AE10": 0, "AE11": 0,
+            "J10": 0.3, "J11": -0.30000000000000004,
+        })
+        combined = rows[("汕头", "#2#3")]
+        self.assertEqual([combined[col] for col in (4, 23, 24)], ["/", "/", "/"])
+        self.assertIsNone(_weighted_price([(1e8, 400), (-1e8 + 1e-5, 500)]))
+        document = Document(LOCAL_TEMPLATE_PATH)
+        fill_daily_clearing_table(document.tables[0],
+                                  [(label, sub, values) for (label, sub), values in rows.items()])
+        target = Path(self._directory.name) / "cancellation.docx"
+        document.save(target)
+        saved = Document(target)
+        # Locate the combined unit row through its unique unit label.
+        row = next(row for row in saved.tables[0].rows
+                   if "#2#3" in row.cells[1].text.replace(" ", "").replace("\n", ""))
+        self.assertEqual([row.cells[col - 1].text.strip() for col in (4, 23, 24)],
+                         ["/", "/", "/"])
 
     def test_renewable_row_uses_mechanism_columns(self) -> None:
         values = self.rows[("分公司新能源", None)]
