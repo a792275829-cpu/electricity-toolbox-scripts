@@ -54,7 +54,7 @@ class ReportTextTests(unittest.TestCase):
             summary = {"selected": {"max": 100, "min": 10},
                        "maxDiff": difference, "minDiff": difference,
                        "avgDiff": difference}
-            by_type[code] = {"dayAhead": summary, "actual": summary}
+            by_type[code] = {"dayAhead": summary, "actual": summary, "actualVsDayAhead": summary}
         prices = {"rows": [{"dataType": kind, "selectedDailyAvgPrice": 100,
                             "difference": 10} for kind in ("PRE", "RT")]}
         payload = {"loadCompare": {"subjects": subjects}, "priceBoard": prices,
@@ -68,6 +68,38 @@ class ReportTextTests(unittest.TestCase):
                 text = builder(payload)
                 self.assertIn(label + "增加", text)
                 self.assertNotIn(label + "减少", text)
+
+    def test_actual_output_trends_compare_same_day_forecast(self):
+        from fetch_daily_data import build_load_info_comparison
+        selected = {"date": "2026-11-10", "byType": {
+            code: {"actual": {"max": 124510, "min": 81950, "avg": avg},
+                   "dayAhead": {"avg": forecast}}
+            for code, avg, forecast in (("1", 100, 110), ("6", 50, 60),
+                                         ("2", 400, 500), ("3", 13349.65, 9126.06))}}
+        previous = {"date": "2026-11-09", "byType": {
+            code: {"actual": {"max": 130000, "avg": avg}, "dayAhead": {"avg": 1}}
+            for code, avg in (("1", 110), ("6", 60), ("2", 300), ("3", 15000))}}
+        comparison = build_load_info_comparison(selected, previous)
+        payload = {"marketAnalysisData": {"loadInfo": comparison, "priceBoard": {
+            "rows": [{"dataType": "RT", "selectedDailyAvgPrice": 100}]}}}
+        text = build_actual_market_text(payload)
+        self.assertIn("A类电出力减少、地方电出力增加", text)
+        import tempfile
+        from pathlib import Path
+        from docx import Document
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "realtime-market.docx"
+            document = Document()
+            document.add_paragraph(text)
+            document.save(target)
+            self.assertEqual(Document(target).paragraphs[0].text, text)
+        self.assertIn("实时统调负荷需求下降，全天最大值12451万千瓦，最小值8195万千瓦", text)
+        for code in ("2", "3"):
+            # Missing same-day forecasts must never fall back to previous actuals.
+            del selected["byType"][code]["dayAhead"]
+        payload["marketAnalysisData"]["loadInfo"] = build_load_info_comparison(selected, previous)
+        text = build_actual_market_text(payload)
+        self.assertIn("A类电出力待补充、地方电出力待补充", text)
 
     def test_actual_market_text_accepts_missing_load_extrema(self) -> None:
         empty_summary = {

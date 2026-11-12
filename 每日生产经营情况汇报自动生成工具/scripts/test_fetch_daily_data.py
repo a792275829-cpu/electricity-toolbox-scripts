@@ -161,6 +161,10 @@ class DiffTests(unittest.TestCase):
         self.assertEqual(result["byType"]["1"]["dayAhead"]["maxDiff"], 1.0)
         self.assertIsNone(result["byType"]["2"]["dayAhead"]["maxDiff"])
         self.assertEqual(tuple(result["byType"]), ("1", "2"))
+        same_day = result["byType"]["1"]["actualVsDayAhead"]
+        self.assertEqual(same_day["selectedDate"], "2026-10-11")
+        self.assertEqual(same_day["compareDate"], "2026-10-11")
+        self.assertIsNone(same_day["maxDiff"])
 
 
 if __name__ == "__main__":

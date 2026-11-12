@@ -385,6 +385,12 @@ def build_load_info_comparison(selected: dict[str, Any], compare: dict[str, Any]
                 selected_item.get("actual") or {},
                 compare_item.get("actual") or {},
             ),
+            "actualVsDayAhead": {
+                **diff_summary(selected_item.get("actual") or {},
+                               selected_item.get("dayAhead") or {}),
+                "selectedDate": selected["date"],
+                "compareDate": selected["date"],
+            },
         }
     return comparison
 

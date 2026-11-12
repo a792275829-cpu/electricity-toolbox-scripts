@@ -1820,18 +1820,20 @@ def build_day_ahead_market_text(payload: dict[str, Any]) -> str:
 def build_actual_market_text(payload: dict[str, Any]) -> str:
     market_data = payload["marketAnalysisData"]
     load = load_info_item(market_data, "1", "actual")
-    a_power = load_info_item(market_data, "2", "actual")
-    local = load_info_item(market_data, "3", "actual")
+    a_power = market_data["loadInfo"]["byType"]["2"].get("actualVsDayAhead", {})
+    local = market_data["loadInfo"]["byType"]["3"].get("actualVsDayAhead", {})
     b_space = load_info_item(market_data, "6", "actual")
     price = market_price_item(market_data, "RT")
+    a_change = change_word(a_power["avgDiff"]) if a_power.get("avgDiff") is not None else "待补充"
+    local_change = change_word(local["avgDiff"]) if local.get("avgDiff") is not None else "待补充"
     selected = load["selected"]
     b_selected = b_space["selected"]
     return (
         f"\u5b9e\u65f6\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load.get('maxDiff') or 0)}\uff0c"
         f"\u5168\u5929\u6700\u5927\u503c{fmt_mw_as_10k_kw(selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
         f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
-        f"A\u7c7b\u7535\u51fa\u529b{change_word(a_power.get('avgDiff') or 0)}\u3001"
-        f"\u5730\u65b9\u7535\u51fa\u529b{change_word(local.get('avgDiff') or 0)}\uff0c"
+        f"A\u7c7b\u7535\u51fa\u529b{a_change}\u3001"
+        f"\u5730\u65b9\u7535\u51fa\u529b{local_change}\uff0c"
         f"B\u7c7b\u7ade\u4ef7\u7a7a\u95f4\u5168\u5929\u6700\u5927\u503c{fmt_mw_as_10k_kw(b_selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
         f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(b_selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
         f"\u5168\u5929\u5b9e\u65f6\u5747\u4ef7{fmt_number(price['selectedDailyAvgPrice'], 2)}\u5143/\u5146\u74e6\u65f6\u3002"
