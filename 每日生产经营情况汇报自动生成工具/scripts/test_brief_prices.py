@@ -6,8 +6,9 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 
-from openpyxl import Workbook
-from toolbox_shared.morning_prices import apply_brief_prices, read_brief_prices
+from openpyxl import Workbook, load_workbook
+from toolbox_shared.morning_prices import (apply_brief_prices, read_brief_prices,
+    apply_day_ahead_market_deltas, read_day_ahead_market_deltas)
 
 
 class BriefPriceTests(unittest.TestCase):
@@ -89,3 +90,74 @@ class BriefPriceTests(unittest.TestCase):
         sources = apply_brief_prices(payload, day_ahead_workbook=self.path, daily_clearing_workbook=None, log=lambda _: None)
         self.assertEqual(sources, [])
         self.assertEqual(payload, before)
+
+
+    def test_daily_a41_deltas_override_website_but_preserve_current_values(self):
+        self.write("日前简析：市场开机台数451台，环比增加7台，全省日前出清均价384.33元/兆瓦时，环比上涨3.25元/兆瓦时。")
+        payload = self.payload()
+        market = payload["marketAnalysisData"]
+        market["operationPublicData"] = {"startupCount": {
+            "selected": {"maxStartupCount": 451}, "difference": 23}}
+        current_price = market["priceBoard"]["rows"][0]["selectedDailyAvgPrice"]
+        outer = deepcopy(payload["priceBoard"])
+        realtime = deepcopy(market["priceBoard"]["rows"][1])
+        source = apply_day_ahead_market_deltas(payload, workbook=self.path, log=lambda _: None)
+        self.assertEqual(market["operationPublicData"]["startupCount"]["difference"], 7)
+        self.assertEqual(market["priceBoard"]["rows"][0]["difference"], 3.25)
+        self.assertEqual(market["priceBoard"]["rows"][0]["selectedDailyAvgPrice"], current_price)
+        self.assertEqual(payload["priceBoard"], outer)
+        self.assertEqual(market["priceBoard"]["rows"][1], realtime)
+        self.assertEqual((source["date"], source["cell"]), ("2026-11-10", "A41"))
+        from generate_red_marked_report import build_day_ahead_market_text
+        from docx import Document
+        market["loadInfo"] = {"byType": {code: {"dayAhead": {
+            "selected": {"max": 128000, "min": 92000}, "maxDiff": -7000,
+            "minDiff": -1000, "avgDiff": 10}} for code in ("1", "2", "3")}}
+        text = build_day_ahead_market_text(payload)
+        self.assertIn("市场开机台数451台，环比增加7台", text)
+        self.assertIn("环比上升3.25元/兆瓦时", text)
+        output = Path(self.tmp.name) / "market.docx"
+        document = Document()
+        document.add_paragraph(text)
+        document.save(output)
+        self.assertEqual(Document(output).paragraphs[0].text, text)
+
+    def test_a41_decreases_and_flat(self):
+        for wording, expected in (("减少8台", -8), ("增加0台", 0), ("持平", 0)):
+            with self.subTest(wording=wording):
+                self.write(f"市场开机台数451台，环比{wording}。全省日前出清均价384.33元/兆瓦时，环比下跌21.64元/兆瓦时。")
+                data = read_day_ahead_market_deltas(self.path, expected_date="2026-11-10")
+                self.assertEqual(data["startupDifference"], expected)
+                self.assertEqual(data["priceDifference"], -21.64)
+
+    def test_missing_deltas_do_not_reuse_website_or_nearby_cells(self):
+        self.write("日前简析：市场开机台数451台。全省日前出清均价384.33元/兆瓦时。")
+        book = load_workbook(self.path)
+        book["快报  (日前)"]["A39"] = "市场开机台数451台，环比增加99台。全省日前出清均价384.33元/兆瓦时，环比上涨99元/兆瓦时。"
+        book.save(self.path)
+        book.close()
+        payload = self.payload()
+        source = apply_day_ahead_market_deltas(payload, workbook=self.path, log=lambda _: None)
+        self.assertIsNone(source["startupDifference"])
+        self.assertIsNone(source["priceDifference"])
+        self.assertIsNone(payload["marketAnalysisData"]["priceBoard"]["rows"][0]["difference"])
+
+    def test_a41_fields_are_independent(self):
+        self.write("市场开机台数451台，环比减少5台。全省日前出清均价384.33元/兆瓦时。")
+        source = read_day_ahead_market_deltas(self.path, expected_date="2026-11-10")
+        self.assertEqual(source["startupDifference"], -5)
+        self.assertIsNone(source["priceDifference"])
+        self.write("市场开机台数451台。全省日前出清均价384.33元/兆瓦时，环比持平。")
+        source = read_day_ahead_market_deltas(self.path, expected_date="2026-11-10")
+        self.assertIsNone(source["startupDifference"])
+        self.assertEqual(source["priceDifference"], 0)
+
+    def test_a41_rejects_wrong_date_and_missing_workbook(self):
+        self.write("市场开机台数451台，环比增加7台。")
+        with self.assertRaisesRegex(ValueError, "运行日"):
+            read_day_ahead_market_deltas(self.path, expected_date="2026-11-09")
+        for path in (None, self.path.with_name("missing.xlsx")):
+            payload = self.payload()
+            source = apply_day_ahead_market_deltas(payload, workbook=path, log=lambda _: None)
+            self.assertIn("error", source)
+            self.assertIsNone(payload["marketAnalysisData"]["priceBoard"]["rows"][0]["difference"])

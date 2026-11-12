@@ -1800,6 +1800,9 @@ def build_day_ahead_market_text(payload: dict[str, Any]) -> str:
     capacity = (public_data.get("capacity") or {}).get("selected", {}).get("capacityWanKw")
     startup = (public_data.get("startupCount") or {}).get("selected", {}).get("maxStartupCount")
     startup_diff = (public_data.get("startupCount") or {}).get("difference")
+    startup_delta = startup_change_text(startup_diff) if startup_diff is not None else "待补充"
+    price_delta = (delta_phrase(price["difference"], unit=UNIT_YUAN_PER_MWH, digits=2)
+                   if price.get("difference") is not None else "待补充")
     selected = load["selected"]
     return (
         f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load.get('maxDiff') or 0)}\uff0c"
@@ -1811,9 +1814,9 @@ def build_day_ahead_market_text(payload: dict[str, Any]) -> str:
         f"\u5730\u65b9\u7535\u51fa\u529b{change_word(local.get('avgDiff') or 0)}\uff0c"
         f"\u68c0\u4fee\u5bb9\u91cf{fmt_number(capacity)}\u4e07\u5343\u74e6\u3002"
         f"\u5e02\u573a\u5f00\u673a\u53f0\u6570{fmt_number(startup)}\u53f0\uff0c"
-        f"\u73af\u6bd4{startup_change_text(startup_diff)}\uff0c"
+        f"\u73af\u6bd4{startup_delta}\uff0c"
         f"\u5168\u7701\u65e5\u524d\u51fa\u6e05\u5747\u4ef7{fmt_number(price['selectedDailyAvgPrice'], 2)}\u5143/\u5146\u74e6\u65f6\uff0c"
-        f"\u73af\u6bd4{delta_phrase(price['difference'], unit=UNIT_YUAN_PER_MWH, digits=2)}\u3002"
+        f"\u73af\u6bd4{price_delta}\u3002"
     )
 
 
@@ -2001,10 +2004,15 @@ def generate(
     save_data_summary: bool = False,
 ) -> tuple[Path, Path]:
     from fetch_daily_data import build_report_date_plan, run_daily_data, parse_subjects, save_output, print_result
-    from toolbox_shared.morning_prices import apply_brief_prices
+    from toolbox_shared.morning_prices import apply_brief_prices, apply_day_ahead_market_deltas
 
     plan = build_report_date_plan(report_date)
     day_ahead_workbook = resolve_day_ahead_workbook(day_ahead_workbook, plan["dayAheadDate"])
+    if daily_clearing_workbook is None:
+        try:
+            daily_clearing_workbook = find_clearing_workbook(plan["dailyClearingDate"])
+        except FileNotFoundError:
+            pass
     workbook_date_warnings = check_workbook_dates(
         plan,
         online_workbook=online_workbook,
@@ -2033,6 +2041,7 @@ def generate(
         payload, day_ahead_workbook=day_ahead_workbook,
         daily_clearing_workbook=daily_clearing_workbook, log=log,
     )
+    market_delta_source = apply_day_ahead_market_deltas(payload, workbook=daily_clearing_workbook, log=log)
     if save_data_summary:
         summary_path = save_output(payload, output_dir)
         print_result(payload, summary_path)
@@ -2161,6 +2170,7 @@ def generate(
     audit = {
         "reportDate": report_date,
         "marketPriceSources": market_price_sources,
+        "dayAheadMarketDeltaSource": market_delta_source,
         "datePlan": plan,
         "template": str(actual_template_path),
         "templateFallback": str(template_path) if actual_template_path != template_path else None,

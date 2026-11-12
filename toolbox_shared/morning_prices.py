@@ -12,20 +12,25 @@ NUMBER = r"[-+]?\d+(?:\.\d+)?"
 UNIT = r"(?:元\s*/\s*(?:兆瓦时|MWh)|厘\s*/\s*(?:千瓦时|kWh))"
 
 
+def _brief_sheet(book, path: Path, *, day_ahead: bool, expected_date: str | None):
+    if expected_date is not None:
+        value = book["基础信息"]["A2"].value if "基础信息" in book.sheetnames else None
+        actual = value.strftime("%Y-%m-%d") if isinstance(value, (date, datetime)) else str(value or "").strip()[:10].replace("/", "-")
+        if actual != expected_date:
+            raise ValueError(f"{path.name} 基础信息!A2 运行日为 {actual or '空'}，应为 {expected_date}")
+    sheet = next((s for s in book if
+                  re.sub(r"\s+", "", s.title).replace("（", "(").replace("）", ")")
+                  == ("快报(日前)" if day_ahead else "快报")), None)
+    if sheet is None:
+        raise ValueError(f"{path.name} 未找到{'快报（日前）' if day_ahead else '快报'}工作表")
+    return sheet
+
+
 def read_brief_prices(path: Path, *, day_ahead: bool, expected_date: str | None = None) -> dict:
     """Find the labelled paragraph in column A, including shifted A41/A42."""
     book = load_workbook(path, read_only=True, data_only=True)
     try:
-        if expected_date is not None:
-            value = book["基础信息"]["A2"].value if "基础信息" in book.sheetnames else None
-            actual = value.strftime("%Y-%m-%d") if isinstance(value, (date, datetime)) else str(value or "").strip()[:10].replace("/", "-")
-            if actual != expected_date:
-                raise ValueError(f"{path.name} 基础信息!A2 运行日为 {actual or '空'}，应为 {expected_date}")
-        sheet = next((s for s in book if
-                      re.sub(r"\s+", "", s.title).replace("（", "(").replace("）", ")")
-                      == ("快报(日前)" if day_ahead else "快报")), None)
-        if sheet is None:
-            raise ValueError(f"{path.name} 未找到{'快报（日前）' if day_ahead else '快报'}工作表")
+        sheet = _brief_sheet(book, path, day_ahead=day_ahead, expected_date=expected_date)
         prices = {}
         patterns = {
             "PRE": rf"全省日前出清均价\s*({NUMBER})\s*{UNIT}",
@@ -95,3 +100,56 @@ def apply_brief_prices(payload: dict, *, day_ahead_workbook: Path | None,
         board["source"] = "工作簿简析（priceSource）及网站价格看板"
         board["note"] = "priceSource 标识的均价及环比取工作簿简析，比较均价由均价减环比还原；简析未给环比时留空。其余保留网站值。"
     return sources
+
+
+def _narrative_difference(text: str, unit: str) -> float | None:
+    change = re.search(rf"环比\s*(上涨|上升|增加|下降|下跌|减少)\s*({NUMBER})\s*{unit}", text, re.I)
+    if change:
+        return abs(float(change[2])) * (-1 if change[1] in {"下降", "下跌", "减少"} else 1)
+    return 0.0 if re.search(r"环比\s*持平", text) else None
+
+
+def read_day_ahead_market_deltas(path: Path, *, expected_date: str) -> dict:
+    """Read only D-2 快报(日前)!A41, never a shifted paragraph or another day."""
+    book = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = _brief_sheet(book, path, day_ahead=True, expected_date=expected_date)
+        text = sheet["A41"].value
+        if not isinstance(text, str):
+            raise ValueError(f"{path.name} {sheet.title}!A41 缺少日前市场文字")
+        startup = re.search(r"市场开机台数\s*\d+\s*台([^。；;]*)", text)
+        # Decimal points must not terminate the price sentence.
+        price = re.search(rf"全省日前出清均价\s*{NUMBER}\s*{UNIT}(.*?)(?:。|；|;|$)", text, re.I)
+        return {
+            "startupDifference": _narrative_difference(startup[1], "台") if startup else None,
+            "priceDifference": _narrative_difference(price[1], UNIT) if price else None,
+            "workbook": str(path), "sheet": sheet.title, "cell": "A41", "date": expected_date,
+        }
+    finally:
+        book.close()
+
+
+def apply_day_ahead_market_deltas(payload: dict, *, workbook: Path | None, log=print) -> dict:
+    """Override the two D-2 PRE deltas; unavailable A41 values stay missing."""
+    market = payload["marketAnalysisData"]
+    board = market["priceBoard"]
+    source = {"startupDifference": None, "priceDifference": None,
+              "date": board["selectedDate"], "cell": "A41"}
+    try:
+        if workbook is None:
+            raise ValueError("未找到日清分当天出清情况工作簿")
+        source = read_day_ahead_market_deltas(Path(workbook), expected_date=board["selectedDate"])
+    except (OSError, ValueError) as exc:
+        source["error"] = str(exc)
+        log(f"日前市场环比未取数，标记待补充：{exc}")
+    startup = market.setdefault("operationPublicData", {}).setdefault("startupCount", {})
+    startup["difference"] = source["startupDifference"]
+    startup["differenceSource"] = dict(source)
+    for row in board["rows"]:
+        if row["dataType"] == "PRE":
+            row["difference"] = source["priceDifference"]
+            row["differenceSource"] = dict(source)
+            row["compareDailyAvgPrice"] = None  # Delta and current price have separate sources.
+            row["comparePointCount"] = None
+    market["dayAheadDeltaSource"] = source
+    return source
