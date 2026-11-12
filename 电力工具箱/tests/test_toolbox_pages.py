@@ -351,6 +351,7 @@ class PageAdapterTests(unittest.TestCase):
         runtime_config = {
             "recent_urls": ["https://www.kdocs.cn/l/target"],
             "browser_mode": "managed_cdp",
+            "overwrite": True,
             "cdp_url": "http://127.0.0.1:9222",
             "configs": [
                 {
@@ -380,6 +381,9 @@ class PageAdapterTests(unittest.TestCase):
         self.assertEqual(exported["exported_at"], "2026-06-29T16:45:11")
         self.assertEqual(exported["configs"][0]["source_type"], "kdocs")
         self.assertEqual(module.runtime_config_from_export_payload(exported), runtime_config)
+        # 旧配置文件没有 overwrite 字段时按默认的「覆盖非空单元格」导入。
+        legacy = {key: value for key, value in exported.items() if key != "overwrite"}
+        self.assertTrue(module.runtime_config_from_export_payload(legacy)["overwrite"])
 
     def test_open_directory_uses_macos_open_command(self) -> None:
         if sys.platform != "darwin":
