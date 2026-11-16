@@ -10,6 +10,13 @@ export TOOLBOX_DATA_ROOT="$HOME/Library/Application Support/com.electricity.tool
 export TOOLBOX_SOURCE_DEBUG=1
 export PYTHONPATH="$root_dir${PYTHONPATH:+:$PYTHONPATH}"
 
+if [[ "${1:-}" == "--accessibility-probe" && "${TOOLBOX_SMOKE:-}" != "1" ]]; then
+  if [[ ! -x "$root_dir/.venv/bin/python" ]]; then
+    "$root_dir/setup_macos.command"
+  fi
+  exec "$root_dir/.venv/bin/python" "$root_dir/tooling/accessibility_probe.py"
+fi
+
 if [[ "${TOOLBOX_SMOKE:-}" == "1" ]]; then
   print -r -- "DEBUG_SOURCE=$TOOLBOX_CODE_ROOT"
   print -r -- "DEBUG_DATA=$TOOLBOX_DATA_ROOT"

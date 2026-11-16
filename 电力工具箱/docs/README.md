@@ -11,6 +11,7 @@
 
 | 文档 | 内容 | 状态 |
 | --- | --- | --- |
+| [2026-11-17-accessibility-probe.md](2026-11-17-accessibility-probe.md) | Tk 9.1 导出页跨进程 AX 试验 | 历史测量，原生操作未通过；升级后需重测 |
 | [performance/2026-07-10-startup.md](performance/2026-07-10-startup.md) | 启动耗时基线与优化 | 历史，数字为当时结果 |
 | [performance/2026-10-10-page-loading.md](performance/2026-10-10-page-loading.md) | 页面首次加载与切换重绘 | 历史，当时 14 个导航模块 |
 

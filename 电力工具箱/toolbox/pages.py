@@ -12,6 +12,7 @@ import threading
 import tkinter as tk
 from toolbox_shared.choices import OptionCheckbutton, SettingCheckbutton
 from toolbox_shared.file_button import FileSelectButton
+from toolbox_shared.accessibility import describe
 
 from collections.abc import Mapping
 from datetime import date, timedelta
@@ -78,20 +79,34 @@ class OnlineEnergyPage(ToolPage):
         form = ttk.LabelFrame(self.content, text="导出设置", padding=14)
         form.grid(row=0, column=0, sticky="ew")
         ttk.Label(form, text="导出日期").grid(row=0, column=0, sticky="w")
-        DateRangeInput(
+        self.date_range = DateRangeInput(
             form, start_variable=self.start_date, end_variable=self.end_date
-        ).grid(row=0, column=1, sticky="w", padx=(8, 14))
+        )
+        self.date_range.grid(row=0, column=1, sticky="w", padx=(8, 14))
+        for entry, label, variable in (
+            (self.date_range.start_entry, "导出开始日期", self.start_date),
+            (self.date_range.end_entry, "导出结束日期", self.end_date),
+        ):
+            describe(entry, name=label, role="Entry", variable=variable,
+                     help_text="格式 YYYY-MM-DD；向下键打开日历，Esc 关闭日历。")
 
         actions = self.actions
         self.export_button = ttk.Button(
             actions, text="开始导出", command=self.start_export
         )
         self.export_button.pack(side="left")
-        ttk.Button(
+        self.output_button = ttk.Button(
             actions,
             text="打开输出目录",
             command=lambda: _open_directory(self.paths.online_energy_output_dir),
-        ).pack(side="left", padx=(8, 0))
+        )
+        self.output_button.pack(side="left", padx=(8, 0))
+        for button, label in ((self.export_button, "开始导出"),
+                              (self.output_button, "打开输出目录"),
+                              (self.cancel_button, "取消任务")):
+            describe(button, name=label, role="Button", invoke=True)
+        describe(self.status_label, name="导出任务状态", role="Label",
+                 variable=self.status_var)
         self.register_busy_widgets(self.export_button)
         self.append_log("请选择日期范围后开始导出。")
 

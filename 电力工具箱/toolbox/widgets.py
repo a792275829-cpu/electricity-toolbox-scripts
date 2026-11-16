@@ -12,6 +12,7 @@ from tkinter import messagebox, ttk
 from typing import Callable, TypeVar
 
 from toolbox_shared.log_console import LogConsole
+from toolbox_shared.accessibility import refresh as refresh_accessibility
 
 from .runtime import TaskRegistry, utf8_environment
 from .tasks import TaskSnapshot, TaskState, classify_error
@@ -101,7 +102,8 @@ class ToolPage(ttk.Frame):
             self.footer, text="取消任务", command=self.cancel_current_task, state="disabled"
         )
         self.cancel_button.grid(row=0, column=1, padx=(8, 0))
-        ttk.Label(self.footer, textvariable=self.status_var).grid(
+        self.status_label = ttk.Label(self.footer, textvariable=self.status_var)
+        self.status_label.grid(
             row=1, column=0, sticky="w", pady=(5, 0)
         )
 
@@ -251,6 +253,7 @@ class ToolPage(ttk.Frame):
         for widget in self._busy_widgets:
             try:
                 widget.configure(state=state)
+                refresh_accessibility(widget)
             except tk.TclError:
                 pass
         if busy:
@@ -267,6 +270,7 @@ class ToolPage(ttk.Frame):
             elif status == "无数据":
                 self.log_console.finish(status)
         self.cancel_button.configure(state="normal" if busy and self._current_cancellable else "disabled")
+        refresh_accessibility(self.cancel_button)
 
     def _sync_progress_animation(self, _event=None) -> None:
         # A 10 ms timer can redraw faster than macOS can paint the page, keeping

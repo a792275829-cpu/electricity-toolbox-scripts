@@ -36,6 +36,31 @@
 - 动态加载器保留解释器目录与工作区 `.venv/` 中的依赖。源码调试版用复制的解释器和 `PYTHONHOME`，此时 `sys.prefix` 指向基础 Python，依赖仍从 `.venv/` 导入；不得把 NumPy、pandas 等依赖作为工具本地模块清理，否则重新导入会破坏内部对象身份。
 - 发行源码过滤会包含 `toolbox_shared/` 与已有工具目录中的新源码，维护测试同时检查本轮提取模块实际被包含。
 
+## macOS 辅助功能试验
+
+从仓库根目录运行 `./00_启动/源码调试版.command --accessibility-probe`。驱动脚本由根 `.venv` 执行，使用 uv 安装独立的 Python 3.14.6、从固定 SHA-256 的官方源码构建 Tcl/Tk 9.1.0，并构建对应 `_tkinter` 扩展。界面主题所需 Pillow 的版本与 wheel 哈希复用现有依赖锁，安装到隔离目录；不会修改根 `.venv`、正式包或已安装应用。首次构建需要网络与 Xcode Command Line Tools，构建日志为 `.toolbox/accessibility/build.log`；系统临时构建目录被回收后会重新构建。
+
+窗口复用实际 `OnlineEnergyPage`，只替换外部执行边界。所有导出请求都是界面验证请求，不运行网站取数或 Excel 写入。验证 PID、日期、任务状态与请求计数记录在 `logs/accessibility-probe-ui.json`，界面数据位于 `~/Library/Application Support/com.electricity.toolbox/development/data/accessibility-probe/`。
+
+窗口打开后，在另一个终端运行：
+
+```sh
+probe_pid=$(.venv/bin/python -c 'import json; print(json.load(open("logs/accessibility-probe-ui.json"))["pid"])')
+.venv/bin/python tooling/accessibility_probe.py --audit "$probe_pid"
+```
+
+审计调用 `tooling/macos_ax_probe.swift`，需要**控制端进程**已有 macOS 辅助功能权限，不会自动弹出授权请求或修改权限。它通过实际 AX 接口检查六个控件、稳定标识、启用状态、日期写入回读及按钮是否到达原页面；结果在 `logs/accessibility-probe-summary.json`，完整 AX 证据在 `logs/accessibility-ax-{initial,set,press}.json`。只有六项全部通过才返回 0，否则返回 2；当前 Tk 9.1.0 试验预期返回 2，不能用于正式版兼容性声明。
+
+元数据契约测试是 `电力工具箱/tests/test_accessibility.py`。现有 Tk 8.6 下运行时六项原生测试跳过；在隔离运行时可运行：
+
+```sh
+cd 电力工具箱
+PYTHONPATH="../.toolbox/accessibility/extension:../.toolbox/accessibility/dependencies:.." \
+  uv run --python 3.14.6 python -m unittest tests.test_accessibility -v
+```
+
+这些单测仅验证语义同步、原有校验和资源清理，不能替代跨进程 AX 验收。隔离环境只安装界面所需依赖，未完成 Tk 9.1 全部业务模块兼容性验证；真实登录、取数、写入及上传均未执行。测量和取舍见[验证记录](../电力工具箱/docs/2026-11-17-accessibility-probe.md)。
+
 ## 更新兼容矩阵
 
 | 场景 | 预期路径 | 自动验证 |
