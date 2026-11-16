@@ -17,6 +17,7 @@ APP_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name in {"scripts", "\u811a\u672c"} e
 if str(APP_ROOT.parent) not in sys.path:
     sys.path.insert(0, str(APP_ROOT.parent))
 from toolbox_shared.storage import data_path
+from toolbox_shared.clearing_files import find_workbook_for_day
 from toolbox_shared.dates import DATE_INPUT_ERROR, normalize_date_input, parse_date_input
 from toolbox_shared.date_input import DateInput
 from toolbox_shared.file_button import FileSelectButton
@@ -167,17 +168,7 @@ class ReportTool(tk.Tk):
 
     @staticmethod
     def find_workbook_for_day(target_day: date) -> Path | None:
-        date_token = f"{target_day.year}.{target_day.month}.{target_day.day}"
-        candidates = [
-            path
-            for path in DOWNLOADS_DIR.glob("*.xlsx")
-            if not path.name.startswith("~$")
-            and "出清情况" in path.name
-            and date_token in path.name
-        ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda path: path.stat().st_mtime)
+        return find_workbook_for_day(target_day, DOWNLOADS_DIR)
 
     def open_exports(self) -> None:
         path = data_path(APP_ROOT) / "\u8f93\u51fa"

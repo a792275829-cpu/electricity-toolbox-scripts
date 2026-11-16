@@ -25,6 +25,7 @@ from gd_power_report.clearing_table_view import (
 SHEET_NAME = "新快报"
 ENERGY_METRICS_SHEET_NAME = "新"
 REPORT_SHEET_ALIASES = ("新",)
+DAY_NARRATIVE_MARKERS = ("日前简析", "日前市场简析")
 FALLBACK_SHEET_PREFIX = "快报"
 DAY_AHEAD_RANGE = "A6:Q66"
 REALTIME_RANGE = "A68:Q84"
@@ -47,7 +48,7 @@ def _looks_like_report_sheet(sheet: Any) -> bool:
         )
     ):
         return True
-    if "日前市场简析" not in day_text or int(sheet.max_column or 0) < 17:
+    if not any(marker in day_text for marker in DAY_NARRATIVE_MARKERS) or int(sheet.max_column or 0) < 17:
         return False
     return any(
         isinstance(sheet.cell(row, 1).value, str)
@@ -263,13 +264,14 @@ def _date_label(value: date) -> str:
     return f"{value.month}月{value.day}日（周{weekdays[value.weekday()]}）"
 
 
-def _section_text(sheet: Any, marker: str, preferred_coordinate: str) -> str:
+def _section_text(sheet: Any, marker: str | tuple[str, ...], preferred_coordinate: str) -> str:
+    markers = (marker,) if isinstance(marker, str) else marker
     preferred = str(sheet[preferred_coordinate].value or "")
-    if marker in preferred:
+    if any(item in preferred for item in markers):
         return preferred
     for row in range(1, min(int(sheet.max_row or 1), 200) + 1):
         value = sheet.cell(row, 1).value
-        if isinstance(value, str) and marker in value:
+        if isinstance(value, str) and any(item in value for item in markers):
             return value
     return preferred
 
@@ -299,7 +301,7 @@ def _dated_day_narrative(workbook: Any, report_date: date) -> str | None:
 
 def _date_matched_day_narrative(workbook: Any, report_date: date, fallback_sheet: Any) -> str:
     return _dated_day_narrative(workbook, report_date) or _section_text(
-        fallback_sheet, "日前市场简析", "A4"
+        fallback_sheet, DAY_NARRATIVE_MARKERS, "A4"
     )
 
 
@@ -963,7 +965,7 @@ def _operation_table(
     quick_sheet: Any | None = None,
 ) -> dict[str, Any]:
     quick = quick_sheet or _select_report_sheet(current_workbook)
-    quick_text = _section_text(quick, "日前市场简析", "A4")
+    quick_text = _section_text(quick, DAY_NARRATIVE_MARKERS, "A4")
     dated_operations = _dated_operations_from_text(quick_text, current_date)
     workbook_operations = _operations(current_workbook)
     undated_operations = _operations_from_text(quick_text)
@@ -1070,14 +1072,58 @@ def _strategy_lines(value: Any) -> list[dict[str, str]]:
 
 
 
+def _reported_unit_profits(
+    sheet: Any,
+    plant: str,
+    expected_units: tuple[str, ...],
+    profit_column: int,
+    summary_row: int,
+    end: int,
+) -> dict[str, float] | None:
+    """Collect per-unit day-ahead deviation profits, or ``None`` when unreadable.
+
+    A ``/`` placeholder means the unit has no day-ahead clearing for this day
+    (a commissioning unit, for example), so that unit is simply absent from the
+    result instead of invalidating the whole plant. Error values, duplicate
+    rows or unknown unit labels return ``None`` so the caller keeps the source
+    wording untouched.
+    """
+
+    values: dict[str, float] = {}
+    seen: set[str] = set()
+    for row in range(summary_row + 1, end + 1):
+        if _normalized_label(_merged_header_value(sheet, row, 1)) not in {
+            plant,
+            plant.removesuffix("厂"),
+        }:
+            continue
+        unit = _normalized_label(sheet.cell(row, 2).value)
+        if unit == "合计":
+            continue
+        if unit not in expected_units or unit in seen:
+            return None
+        seen.add(unit)
+        value = sheet.cell(row, profit_column).value
+        if value is None or (isinstance(value, str) and value.strip() in {"", "/", "／"}):
+            continue
+        if (
+            isinstance(value, bool) or not isinstance(value, (int, float))
+            or not isfinite(value) or abs(value) >= 1_000_000_000_000
+        ):
+            return None
+        values[unit] = float(value)
+    return values
+
+
 def _sync_strategy_profits(
     strategies: list[dict[str, str]], sheet: Any, report_date: date
 ) -> list[dict[str, str]]:
     """Sync complete, canonically ordered profit lists from the dated recap.
 
-    The caller must first verify the narrative date. Only the existing thermal
-    fleet's complete unit sets are supported; partial or ambiguous data leaves
-    the original sentence intact instead of assigning values by row position.
+    The caller must first verify the narrative date. Unit sets must be a
+    canonical prefix of the plant's fleet (海门厂 now carries 6 units); partial
+    or ambiguous data leaves the original sentence intact instead of assigning
+    values by row position.
     """
     day_range, _ = _appendix_ranges(sheet)
     _, start, _, end = range_boundaries(day_range)
@@ -1109,7 +1155,9 @@ def _sync_strategy_profits(
     profit_column = columns.pop()
     unit_orders = {
         "汕头厂": ("#1机组", "#2机组", "#3机组"),
-        "海门厂": ("#1机组", "#2机组", "#3机组", "#4机组"),
+        "海门厂": (
+            "#1机组", "#2机组", "#3机组", "#4机组", "#5机组", "#6机组",
+        ),
         "东莞厂": ("一套机组", "二套机组", "三套机组", "四套机组"),
     }
     amount_pattern = r"[+-]?\d+(?:\.\d+)?\s*万元"
@@ -1127,32 +1175,25 @@ def _sync_strategy_profits(
             continue
         match = matches[0]
         amounts = list(re.finditer(r"[+-]?\d+(?:\.\d+)?", match["amounts"]))
-        if len(amounts) != len(expected_units):
+        if not 0 < len(amounts) <= len(expected_units):
             result.append(strategy)
             continue
-        values = {}
-        valid = True
-        for row in range(summary_row + 1, end + 1):
-            plant = _normalized_label(_merged_header_value(sheet, row, 1))
-            if plant not in {strategy["plant"], strategy["plant"].removesuffix("厂")}:
-                continue
-            unit = _normalized_label(sheet.cell(row, 2).value)
-            if unit == "合计":
-                continue
-            value = sheet.cell(row, profit_column).value
-            if (
-                unit not in expected_units or unit in values
-                or isinstance(value, bool) or not isinstance(value, (int, float))
-                or not isfinite(value) or abs(value) >= 1_000_000_000_000
-            ):
-                valid = False
-                break
-            values[unit] = value
-        if not valid or set(values) != set(expected_units):
+        values = _reported_unit_profits(
+            sheet, strategy["plant"], expected_units, profit_column, summary_row, end
+        )
+        if values is None:
+            result.append(strategy)
+            continue
+        reported_units = expected_units[: len(amounts)]
+        # 句中金额数少于表内可核对机组、对应机组缺值，或表内还有句中未体现的数值时，
+        # 都不猜测金额与机组的对应关系。
+        if any(unit not in values for unit in reported_units) or any(
+            unit in values for unit in expected_units[len(amounts):]
+        ):
             result.append(strategy)
             continue
         replacement = match["amounts"]
-        for amount, unit in reversed(list(zip(amounts, expected_units))):
+        for amount, unit in reversed(list(zip(amounts, reported_units))):
             replacement = (
                 replacement[:amount.start()] + _display_value(values[unit], "0")
                 + replacement[amount.end():]
@@ -1166,10 +1207,17 @@ def _sync_strategy_profits(
 
 
 def _time_rows(sheet: Any) -> list[int]:
+    """Rows holding ``0:00``-``23:00`` labels, first occurrence per hour.
+
+    Hours may be text (``8:00``) or real time values (``08:00:00``); missing the
+    latter would fall back to the fixed 60-row floor in ``_appendix_ranges`` and
+    silently clip the tail of an appendix that grew past it.
+    """
+
     rows_by_hour: dict[int, int] = {}
     for row in range(1, min(int(sheet.max_row or 1), 300) + 1):
         value = str(sheet.cell(row, 1).value or "").strip()
-        match = re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", value)
+        match = re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d(?::00)?", value)
         if match:
             rows_by_hour.setdefault(int(match.group(1)), row)
     return [rows_by_hour[hour] for hour in sorted(rows_by_hour)]
@@ -1326,7 +1374,7 @@ def _market_cards_from_quick(
         must_run_workbook=must_run_workbook,
     )
     fallback_by_label = {card["label"]: card for card in fallback}
-    day_text = text_override or _section_text(sheet, "日前市场简析", "A4")
+    day_text = text_override or _section_text(sheet, DAY_NARRATIVE_MARKERS, "A4")
     if realtime:
         text = text_override or _section_text(sheet, "实时市场简析", "A68")
         peak = _text_number(text, r"全天(?:最大|峰值)(?:值)?(?:为|达到)?\s*([\d,.]+)\s*万千瓦")
@@ -1685,7 +1733,7 @@ def parse_daily_report_workbook(
         realtime_comparison_workbook,
     )
     dated_day_narrative = _dated_day_narrative(workbook, report_date)
-    day_narrative_text = dated_day_narrative or _section_text(sheet, "日前市场简析", "A4")
+    day_narrative_text = dated_day_narrative or _section_text(sheet, DAY_NARRATIVE_MARKERS, "A4")
     strategies = _strategy_lines(day_narrative_text)
     if dated_day_narrative is not None:
         strategies = _sync_strategy_profits(strategies, sheet, report_date)

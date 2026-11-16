@@ -1,5 +1,5 @@
 """Four/six-unit recap compatibility, independent of business workbooks."""
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 import sys
 import tempfile
@@ -67,6 +67,65 @@ def template(six):
 
 
 class TemplateCompatibilityTests(unittest.TestCase):
+    def test_six_unit_strategy_profits_and_placeholders(self):
+        for count in (4, 6):
+            with self.subTest(count=count):
+                book = template(True)
+                sheet = book["新"]
+                sheet["B16"] = "合计"
+                sheet["J8"], sheet["J9"] = "日前偏差", "边际贡献"
+                for number in range(1, 7):
+                    sheet.cell(16 + number, 10, number * 10 if number <= count else "/")
+                strategy = {"plant": "海门厂", "text": "各机组日前收益分别为：" + "、".join(["999万元"] * count) + "。"}
+                expected = "各机组日前收益分别为：" + "、".join(f"{n * 10}万元" for n in range(1, count + 1)) + "。"
+                self.assertEqual(reader._sync_strategy_profits([strategy], sheet, date(2026, 11, 8))[0]["text"], expected)
+                sheet.cell(18, 10).value = "/"
+                self.assertEqual(reader._sync_strategy_profits([strategy], sheet, date(2026, 11, 8)), [strategy])
+                sheet.cell(18, 10).value = "#VALUE!"
+                self.assertEqual(reader._sync_strategy_profits([strategy], sheet, date(2026, 11, 8)), [strategy])
+                book.close()
+
+    def test_ambiguous_profit_rows_and_mismatched_dates_keep_source_text(self):
+        book = template(True)
+        sheet = book["新"]
+        sheet["J8"], sheet["J9"] = "日前偏差", "边际贡献"
+        for number in range(1, 7):
+            sheet.cell(16 + number, 10, number * 10)
+        strategy = {"plant": "海门厂", "text": "各机组日前收益分别为：1万元、2万元、3万元、4万元。"}
+        self.assertEqual(reader._sync_strategy_profits([strategy], sheet, date(2026, 11, 8)), [strategy])
+        sheet["B18"] = "#1机组"
+        self.assertEqual(reader._sync_strategy_profits([strategy], sheet, date(2026, 11, 8)), [strategy])
+        self.assertEqual(reader._sync_strategy_profits([strategy], sheet, date(2026, 11, 7)), [strategy])
+        book.close()
+
+    def test_excel_time_values_preserve_full_day_tail_after_reopen(self):
+        with tempfile.TemporaryDirectory() as folder:
+            book = template(True)
+            sheet = book["新"]
+            for hour in range(24):
+                sheet.cell(48 + hour, 1).value = time(hour)
+            path = Path(folder) / "time.xlsx"
+            book.save(path)
+            book.close()
+            from openpyxl import load_workbook
+            reopened = load_workbook(path)
+            self.assertEqual(reader._time_rows(reopened["新"]), list(range(48, 72)))
+            self.assertEqual(reader._appendix_ranges(reopened["新"]), ("A6:Q72", "A74:Q90"))
+            reopened.close()
+
+    def test_legacy_narrative_aliases(self):
+        for title in ("日前简析", "日前市场简析"):
+            with self.subTest(title=title):
+                book = Workbook()
+                sheet = book.active
+                sheet.title = "快报v2"
+                sheet["A4"], sheet["A68"], sheet["Q4"] = title, "实时市场简析", "表头"
+                self.assertIs(reader._select_report_sheet(book), sheet)
+                sheet["A4"] = None
+                sheet["A5"] = title + "：内容"
+                self.assertEqual(reader._section_text(sheet, reader.DAY_NARRATIVE_MARKERS, "A4"), title + "：内容")
+                book.close()
+
     def test_complete_four_and_six_unit_tables_reach_both_renderers(self):
         for six in (False, True):
             with self.subTest(six=six), tempfile.TemporaryDirectory() as folder:

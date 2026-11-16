@@ -260,10 +260,15 @@ def load_plant_strategies(workbook_path: Path | None, *,
         return {}
     text: str | None = None
     try:
+        def normalized(name: str) -> str:
+            return re.sub(r"\s+", "", name).replace("（", "(").replace("）", ")")
+
         sheet_name = next(
-            (name for name in workbook.sheetnames if name.replace(" ", "") == "快报(日前)"),
-            None,
+            (name for name in workbook.sheetnames if normalized(name) == "快报(日前)"), None,
         )
+        if sheet_name is None:
+            sheet_name = next((name for name in workbook.sheetnames
+                               if "快报" in name and "日前" in name), None)
         if sheet_name is None:
             log(f"三厂策略：{source.name} 中没有「快报（日前）」工作表，保留模板原文")
             return {}
@@ -550,9 +555,13 @@ def replace_weather_prefix(paragraph, report_date: str) -> None:
 
 
 def parse_float(value: Any) -> float:
-    if value is None:
-        return 0.0
-    return float(value)
+    """Required numeric inputs must not turn missing markers into zero."""
+    if value is None or isinstance(value, bool):
+        raise ValueError("数值缺失或无效，不能按零处理")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("数值必须是有限数")
+    return number
 
 
 def find_first_column_row(sheet, labels: tuple[str, ...]) -> int:
@@ -829,27 +838,25 @@ def build_online_price_text(price_summary: dict[str, Any]) -> str:
 
 def fill_online_completion(paragraph, date_text: str, energy: dict[str, Any] | None,
                            price_summary: dict[str, Any]) -> None:
-    """Keep the template energy text for manual entry and update prices separately."""
+    """Mark retained energy explicitly while updating the target date and prices."""
     if energy and energy["total"] > 0:
         replace_paragraph(paragraph, build_online_energy_text(date_text, energy, price_summary))
         return
     boundary = paragraph.text.find("分公司日前均价")
     if boundary < 0:
         raise ValueError("近两日完成情况段落缺少「分公司日前均价」，无法保留模板电量并单独更新均价")
-    remaining = boundary
+    marker = "【上网电量未更新，旧数字需人工核对】"
+    energy_text = paragraph.text[:boundary].replace(marker, "")
+    energy_text = replace_leading_month_day(energy_text, date_label(date_text))
     template_run = paragraph.runs[0] if paragraph.runs else None
     for run in list(paragraph.runs):
-        length = len(run.text)
-        if remaining <= 0:
-            paragraph._element.remove(run._element)
-        else:
-            if length > remaining:
-                run.text = run.text[:remaining]
-            remaining -= length
-    prices = paragraph.add_run(build_online_price_text(price_summary))
-    if template_run is not None:
-        copy_run_format(template_run, prices)
-    prices.font.color.rgb = RGBColor(0, 0, 0)
+        paragraph._element.remove(run._element)
+    for text, color in ((marker + energy_text, "FF0000"),
+                        (build_online_price_text(price_summary), "000000")):
+        run = paragraph.add_run(text)
+        if template_run is not None:
+            copy_run_format(template_run, run)
+        run.font.color.rgb = RGBColor.from_string(color)
 
 
 def _cell_number(sheet, row: int, column: int) -> float | None:
@@ -916,12 +923,15 @@ def _energy_denominator(values: list[float | None]) -> float | None:
 
 
 def _weighted_price(pairs: list[tuple[float | None, float | None]]) -> float | None:
-    if any(price is None or not math.isfinite(price) for _, price in pairs):
+    if any(weight is None or not math.isfinite(weight) for weight, _ in pairs):
         return None
-    total = _energy_denominator([weight for weight, _ in pairs])
+    usable = [(weight, price) for weight, price in pairs if weight != 0]
+    if any(price is None or not math.isfinite(price) for _, price in usable):
+        return None
+    total = _energy_denominator([weight for weight, _ in usable])
     if total is None:
         return None
-    return math.fsum(weight * price for weight, price in pairs) / total
+    return math.fsum(weight * price for weight, price in usable) / total
 
 
 def _energy_price(total_fee: float | None, capacity_fee: float | None,
@@ -2200,10 +2210,11 @@ def generate(
         "plantStrategiesMissing": missing_plants,
         "plantStrategiesSource": str(plant_strategy_source) if plant_strategy_source else None,
         "onlineEnergyError": online_energy_error,
+        "onlineEnergyPendingDate": plan["actualOnlineEnergyDate"] if online_energy_error else None,
         "dailyClearingError": daily_clearing_error,
         "weatherError": weather_error,
         "knownGaps": [
-            "上网电量取 D-1 出清情况工作簿「快报」表：火电三厂与清远取 J 列，新能源取 K 列，总数为 J7＋新能源合计；尚未出数或读取失败时保留模板电量原文和格式供人工填写，只将后半句日前均价独立更新为黑字。",
+            "上网电量取 D-1 出清情况工作簿「快报」表：火电三厂与清远取 J 列，新能源取 K 列，总数为 J7＋新能源合计；尚未出数或读取失败时保留模板电量数字，将日期更新为D-1并标红、明确提示旧数字需人工核对；后半句日前均价独立更新为黑字。",
             "P14 日前出清电量和日前价格来自报告日出清情况 Excel；火电按厂名定位取快报（日前）F/G，新能源取 G/H，清远计划电量按基础信息清远上网电量区的合计行取 AA+AC 后除以10，并计入分公司总电量。",
             "P29 未来三天最高负荷来源尚未确认，暂不替换。",
             "日清分表取 D-2 日出清情况工作簿「快报」表；分公司现货偏差收益按各厂合计（汕头/东莞取现货偏差合计边际贡献，海门取三项偏差边际贡献之和）。",
@@ -2211,6 +2222,8 @@ def generate(
         ],
     }
     audit_path.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
+    if online_energy_error:
+        log(f"⚠ 生成完成，但 {plan['actualOnlineEnergyDate']} 上网电量未更新：正文红字数字沿用模板，必须人工核对后使用。")
     return out_path, audit_path
 
 

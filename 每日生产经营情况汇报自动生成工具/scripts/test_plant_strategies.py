@@ -70,6 +70,17 @@ class LoadStrategyTests(unittest.TestCase):
             workbook.close()
             self.assertEqual(set(load_plant_strategies(path)), {"汕头厂"})
 
+    def test_fullwidth_parentheses_and_versioned_sheet_names(self) -> None:
+        for name in ("快报　（日前）", "快报（日前）v2"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "wb.xlsx"
+                workbook = Workbook()
+                workbook.active.title = name
+                workbook.active["A42"] = f"日前简析：\n汕头厂：{SHANTOU}"
+                workbook.save(path)
+                workbook.close()
+                self.assertEqual(load_plant_strategies(path), {"汕头厂": SHANTOU})
+
     def test_missing_sheet_returns_empty(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "wb.xlsx"

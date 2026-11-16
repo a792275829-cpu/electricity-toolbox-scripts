@@ -158,7 +158,7 @@ class QingyuanTemplateTests(unittest.TestCase):
             day_ahead = workbook.create_sheet("快报  (日前)")
             for row, label in ((7, "分公司"), (8, "汕头"), (13, "海门"), (19, "东莞")):
                 day_ahead.cell(row, 1, label)
-            for row, energy, price in ((7, 6034.8139, 236), (8, 1636, 539)):
+            for row, energy, price in ((7, 6034.8139, 236), (8, 1636, 539), (13, 3557, 200), (19, 841, 300)):
                 day_ahead.cell(row, 6, energy)
                 day_ahead.cell(row, 7, price)
             for row, label, energy, price in (

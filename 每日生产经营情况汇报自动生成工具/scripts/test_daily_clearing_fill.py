@@ -196,13 +196,34 @@ class DailyClearingFillTests(unittest.TestCase):
     def test_weighted_prices_require_complete_finite_pairs(self):
         for pairs in ([(10, 400), (None, 500)], [(10, 400), (20, None)],
                       [(10, 400), (float("nan"), 500)],
-                      [(10, 400), (20, float("inf"))], [(10, 400), (0, None)]):
+                      [(10, 400), (20, float("inf"))]):
             with self.subTest(pairs=pairs):
                 self.assertIsNone(_weighted_price(pairs))
         self.assertEqual(_weighted_price([(10, 0), (10, 400)]), 200)
         self.assertEqual(_weighted_price([(0, 100), (10, 400)]), 400)
+        self.assertEqual(_weighted_price([(0, None), (10, 400)]), 400)
+        self.assertIsNone(_weighted_price([(0, None), (0, 400)]))
         self.assertEqual(_weighted_price([(0.0001, 400)]), 400)
         self.assertEqual(_weighted_price([(100, 400), (-90, 500)]), -500)
+
+    def test_missing_numeric_markers_never_become_zero(self):
+        from generate_red_marked_report import parse_float
+        for value in (None, "", "/", "／", "—", "-", True, float("nan"), float("inf")):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_float(value)
+        self.assertEqual(parse_float(0), 0)
+        self.assertEqual(parse_float("0"), 0)
+
+    def test_zero_weight_missing_price_survives_word_readback(self):
+        rows = self._changed_rows({"D10": 0, "E10": None, "D11": 200, "E11": 400})
+        self.assertEqual(rows[("汕头", "#2#3")][4], "400")
+        document = Document(LOCAL_TEMPLATE_PATH)
+        fill_daily_clearing_table(document.tables[0],
+                                  [(label, sub, values) for (label, sub), values in rows.items()])
+        target = Path(self._directory.name) / "zero-weight.docx"
+        document.save(target)
+        reopened = Document(target)
+        self.assertEqual(reopened.tables[0].cell(5, 3).text, "400")
 
     def test_energy_prices_require_fee_capacity_and_nonzero_energy(self):
         for args in ((10, 0, None), (10, 0, 0), (10, 0, 1e-12),

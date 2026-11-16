@@ -3,6 +3,9 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
+from toolbox_shared.clearing_files import clearing_file_date, find_workbook_for_day
+
+
 def default_output_for_pdf(pdf_path: str | Path) -> Path:
     source = Path(pdf_path).expanduser()
     year = re.search(r"(20\d{2})", source.name)
@@ -12,18 +15,6 @@ def default_output_for_pdf(pdf_path: str | Path) -> Path:
     else:
         suffix = source.stem
     return source.parent / f"现货运行日报报价容量区间{suffix}.xlsx"
-
-
-def clearing_file_date(path: Path) -> date | None:
-    patterns = [r"(20\d{2})[.\-_/年](\d{1,2})[.\-_/月](\d{1,2})", r"(20\d{2})(\d{2})(\d{2})"]
-    for pattern in patterns:
-        match = re.search(pattern, path.name)
-        if match:
-            try:
-                return date(*(int(value) for value in match.groups()))
-            except ValueError:
-                return None
-    return None
 
 
 def find_clearing_files_for_dates(
@@ -45,17 +36,6 @@ def find_clearing_files_for_dates(
             matches.append(max(candidates, key=lambda path: path.stat().st_mtime))
     return matches
 
-def find_workbook_for_day(target_day: date) -> Path | None:
-    downloads = Path.home() / "Downloads"
-    date_token = f"{target_day.year}.{target_day.month}.{target_day.day}"
-    candidates = [
-        path
-        for path in downloads.glob("*.xlsx")
-        if not path.name.startswith("~$")
-        and "出清情况" in path.name
-        and date_token in path.name
-    ]
-    return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
 
 def find_latest_energy_file_for_date(
     today: date,
