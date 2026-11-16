@@ -55,3 +55,28 @@ print(json.dumps({'id': 2, 'result': str(image)}), file=transport, flush=True)
                                   capture_output=True, text=True, timeout=60)
             self.assertEqual(info.returncode, 0, info.stderr)
             self.assertIn('Format: ULMO', info.stdout)
+
+    def test_hdiutil_failure_keeps_its_reason_and_exit_code(self):
+        from unittest import mock
+        sys.path.insert(0, str(ROOT / 'desktop/python'))
+        from installer_image import build
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = root / '电力工具箱.app'
+            (app / 'Contents').mkdir(parents=True)
+            (app / 'Contents/Info.plist').write_bytes(plistlib.dumps(dict(
+                CFBundleIdentifier='com.electricity.toolbox',
+                CFBundleShortVersionString='1.2.3')))
+            installer = root / 'installer.py'
+            installer.write_text('# isolated installer fixture\n')
+
+            def run(command, *args, **kwargs):
+                if command[0] == '/usr/bin/hdiutil':
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout='',
+                        stderr='hdiutil: create failed - 设备上没有剩余空间\n')
+                return subprocess.CompletedProcess(command, 0)
+
+            with mock.patch('subprocess.run', side_effect=run), \
+                    self.assertRaisesRegex(RuntimeError, r'退出码 1.*没有剩余空间'):
+                build(app, root / 'output', installer)

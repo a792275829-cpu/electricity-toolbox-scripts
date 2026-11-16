@@ -47,7 +47,20 @@ image_root=${0:A:h}
         # stdout is the desktop service's JSON-lines transport. Reassigning
         # sys.stdout does not redirect the OS descriptor inherited by children;
         # hdiutil's unterminated "created:" output can swallow the next reply.
-        subprocess.run(["/usr/bin/hdiutil", "create", "-ov", "-volname", "电力工具箱", "-srcfolder", str(root), "-format", image_format, str(package)], check=True, capture_output=True)
+        result = subprocess.run(
+            ["/usr/bin/hdiutil", "create", "-ov", "-volname", "电力工具箱",
+             "-srcfolder", str(root), "-format", image_format, str(package)],
+            capture_output=True, text=True,
+        )
+        if result.returncode:
+            # hdiutil's reason (no space, busy disk image) is the only clue to
+            # a failed build; keep the first line and the free space next to it.
+            lines = [line.strip() for line in (result.stderr or result.stdout).splitlines() if line.strip()]
+            detail = lines[-1] if lines else "无输出"
+            free_mib = shutil.disk_usage(root).free // (1024 * 1024)
+            raise RuntimeError(
+                f"创建安装镜像失败（hdiutil 退出码 {result.returncode}，剩余空间 {free_mib} MiB）：{detail}"
+            )
     with package.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     package.with_suffix(".dmg.sha256").write_text(f"{digest}  {package.name}\n")
