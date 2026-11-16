@@ -1,4 +1,4 @@
-/* Only the updater uses web styles. All business widgets use the original Tk theme. */
+/* Default startup-failure styles. The opt-in WebView pilot uses pilot.css. */
 :root {
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;

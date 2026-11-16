@@ -20,6 +20,30 @@
 
 接收电脑安装发行包即可使用，内置 Python 3.11.15、Node 22.18.0（随 Playwright 轮子）、Playwright 1.55.0 和 Chromium。浏览器登录和网站取数仍需要网络。
 
+## WebView / React 导出页试用
+
+在仓库根目录运行：
+
+```sh
+./00_启动/Tauri开发版.command --webview-pilot
+```
+
+这是独立的开发试用模式：显示 React“导出上网电量”页面，不启动 Tk，使用独立应用标识 `com.electricity.toolbox.webview-pilot`；业务解释器固定使用根 `.venv`。需要现有 Node、npm、Rust 和 Xcode Command Line Tools。普通开发入口、源码启动及正式版仍使用原 Tk 界面。
+
+试用默认离线：开始、结束日期由原业务目录提供默认值，通过原 `prepare_task` 校验；开始导出走现有 Tauri → Python JSON 通信、任务引擎、独立工作进程、取消和日志。只将网站采集替换为已知样例，调用原导出器生成真实 Excel，重新打开核对“汇总”表的标题、机组、数据与数字格式。每次最多导出 3 天，反向日期立即拒绝；开始导出在任务运行时禁用，取消完成后恢复。不会读取实际账号、登录网站或修改已有业务工作簿。
+
+数据位于 `~/Library/Application Support/com.electricity.toolbox/development/data/webview-pilot/data/`。样例结果位于其中的 `上网电量抓取/输出/<本次任务标识>/上网电量汇总_YYYY-MM-DD.xlsx`，每次使用新目录；页面可直接打开输出目录和生成文件。配置、数据、浏览器与正式版隔离；试用入口仅在 Rust debug 构建中生效，不属于正式发布功能。
+
+打开窗口后，用第二个终端从仓库根目录执行真实 macOS AX 验收：
+
+```sh
+.venv/bin/python tooling/webview_accessibility_audit.py
+```
+
+脚本从 `logs/webview-pilot-process.json` 读取当前试用 PID，也支持 `--pid PID`。控制端必须已有辅助功能权限；脚本不修改系统授权。它编译本地 Swift AX 客户端，经真实系统接口读写日期、点击按钮、检查状态、取消任务，然后读取实际生成的两份工作簿；不使用 DOM 注入或浏览器模拟来代替原生操作。WebKit 的稳定 DOM 标识通过 `AXDOMIdentifier` 读取，并检查同次及跨任务一致性。
+
+全部通过返回 0；结果为 `logs/webview-accessibility-summary.json`，完整 AX 树为 `logs/webview-ax-*.json`。当前首个页面六项主验收和反向日期／取消两项附加验收通过；这不代表其他模块、真实登录取数或所有 macOS 版本已经验证。测量与限制见[试用验证记录](docs/2026-11-17-webview-accessibility.md)。
+
 ## 本地构建
 
 在目标原生构建机执行：

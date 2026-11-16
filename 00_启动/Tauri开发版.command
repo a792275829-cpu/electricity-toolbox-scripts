@@ -6,6 +6,10 @@ export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:
 if [[ "${TOOLBOX_SMOKE:-}" == "1" ]]; then
   print -r -- "TAURI_PROJECT=$root_dir/desktop"
   print -r -- "PYTHON_SERVICE=$root_dir/desktop/python/service_bridge.py"
+  if [[ "${1:-}" == "--webview-pilot" ]]; then
+    print -r -- "WEBVIEW_PILOT_CONFIG=$root_dir/desktop/src-tauri/tauri.webview-pilot.conf.json"
+    print -r -- 'WEBVIEW_PILOT_MODE=offline'
+  fi
   exit 0
 fi
 if [[ "$(uname -m)" != "arm64" ]]; then
@@ -27,4 +31,10 @@ if [[ ! -d node_modules ]]; then
 fi
 # Resources are generated only for distributions. Dev mode uses the shared source tree.
 mkdir -p src-tauri/payload
+if [[ "${1:-}" == "--webview-pilot" ]]; then
+  export TOOLBOX_WEBVIEW_PILOT=1
+  export TOOLBOX_WEBVIEW_PILOT_FIXTURE=1
+  export TOOLBOX_APP_HOME="$HOME/Library/Application Support/com.electricity.toolbox/development/data/webview-pilot"
+  exec npm run dev -- --config src-tauri/tauri.webview-pilot.conf.json
+fi
 exec npm run dev

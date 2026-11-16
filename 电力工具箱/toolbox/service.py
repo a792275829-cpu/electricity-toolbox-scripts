@@ -160,6 +160,9 @@ class ToolboxService:
             return dict(protocol=PROTOCOL_VERSION, ui="headless", workspace=str(self.paths.workspace), pid=os.getpid())
         if method == "catalog":
             return list(self._tools.values())
+        if method == "online_energy.settings":
+            output = self.paths.online_energy_output_dir
+            return dict(output_dir=str(output), output_exists=output.is_dir())
         if method == "auto_match":
             from datetime import date, timedelta
             from toolbox_shared.dates import parse_date_input

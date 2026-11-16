@@ -48,8 +48,13 @@ func walk(_ element: AXUIElement, _ depth: Int) {
     let settableError = AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable)
     var actions: CFArray?
     let actionsError = AXUIElementCopyActionNames(element, &actions)
-    let identifier = string(element, kAXIdentifierAttribute)
-    let secondIdentifier = string(element, kAXIdentifierAttribute)
+    var attributeNames: CFArray?
+    _ = AXUIElementCopyAttributeNames(element, &attributeNames)
+    let supportsDOMIdentifier = (attributeNames as? [String] ?? []).contains("AXDOMIdentifier")
+    let nativeIdentifier = string(element, kAXIdentifierAttribute)
+    let identifierAttribute = nativeIdentifier.isEmpty && supportsDOMIdentifier ? "AXDOMIdentifier" : kAXIdentifierAttribute
+    let identifier = string(element, identifierAttribute)
+    let secondIdentifier = string(element, identifierAttribute)
     nodes.append([
         "depth": depth, "role": string(element, kAXRoleAttribute),
         "title": string(element, kAXTitleAttribute),
@@ -57,6 +62,7 @@ func walk(_ element: AXUIElement, _ depth: Int) {
         "value": string(element, kAXValueAttribute),
         "enabled": string(element, kAXEnabledAttribute),
         "identifier": identifier, "secondIdentifier": secondIdentifier,
+        "identifierAttribute": identifierAttribute,
         "identifierStable": identifier == secondIdentifier,
         "valueSettable": settable.boolValue,
         "settableError": settableError.rawValue,
@@ -89,9 +95,17 @@ if !operation.isEmpty {
     if operation[0] == "--press" {
         result = AXUIElementPerformAction(target, kAXPressAction as CFString)
     } else {
+        // WebKit commits edits asynchronously and may require the field's
+        // native focus. Service the client run loop rather than blocking it.
+        _ = AXUIElementSetAttributeValue(target, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.15))
         result = AXUIElementSetAttributeValue(target, kAXValueAttribute as CFString, operation[2] as CFString)
     }
-    Thread.sleep(forTimeInterval: 0.15)
+    let deadline = Date(timeIntervalSinceNow: 1.5)
+    repeat {
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        if operation[0] != "--set" || string(target, kAXValueAttribute) == operation[2] { break }
+    } while Date() < deadline
     output["operation"] = operation[0]
     output["target"] = name
     output["result"] = result.rawValue

@@ -61,6 +61,8 @@ PYTHONPATH="../.toolbox/accessibility/extension:../.toolbox/accessibility/depend
 
 这些单测仅验证语义同步、原有校验和资源清理，不能替代跨进程 AX 验收。隔离环境只安装界面所需依赖，未完成 Tk 9.1 全部业务模块兼容性验证；真实登录、取数、写入及上传均未执行。测量和取舍见[验证记录](../电力工具箱/docs/2026-11-17-accessibility-probe.md)。
 
+WebView / React 的后续试验使用 `tooling/webview_accessibility_audit.py` 和同一 Swift AX 客户端，直接操作独立的 Tauri 窗口并回读工作簿；启动、依赖、数据隔离和验收命令统一见 [desktop/README.md](../desktop/README.md#webview--react-导出页试用)。
+
 ## 更新兼容矩阵
 
 | 场景 | 预期路径 | 自动验证 |

@@ -1,0 +1,16 @@
+{
+  "identifier": "com.electricity.toolbox.webview-pilot",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "电力工具箱 · WebView 试用",
+        "visible": true,
+        "width": 1160,
+        "height": 800,
+        "minWidth": 760,
+        "minHeight": 580
+      }
+    ]
+  }
+}

@@ -1,0 +1,352 @@
+.web-pilot {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  background: #fafaf8;
+  color: #292b28;
+  font-size: 14px;
+}
+.pilot-sidebar {
+  background: #f0f1eb;
+  padding: 30px 18px;
+  border-right: 1px solid #e3e5dc;
+  display: flex;
+  flex-direction: column;
+}
+.pilot-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 650;
+  font-size: 17px;
+  letter-spacing: -0.3px;
+}
+.pilot-brand small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #686d62;
+  letter-spacing: 1px;
+}
+.brand-mark {
+  width: 34px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: #394b36;
+  border-radius: 9px;
+  font-size: 19px;
+}
+.nav-category {
+  margin: 40px 10px 10px;
+  font-size: 11px;
+  color: #646b5d;
+  letter-spacing: 1px;
+}
+.selected-module {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px;
+  color: #253d27;
+  background: #e0e6d9;
+  text-decoration: none;
+  font-weight: 600;
+  border-radius: 7px;
+}
+.selected-module span {
+  font-weight: 400;
+}
+.sidebar-note {
+  margin-top: auto;
+  padding: 26px 10px 0;
+  font-size: 11px;
+  color: #656b60;
+  line-height: 1.9;
+}
+.pilot-main {
+  width: 100%;
+  max-width: 1120px;
+  padding: 34px 40px 24px;
+  margin: auto;
+}
+.pilot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.pilot-breadcrumb {
+  margin: 0 0 15px;
+  font-size: 11px;
+  color: #6a7066;
+}
+.pilot-header h1 {
+  font-size: 27px;
+  line-height: 1.25;
+  letter-spacing: -0.8px;
+  margin: 0;
+  font-weight: 650;
+}
+.pilot-subtitle {
+  font-size: 13px;
+  color: #646b60;
+  margin: 12px 0 0;
+}
+.connection {
+  font-size: 11px;
+  white-space: nowrap;
+  margin-top: 2px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  color: #666;
+  background: #eee;
+}
+.connection.ready {
+  color: #345039;
+  background: #e9eee4;
+}
+.sample-notice {
+  padding: 10px 14px;
+  border: 1px solid #dce4d3;
+  border-radius: 7px;
+  background: #f2f5ed;
+  color: #46553b;
+  font-size: 12px;
+  margin: 0 0 24px;
+}
+.pilot-panel {
+  background: #fff;
+  border: 1px solid #e1e4db;
+  border-radius: 10px;
+  padding: 24px;
+  margin: 0 0 20px;
+  min-width: 0;
+}
+.date-panel {
+  padding-top: 18px;
+}
+.date-panel legend {
+  padding: 0 8px;
+  margin-left: -8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.date-fields {
+  display: flex;
+  gap: 18px;
+  align-items: flex-end;
+  margin-top: 4px;
+}
+.date-fields label {
+  display: block;
+  margin: 0 0 9px;
+  font-size: 12px;
+  font-weight: 550;
+}
+.date-fields input {
+  font: inherit;
+  color: #292b28;
+  background: #fafbf8;
+  border: 1px solid #d7dcd0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  width: 215px;
+  font-variant-numeric: tabular-nums;
+}
+.date-fields input:disabled {
+  color: #777d70;
+  background: #f1f2ed;
+}
+.date-separator {
+  color: #73786b;
+  padding-bottom: 11px;
+  font-size: 12px;
+}
+.field-help {
+  color: #6a7163;
+  font-size: 11px;
+  margin: 12px 0 22px;
+}
+.pilot-actions {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.web-pilot button {
+  border-color: #dce0d5;
+  padding: 9px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.web-pilot button.primary {
+  background: #354832;
+  border-color: #354832;
+  color: #fff;
+}
+.web-pilot button.primary:hover {
+  background: #263923;
+}
+.web-pilot button:disabled {
+  color: #858c7e;
+  background: #f0f2ec;
+  border-color: #e2e6dc;
+  cursor: default;
+}
+.web-pilot :is(button, input, a, summary, pre):focus-visible {
+  outline: 3px solid #67885c;
+  outline-offset: 3px;
+}
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 17px;
+}
+.panel-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.task-badge {
+  color: #666d60;
+  background: #f0f2ec;
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+.task-badge.succeeded {
+  background: #e9f1e3;
+  color: #36552e;
+}
+.task-badge.failed {
+  background: #fff0e9;
+  color: #904a30;
+}
+.result-panel output {
+  display: block;
+  font-size: 13px;
+  line-height: 1.7;
+  min-height: 23px;
+}
+.result-panel progress {
+  margin-top: 14px;
+  accent-color: #354832;
+  height: 5px;
+}
+.pilot-logs {
+  border-top: 1px solid #eef0e9;
+  margin-top: 23px;
+  padding-top: 15px;
+}
+.pilot-logs summary {
+  font-size: 12px;
+  color: #626b5b;
+  cursor: pointer;
+  width: fit-content;
+  padding: 3px 0;
+}
+.pilot-logs pre {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.8;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  background: #f7f8f4;
+  border-radius: 5px;
+}
+.pilot-footer {
+  font-size: 10px;
+  color: #6a7163;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.output-files {
+  padding: 0;
+  margin: 19px 0 0;
+  list-style: none;
+}
+.output-files li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 13px 0;
+  border-top: 1px solid #eff1eb;
+}
+.output-files li div {
+  min-width: 0;
+  flex: 1;
+}
+.output-files strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 550;
+}
+.output-files small {
+  display: block;
+  margin-top: 5px;
+  color: #6a7163;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.file-icon {
+  font-size: 8px;
+  padding: 10px 5px;
+  border-radius: 5px;
+  background: #eaf0e4;
+  color: #46633b;
+}
+.skip-link {
+  position: absolute;
+  top: -60px;
+  left: 20px;
+  z-index: 2;
+  padding: 10px;
+  background: #fff;
+  color: #263923;
+}
+.skip-link:focus {
+  top: 10px;
+}
+@media (max-width: 980px) {
+  .web-pilot {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
+  .pilot-main {
+    padding: 28px 24px;
+  }
+  .date-fields input {
+    width: 175px;
+  }
+  .pilot-header {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 760px) {
+  .web-pilot {
+    grid-template-columns: 1fr;
+  }
+  .pilot-sidebar {
+    padding: 15px 20px;
+  }
+  .pilot-sidebar nav,
+  .sidebar-note {
+    display: none;
+  }
+  .pilot-main {
+    padding: 20px;
+  }
+  .date-fields {
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .date-fields input {
+    width: 180px;
+  }
+}
