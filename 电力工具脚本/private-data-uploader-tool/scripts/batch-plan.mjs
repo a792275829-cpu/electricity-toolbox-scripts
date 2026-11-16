@@ -187,17 +187,74 @@ export function buildMultipart(files, fields = {}) {
   };
 }
 
+function validResultDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}(?:$|[ T])/.test(value)) return false;
+  const day = value.slice(0, 10);
+  const parsed = new Date(`${day}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === day;
+}
+
 /** 接口返回逐文件结果数组：detail 非空即该文件失败。 */
 export function summarizeImport(payload) {
-  const items = Array.isArray(payload) ? payload : [];
+  if (!Array.isArray(payload)) throw new Error('导入响应结构异常：结果必须是数组；提交结果未确认，请先核对网站。');
+  const items = payload;
   const succeeded = [];
   const failed = [];
   for (const item of items) {
-    const detail = item?.detail;
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+        || !validResultDate(item.date)
+        || typeof item.dataType !== 'string' || !item.dataType.trim()
+        || (item.detail != null && typeof item.detail !== 'string')) {
+      throw new Error('导入响应结构异常：明细缺少日期、类型或有效 detail；提交结果未确认，请先核对网站。');
+    }
+    const detail = item.detail;
     if (detail) failed.push({ date: item?.date ?? '', dataType: item?.dataType ?? '', detail: String(detail) });
     else succeeded.push({ date: item?.date ?? '', dataType: item?.dataType ?? '' });
   }
-  return { items, succeeded, failed };
+  return { items, succeeded, failed, confirmed: items.length > 0 };
+}
+
+export function parseImportResponse(payload) {
+  if (Array.isArray(payload)) return summarizeImport(payload);
+  if (!payload || typeof payload !== 'object' || payload.retCode !== 'T200') {
+    throw new Error('导入响应无有效成功码，提交结果未确认，请先核对网站。');
+  }
+  return summarizeImport(payload.data);
+}
+
+export function isDirectoryUploadFile(name) {
+  const lower = String(name).toLowerCase();
+  return !String(name).startsWith('~$') && !String(name).includes('节点电价')
+    && (lower.endsWith('.xlsx') || lower.endsWith('.xls'));
+}
+
+/** Submit serially; errors retain exactly which batches reached a response. */
+export async function submitImportBatches(batches, submit, log = () => {}) {
+  const completed = [], succeeded = [], failed = [];
+  let current;
+  try {
+    for (let index = 0; index < batches.length; index++) {
+      const batch = batches[index];
+      current = batch;
+      log(`[${index + 1}/${batches.length}] 上传 ${batch.files.length} 个文件（${(batch.bytes / 1048576).toFixed(2)}MB）`);
+      for (const file of batch.files) log(`   ${path.basename(file.path)}`);
+      const result = await submit(batch);
+      succeeded.push(...result.succeeded);
+      failed.push(...result.failed);
+      const confirmed = result.confirmed && result.items.length >= batch.files.length && !result.failed.length;
+      completed.push({ batch: index + 1, files: batch.files.map(file => path.basename(file.path)), confirmed });
+      current = undefined;
+      for (const item of result.succeeded) log(`   接口确认：${item.date} ${item.dataType}`);
+      for (const item of result.failed) log(`   失败：${item.date} ${item.dataType} ${item.detail}`);
+      if (!confirmed && !result.failed.length) log('   提交成功；接口明细不足，结果未确认，请核对网站，不要全量重传。');
+      if (result.failed.length) throw new Error(`本批 ${result.failed.length} 条导入失败，已停止后续批次。`);
+    }
+  } catch (error) {
+    const progress = completed.map(item => `第${item.batch}批（${item.confirmed ? '结果已确认' : '已提交，需核对'}）：${item.files.join('、')}`).join('；') || '无';
+    const uncertain = current ? `；当前批次可能已提交：${current.files.map(file => path.basename(file.path)).join('、')}` : '';
+    throw new Error(`${String(error?.message || error).split('\nCall log:')[0]}；已完成批次：${progress}${uncertain}。请核对后只重传未完成文件，勿全量重传。`);
+  }
+  return { completed, succeeded, failed, unconfirmedBatches: completed.filter(item => !item.confirmed).length };
 }
 
 /** 上传后的状态快照只汇总已上传条数，未上传的其它数据项不属于本次上传结果。 */

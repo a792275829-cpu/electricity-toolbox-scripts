@@ -47,6 +47,10 @@ class ReviewDataGuardsTests(unittest.TestCase):
             energy = Path(folder) / "广东-能销数据-20261026.xlsx"
             energy.write_bytes(b"energy sentinel")
             template_bytes = module.BUILTIN_PROVINCE_TEMPLATE.read_bytes()
+            province = Path(folder) / '广东-省内数据-20261025.xlsx'
+            book = load_workbook(module.BUILTIN_PROVINCE_TEMPLATE)
+            book.active['C2'] = '=1000-200-100'
+            book.save(province); book.close()
             day, uploads = module.prepare_upload_files([energy])
             with patch.object(module.upload_flow, "parse_api_payload", side_effect=lambda response, _: response), patch.object(
                 module.upload_flow, "fetch_capacity_average", return_value=100

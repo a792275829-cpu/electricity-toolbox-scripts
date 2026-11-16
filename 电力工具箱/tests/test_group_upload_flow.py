@@ -26,6 +26,26 @@ def destroy_tk(root: tk.Misc) -> None:
     root.destroy()
 
 
+class GroupStatusContractTests(unittest.TestCase):
+    def test_status_requires_exact_identity_and_valid_state(self):
+        import json
+        from toolbox.runtime import ToolPaths, load_module
+        module = load_module('group_status_contract', ToolPaths(Path(__file__).resolve().parents[2]).group_upload)
+        valid = dict(date='2026-11-16', groupDataType='1', provinceId='044', dataStatus=1)
+        for mutation in ({'date': '2026-11-15'}, {'groupDataType': '2'}, {'provinceId': '043'}, {'dataStatus': None}, {'dataStatus': True}):
+            context = mock.Mock()
+            context.request.get.return_value.status = 200
+            context.request.get.return_value.text.return_value = json.dumps(dict(retCode='T200', data=[dict(valid, **mutation)]))
+            with self.subTest(mutation=mutation), self.assertRaises(RuntimeError):
+                module.get_daily_status(context, '2026-11-16', '1', '044')
+        context.request.get.return_value.text.return_value = json.dumps(dict(retCode='T200', data=[valid]))
+        self.assertEqual(module.get_daily_status(context, '2026-11-16', '1', '044'), valid)
+        context.request.get.return_value.text.return_value = json.dumps(dict(retCode='T200', data=[valid, valid]))
+        with self.assertRaisesRegex(RuntimeError, '重复'):
+            module.get_daily_status(context, '2026-11-16', '1', '044')
+
+
+
 class GroupUploadRuntimeTests(unittest.TestCase):
     """Group upload runtime: locking, report naming, startup max and report creation."""
     def test_group_upload_process_is_alive_detects_current_process(self) -> None:
@@ -246,7 +266,7 @@ class GroupUploadRuntimeTests(unittest.TestCase):
         self.assertEqual(updated_sheet["B2"].value, 20)
         self.assertEqual(updated_sheet["C2"].value, 108314.96)
 
-    def test_group_upload_accepts_numeric_c2_from_nearest_template(self) -> None:
+    def test_group_upload_rejects_numeric_c2_from_nearest_template(self) -> None:
         from openpyxl import Workbook, load_workbook
         from toolbox.runtime import ToolPaths, load_module
 
@@ -274,20 +294,13 @@ class GroupUploadRuntimeTests(unittest.TestCase):
                 mock.patch.object(module.upload_flow, "fetch_startup_max", return_value=20),
                 mock.patch.object(module.upload_flow, "fetch_capacity_average", return_value=50000.0),
             ):
-                updated_uploads = module.update_province_excel_for_upload(
-                    object(),
-                    "2026-07-05",
-                    uploads,
-                )
-
-            target_path = folder / "广东-省内数据-20260705.xlsx"
-            updated = load_workbook(target_path, data_only=True)
-            updated_sheet = updated["省内数据"]
-
-        self.assertEqual(updated_uploads[0].path, target_path.resolve())
-        self.assertEqual(updated_sheet["A2"].value.date(), date(2026, 7, 5))
-        self.assertEqual(updated_sheet["B2"].value, 20)
-        self.assertEqual(updated_sheet["C2"].value, 108314.96)
+                with self.assertRaisesRegex(RuntimeError, "禁止跨日自动复用"):
+                    module.update_province_excel_for_upload(object(), "2026-07-05", uploads)
+            self.assertFalse((folder / "广东-省内数据-20260705.xlsx").exists())
+            original = load_workbook(province_path)
+            self.assertEqual(original.active['C2'].value, 108314.96)
+            self.assertEqual(original.active['A2'].value.date(), date(2026, 7, 4))
+            original.close()
 
     def test_group_upload_prefers_guangdong_branch_tenant(self) -> None:
         from toolbox.runtime import ToolPaths, load_module

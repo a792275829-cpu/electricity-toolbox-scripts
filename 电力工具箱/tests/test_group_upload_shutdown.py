@@ -8,6 +8,30 @@ from unittest import mock
 from toolbox.runtime import load_module
 
 
+class ProvinceFormulaProvenanceTests(unittest.TestCase):
+    def test_saved_numeric_output_recalculates_from_original_formula_next_day(self):
+        from toolbox_shared.province_excel import write_province_workbook
+        from openpyxl import Workbook, load_workbook
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            source, first, second = [folder / name for name in ('source.xlsx', 'first.xlsx', 'second.xlsx')]
+            book = Workbook(); sheet = book.active; sheet.title = '省内数据'
+            sheet['C2'] = '=150000-20000-100'; sheet['C2'].number_format = '0.00'
+            sheet['A2'].number_format = 'yyyy/m/d'; book.save(source); book.close()
+            write_province_workbook(source, first, '2026-11-15', 20, 30000)
+            write_province_workbook(first, second, '2026-11-16', 21, 40000)
+            for path, value, day, count in ((first, 119900, 15, 20), (second, 109900, 16, 21)):
+                book = load_workbook(path)
+                try:
+                    self.assertEqual(book.active['C2'].value, value)
+                    self.assertEqual(book.active['C2'].number_format, '0.00')
+                    self.assertEqual(book.active['A2'].value.day, day)
+                    self.assertEqual(book.active['B2'].value, count)
+                    self.assertEqual(book.defined_names['_toolbox_province_c2_formula'].attr_text, '"=150000-20000-100"')
+                finally: book.close()
+
+
+
 class GroupUploadShutdownTests(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_module(

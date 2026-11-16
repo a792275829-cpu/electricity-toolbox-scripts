@@ -161,9 +161,8 @@ def parse_api_payload(response, label: str) -> dict[str, Any]:
         raise RuntimeError(f"{label} 返回的不是 JSON：HTTP {response.status}，{text[:300]}") from exc
     if response.status >= 400:
         raise RuntimeError(f"{label} HTTP {response.status}: {json.dumps(payload, ensure_ascii=False)[:500]}")
-    ret_code = payload.get("retCode")
-    if ret_code and ret_code != "T200":
-        raise RuntimeError(f"{label} 失败：{payload.get('retMsg') or payload}")
+    if not isinstance(payload, dict) or payload.get("retCode") != "T200":
+        raise RuntimeError(f"{label} 失败：{payload.get('retMsg') if isinstance(payload, dict) else '响应结构异常'}")
     return payload
 
 
@@ -327,10 +326,23 @@ def get_daily_status(context, run_date: str, data_type: str, province_id: str) -
         timeout=30000,
     )
     payload = parse_api_payload(response, "查询日报上传状态")
-    rows = payload.get("data") or []
+    rows = payload.get("data")
     if not isinstance(rows, list):
         raise RuntimeError("查询日报上传状态返回格式不正确。")
-    return rows[0] if rows else None
+    matching = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise RuntimeError("日报状态记录结构异常，停止上传。")
+        if (str(row.get('date') or '')[:10] != run_date
+                or str(row.get('groupDataType', row.get('dataType', ''))) != str(data_type)
+                or str(row.get('provinceId', '')) != str(province_id)):
+            raise RuntimeError("日报状态的日期、类型或省份与本次上传不一致，停止上传。")
+        if type(row.get('dataStatus')) is not int or row['dataStatus'] not in (0, 1):
+            raise RuntimeError("日报上传状态无效，停止上传。")
+        matching.append(row)
+    if len(matching) > 1:
+        raise RuntimeError("日报状态出现重复记录，停止上传。")
+    return matching[0] if matching else None
 
 
 def file_payload(path: Path) -> dict[str, Any]:

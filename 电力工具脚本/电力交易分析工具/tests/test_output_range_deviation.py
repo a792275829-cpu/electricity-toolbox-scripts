@@ -1,6 +1,8 @@
 import importlib.util
 import sys
 import unittest
+import tempfile
+from unittest import mock
 from pathlib import Path
 
 
@@ -27,6 +29,25 @@ def make_row(market_type, date, unit, time, deviation_mw, clearing_mwh=100.0):
 
 
 class OutputRangeTests(unittest.TestCase):
+    def test_four_six_scope_and_exported_actual_units(self):
+        import openpyxl
+        for count in (4, 6):
+            with mock.patch.object(sys, 'argv', ['script', '--haimen-units', str(count)]):
+                self.assertEqual(deviation.parse_args().haimen_units, count)
+        filters = [f'海门#{number}机组' for number in range(1, 7)]
+        rows = [make_row('日前', '2026-11-16', unit, '0:00', 10) for unit in filters]
+        scores, excluded = deviation.rank_plant_days_with_exclusions(rows, top=3)
+        with tempfile.TemporaryDirectory() as folder:
+            output = deviation.write_results(Path(folder) / 'scope.xlsx', scores, excluded, rows, unit_filters=filters, top=3)
+            book = openpyxl.load_workbook(output)
+            try:
+                notes = dict(book['说明'].iter_rows(min_row=2, values_only=True))
+                self.assertEqual(notes['实际统计范围'], '、'.join(filters))
+                self.assertEqual(notes['选择范围'], '、'.join(filters))
+                self.assertIn('前3天', notes['排序粒度'])
+                self.assertEqual(book['日前Top天']['D2'].value, 6)
+            finally: book.close()
+
     def test_output_range_distance_uses_nearest_boundary(self):
         bounded = deviation.NormalOutputRange(lower=100.0, upper=200.0, label="100.00-200.00MW")
         open_ended = deviation.NormalOutputRange(lower=250.0, upper=None, label=">=250.00MW")

@@ -26,6 +26,18 @@ def day_prices(day: date, base: float = 1.0) -> tuple[float, ...]:
     return tuple(base + hour / 100 for hour in range(MODULE.EXPECTED_POINT_COUNT))
 
 
+class DuplicatePayloadTests(unittest.TestCase):
+    def test_complete_duplicate_stops_even_when_values_match_or_skip_incomplete_is_on(self):
+        day = date(2026, 10, 1)
+        row = dict(unitId='unit', date=day.isoformat(), acPrice=list(day_prices(day)))
+        for skip in (False, True):
+            for second in (row, dict(row, acPrice=[2] * 24)):
+                with self.subTest(skip=skip, same=second == row):
+                    with self.assertRaisesRegex(RuntimeError, '重复完整记录'):
+                        MODULE.parse_price_payload({'data': [row, second]}, unit_id='unit', expected_dates=(day,), label='归湖', skip_incomplete=skip)
+
+
+
 class DateRangeTests(unittest.TestCase):
     def test_range_includes_both_ends(self):
         self.assertEqual(

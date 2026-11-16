@@ -97,6 +97,8 @@ from .wps_browser import (
     open_browser_context,
 )
 
+WPS_STAGE_TIMEOUT_MS = 120_000
+
 WPS_APPLICATION_GUARD = """
   const api = window.WPSOpenApi;
   if (typeof api?.EtApplication !== "function") {
@@ -272,6 +274,37 @@ def read_excel_range(workbook_path: Path, sheet_name: str, source_range: str) ->
 
 
 
+def validate_formula_caches(workbook_path: Path, requests: list[tuple[str, str]]) -> None:
+    """Inspect OOXML before normalizing blanks; an uncached formula isn't blank."""
+    from xml.etree import ElementTree as ET
+    ns = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+    metadata = load_excel_workbook(workbook_path, read_only=True, data_only=False)
+    try:
+        with zipfile.ZipFile(workbook_path) as archive:
+            parts = {sheet.title: sheet._worksheet_path for sheet in metadata.worksheets}
+            grouped = {}
+            for sheet_name, region in requests:
+                grouped.setdefault(sheet_name, []).append(range_boundaries(region))
+            for sheet_name, regions in grouped.items():
+                if sheet_name not in parts:
+                    continue  # The normal reader reports the missing sheet.
+                root = ET.fromstring(archive.read(parts[sheet_name]))
+                for cell in root.findall('.//m:sheetData/m:row/m:c', ns):
+                    formula = cell.find('m:f', ns)
+                    if formula is None:
+                        continue
+                    left, top, right, bottom = range_boundaries(formula.get('ref', cell.attrib['r']))
+                    if not any(left <= max_col and min_col <= right and top <= max_row and min_row <= bottom
+                               for min_col, min_row, max_col, max_row in regions):
+                        continue
+                    cached = cell.find('m:v', ns)
+                    if cached is None or (cached.text is None and cell.get('t') != 'str'):
+                        raise ValueError(f'来源公式缺少计算缓存，停止写入：{sheet_name}!{cell.attrib["r"]}；请用表格软件重新计算并保存。')
+    finally:
+        metadata.close()
+
+
+
 def read_excel_ranges(
     workbook_path: Path, requests: list[tuple[str, str]]
 ) -> list[tuple[list[list[Any]], int, int]]:
@@ -283,6 +316,7 @@ def read_excel_ranges(
     if not requests:
         return []
 
+    validate_formula_caches(workbook_path, requests)
     wb = load_excel_workbook(workbook_path, data_only=True, read_only=True)
     try:
         grouped: dict[str, list[tuple[int, tuple[int, int, int, int]]]] = {}
@@ -509,7 +543,7 @@ def wait_for_wps_ready(page, log, timeout_seconds: int) -> dict[str, Any]:
 
 
 
-def evaluate_wps_operation(page, script: str, payload: Any, log, timeout_seconds: int):
+def evaluate_wps_operation(page, script: str, payload: Any, log, timeout_seconds: int, *, writing=False):
     """Recheck readiness after navigation, including the gap before evaluate."""
     first_error: Exception | None = None
     for attempt in range(1, 4):
@@ -526,10 +560,25 @@ def evaluate_wps_operation(page, script: str, payload: Any, log, timeout_seconds
                 message += f" 首次操作失败原因：{first_error}"
             raise RuntimeError(message) from first_error
         try:
-            return page.evaluate(script, payload)
+            bounded_script = """async (payload) => {
+              let timer;
+              try {
+                return await Promise.race([
+                  (""" + script + """)(payload),
+                  new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(
+                    'WPS_TIMEOUT: 读取阶段超时；尚未写入目标表格'
+                  )), """ + str(timeout_seconds * 1000) + """); })
+                ]);
+              } finally { clearTimeout(timer); }
+            }""" if not writing else script
+            return page.evaluate(bounded_script, payload)
         except Exception as exc:
             # The guard runs before any cell assignment. Do not retry arbitrary
             # TypeErrors or API errors that may have occurred during a write.
+            if writing and 'WPS_API_NOT_READY:' not in str(exc):
+                if any(marker in str(exc) for marker in ('尚未写入目标表格', '可能已部分写入')):
+                    raise
+                raise RuntimeError(f'{exc}；可能已部分写入，请先在网站核对，勿直接重试。') from exc
             if not any(marker in str(exc) for marker in (
                 "WPS_API_NOT_READY:", "Execution context was destroyed"
             )) and "navigation" not in str(exc).lower():
@@ -592,6 +641,26 @@ def write_to_wps(
               if (typeof api.save !== "function") {
                 throw new Error("WPS_API_NOT_READY: 表格保存功能尚未就绪");
               }
+              let stopped = false;
+              let mayHaveWritten = false;
+              const ensureActive = () => { if (stopped) throw new Error("WPS_OPERATION_STOPPED"); };
+              const stage = async (name, action, milliseconds = __WPS_STAGE_TIMEOUT_MS__) => {
+                let timer;
+                try {
+                  return await Promise.race([
+                    action(),
+                    new Promise((_, reject) => { timer = setTimeout(() => {
+                      stopped = true;
+                      reject(new Error("WPS_TIMEOUT: " + name + "阶段超时；"
+                        + (mayHaveWritten ? "可能已部分写入，请核对网站后再操作" : "尚未写入目标表格")));
+                    }, milliseconds); })
+                  ]);
+                } catch (error) {
+                  stopped = true;
+                  throw new Error(name + "阶段失败：" + (error?.message || String(error)) + "；"
+                    + (mayHaveWritten ? "可能已部分写入，请核对网站后再操作" : "尚未写入目标表格"));
+                } finally { clearTimeout(timer); }
+              };
               const results = [];
               const ranges = [];
               const blankCells = [];
@@ -605,7 +674,9 @@ def write_to_wps(
               // KDocs saves continuously, so resolve every target before the
               // first assignment: a typo in a later region must not leave the
               // earlier regions half-written.
+              await stage("读取", async () => {
               for (const item of payload) {
+                ensureActive();
                 let range;
                 try {
                   const sheet = await app.Worksheets(item.targetSheet);
@@ -677,21 +748,35 @@ def write_to_wps(
                   cols: item.cols
                 });
               }
+              });
+              await stage("写入", async () => {
+              ensureActive();
               for (let i = 0; i < payload.length; i++) {
                 const item = payload[i];
                 if (!item.overwrite) {
-                  for (const {cell, value} of blankCells[i]) cell.Value = value;
+                  for (const {cell, value} of blankCells[i]) {
+                    ensureActive(); mayHaveWritten = true; cell.Value = value;
+                  }
+                  await ranges[i].Value;  // Drain queued assignments within the write deadline.
+                  ensureActive();
                   results[i].expectedValues = expectedValues[i];
                   results[i].skipped = item.rows * item.cols - blankCells[i].length;
                   continue;
                 }
                 const assignment = item.rows === 1 && item.cols === 1 ? item.values[0][0] : item.values;
+                ensureActive();
+                mayHaveWritten = true;
                 ranges[i].Value = assignment;
+                await ranges[i].Value;
+                ensureActive();
               }
-              await api.save();
+              });
+              await stage("保存", async () => { ensureActive(); await api.save(); });
               // The web SDK serialises its RPCs, so parallel reads measured the
               // same as sequential ones; read in order to keep one request in
               // flight at a time.
+              await stage("回读", async () => {
+              ensureActive();
               for (const result of results) {
                 const sheet = await app.Worksheets(result.targetSheet);
                 const range = await sheet.Range(result.targetRange);
@@ -713,13 +798,15 @@ def write_to_wps(
                   }
                 }
               }
+              });
               return { saved: true, results };
             }
             """
+            writer_script = writer_script.replace("__WPS_STAGE_TIMEOUT_MS__", str(WPS_STAGE_TIMEOUT_MS))
             log(f"正在写入 {len(payload)} 个区域…")
             log("覆盖非空单元格：" + ("是" if overwrite else "否（只补空白，保留已有值和公式）"))
             try:
-                result = evaluate_wps_operation(page, writer_script, payload, log, 180)
+                result = evaluate_wps_operation(page, writer_script, payload, log, 180, writing=True)
                 if not overwrite:
                     skipped = sum(entry.get("skipped", 0) for entry in result.get("results", []))
                     log(f"已保留 {skipped} 个已有值或公式单元格。")

@@ -47,3 +47,7 @@
 ## 登录态与测试
 
 本模块不读取 `config.json`：是否显示浏览器由命令行 `--headed` 决定，工具箱页面按界面设置执行。登录态、锁和 `.browser-profile/` 独立维护。测试随 `tooling/run_tests.py --suite toolbox --pattern 'test_market_table*.py'` 运行。
+
+## 数组公式保护
+
+普通公式、数组公式对象及其整个 `ref` 溢出区域均跳过，包括区域内已有数字和空白单元格；勾选“覆盖非空单元格”也不改写这些单元格。日期、字段顺序及各数据源 D／D-1／D-2 口径保持现有约定。

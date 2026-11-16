@@ -40,34 +40,6 @@ class GroupUploadTemplateTests(unittest.TestCase):
         ):
             return module.update_province_excel_for_upload(object(), run_date, uploads)
 
-    def assert_output(self, path):
-        self.assertEqual(path.name, "广东-省内数据-20261023.xlsx")
-        for data_only in (False, True):
-            workbook = load_workbook(path, data_only=data_only)
-            source = load_workbook(self.template, data_only=data_only)
-            try:
-                self.assertEqual(workbook.sheetnames, ["省内数据"])
-                sheet = workbook["省内数据"]
-                self.assertEqual(sheet["A2"].value, datetime(2026, 10, 23))
-                self.assertEqual(sheet["B2"].value, 162)
-                self.assertEqual(sheet["C2"].value, 108314.96)
-                for row in sheet.iter_rows(min_row=1, max_row=2, max_col=11):
-                    for cell in row:
-                        expected = source.active[cell.coordinate]
-                        self.assertEqual(cell.number_format, expected.number_format)
-                        if cell.coordinate not in ("A2", "B2"):
-                            self.assertEqual(cell.value, expected.value)
-                            self.assertEqual(cell.data_type, expected.data_type)
-                self.assertEqual(sheet["A2"].number_format, "yyyy/m/d;@")
-                self.assertEqual(sheet["G2"].value, "100")
-                self.assertIsNone(sheet["J2"].value)
-                self.assertIsNone(sheet["K2"].value)
-            finally:
-                workbook.close()
-                source.close()
-        self.assertEqual(self.template.read_bytes(), self.original_template)
-        self.assertEqual(self.energy.read_bytes(), b"energy-input")
-
     def test_energy_only_uses_builtin_and_gui_selection_can_be_prepared_again(self):
         run_date, uploads = self.prepare()
         self.assertEqual(run_date, "2026-10-23")
@@ -84,43 +56,47 @@ class GroupUploadTemplateTests(unittest.TestCase):
         (self.folder / "~$广东-省内数据-20261023.xlsx").write_bytes(b"lock")
         self.assertTrue(self.prepare()[1][0].builtin_template)
 
-    def test_builtin_generates_real_workbook_next_to_energy(self):
-        output = self.update([self.energy])[0].path
-        self.assertEqual(output.parent, self.folder)
-        self.assert_output(output)
-        source = load_workbook(self.template)
-        try:
-            self.assertIsNone(source.active["A2"].value)
-            self.assertIsNone(source.active["B2"].value)
-        finally:
-            source.close()
+    def test_numeric_builtin_is_rejected_without_creating_output(self):
+        with self.assertRaisesRegex(RuntimeError, '禁止跨日自动复用'):
+            self.update([self.energy])
+        self.assertFalse((self.folder / '广东-省内数据-20261023.xlsx').exists())
+        self.assertEqual(self.template.read_bytes(), self.original_template)
 
-    def test_staging_copies_builtin_output_back_to_energy_folder(self):
+    def test_staging_numeric_builtin_failure_keeps_inputs_and_cleans_staging(self):
         observed = []
         def upload(paths, *, force):
-            self.assertFalse(force)
             observed.extend(paths)
-            self.assertNotEqual(paths[1].parent, self.folder)
-            self.assertEqual(paths[0], self.template)
             self.update(paths)
-        with mock.patch.object(self.module, "run_api_upload", side_effect=upload):
-            run_group_upload_with_staging(self.module, [self.energy], force=False, on_log=lambda _: None)
-        self.assert_output(self.folder / "广东-省内数据-20261023.xlsx")
+        with mock.patch.object(self.module, 'run_api_upload', side_effect=upload):
+            with self.assertRaisesRegex(RuntimeError, '禁止跨日自动复用'):
+                run_group_upload_with_staging(self.module, [self.energy], force=False, on_log=lambda _: None)
         self.assertFalse(observed[1].parent.exists())
+        self.assertEqual(self.energy.read_bytes(), b'energy-input')
+        self.assertEqual(self.template.read_bytes(), self.original_template)
 
-    def test_same_directory_template_is_staged_even_when_only_energy_is_selected(self):
-        from shutil import copy2
-        province = self.folder / "广东-省内数据-20261022.xlsx"
-        copy2(self.template, province)
+    def test_same_directory_formula_template_is_staged_and_read_back(self):
+        province = self.folder / '广东-省内数据-20261022.xlsx'
+        book = load_workbook(self.template)
+        book.active['A2'] = datetime(2026, 10, 22)
+        book.active['C2'] = '=150000-10000-100'
+        book.save(province)
+        book.close()
+        original = province.read_bytes()
         def upload(paths, *, force):
-            self.assertEqual(paths[0].name, province.name)
             self.assertNotEqual(paths[0].parent, province.parent)
-            self.assertFalse(self.module.prepare_upload_files(paths)[1][0].builtin_template)
             self.update(paths)
-        with mock.patch.object(self.module, "run_api_upload", side_effect=upload):
+        with mock.patch.object(self.module, 'run_api_upload', side_effect=upload):
             run_group_upload_with_staging(self.module, [self.energy], force=False, on_log=lambda _: None)
-        self.assert_output(self.folder / "广东-省内数据-20261023.xlsx")
-        self.assertEqual(province.read_bytes(), self.original_template)
+        output = self.folder / '广东-省内数据-20261023.xlsx'
+        book = load_workbook(output)
+        try:
+            self.assertEqual(book.active['C2'].value, 124680.3)
+            self.assertEqual(book.active['A2'].value, datetime(2026, 10, 23))
+            self.assertEqual(book.active['B2'].value, 162)
+            self.assertIn('_toolbox_province_c2_formula', book.defined_names)
+        finally:
+            book.close()
+        self.assertEqual(province.read_bytes(), original)
 
     def test_locked_generated_file_is_rejected_without_touching_template(self):
         (self.folder / "~$广东-省内数据-20261023.xlsx").write_bytes(b"lock")

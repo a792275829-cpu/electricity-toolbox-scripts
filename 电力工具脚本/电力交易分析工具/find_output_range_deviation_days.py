@@ -265,7 +265,7 @@ def top_per_market(scores: list[PlantDayScore], top: int) -> list[PlantDayScore]
     return limited
 
 
-def write_results(output_path: Path, scores: list[PlantDayScore], excluded: list[tuple[str, str]], rows: list[HourDeviation]) -> Path:
+def write_results(output_path: Path, scores: list[PlantDayScore], excluded: list[tuple[str, str]], rows: list[HourDeviation], *, unit_filters: list[str] | None = None, top: int = DEFAULT_TOP) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -312,8 +312,10 @@ def write_results(output_path: Path, scores: list[PlantDayScore], excluded: list
     note.append(["项目", "说明"])
     note.append(["计算口径", "机端出力=出清电量/(1-厂用电率)，正常出力范围沿用电力交易分析报告的运行补偿报价段规则。"])
     note.append(["偏差计分", "机端出力在正常范围内记0；低于下限或高于上限时，按到最近边界的绝对差计入。"])
-    note.append(["统计范围", "默认只统计海门#1机组、海门#2机组、海门#3机组、海门#4机组。"])
-    note.append(["排序粒度", "日前和实时分开统计；每个口径按日期汇总海门4台机组全天偏差绝对值后各取前10天。"])
+    actual_units = sorted({row.unit for row in rows})
+    note.append(["选择范围", "、".join(unit_filters or DEFAULT_UNIT_FILTERS)])
+    note.append(["实际统计范围", "、".join(actual_units)])
+    note.append(["排序粒度", f"日前和实时分开统计；按实际统计机组逐日汇总全天偏差绝对值，各取前{top}天。"])
     note.append(["启停剔除", "任一机组在该日发生出力状态变化则剔除；全天有出力或全天无出力都不视为启停变化。"])
 
     for sheet in wb.worksheets:
@@ -332,6 +334,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-x", "--top", type=int, default=DEFAULT_TOP, help="日前、实时分别输出偏差最大的前X天，默认10")
     parser.add_argument("--start-date", help="开始日期，格式 YYYY-MM-DD")
     parser.add_argument("--end-date", help="结束日期，格式 YYYY-MM-DD")
+    parser.add_argument("--haimen-units", type=int, choices=(4, 6), default=4, help="海门机组范围：4（默认）或6台；--unit 可自定义筛选")
     parser.add_argument("--unit", action="append", help="只分析名称包含该文本的机组，可重复传入；不传时默认海门4台机组")
     parser.add_argument("--output", help="输出xlsx路径，默认写到输入目录下")
     return parser.parse_args()
@@ -355,7 +358,7 @@ def main() -> None:
     if not workbooks:
         raise SystemExit("没有找到符合日期范围的出清情况xlsx。")
 
-    unit_filters = args.unit or DEFAULT_UNIT_FILTERS
+    unit_filters = args.unit or [f"海门#{number}机组" for number in range(1, args.haimen_units + 1)]
     rows: list[HourDeviation] = []
     for workbook in workbooks:
         rows.extend(workbook_hour_deviations(workbook, unit_filters=unit_filters))
@@ -368,7 +371,7 @@ def main() -> None:
     else:
         output_dir = input_path.parent if input_path.is_file() else input_path
         output_path = output_dir / f"正常出力范围偏差_全厂全天_日前实时分开Top{args.top}.xlsx"
-    result = write_results(output_path, scores, excluded, rows)
+    result = write_results(output_path, scores, excluded, rows, unit_filters=unit_filters, top=args.top)
 
     print(f"已读取 {len(workbooks)} 个出清文件，逐小时记录 {len(rows)} 条。")
     print(f"统计机组：{', '.join(unit_filters)}")

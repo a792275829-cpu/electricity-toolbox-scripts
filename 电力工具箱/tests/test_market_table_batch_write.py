@@ -12,6 +12,30 @@ from toolbox.runtime import load_module
 
 
 class MarketTableBatchWriteTests(unittest.TestCase):
+    def test_array_anchor_and_spill_cells_are_protected_with_overwrite(self):
+        from openpyxl.worksheet.formula import ArrayFormula
+        module = load_module('market_array_protection', Path(__file__).resolve().parents[2] / '市场表更新/update_market_table.py')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'market.xlsx'
+            book = Workbook(); sheet = book.active; sheet.title = module.MARKET_SHEET_NAME
+            sheet['A2'] = date(2026, 10, 8)
+            sheet['V2'] = ArrayFormula(ref='V2:X2', text='=SEQUENCE(1,3)')
+            sheet['W2'] = 2; sheet['W2'].number_format = '0.00%'
+            book.save(path); book.close()
+            result = module.write_day_ahead_market_values(path, date(2026, 10, 8), list(range(12)), overwrite=True)
+            self.assertEqual((result['count'], result['skipped']), (9, 3))
+            book = load_workbook(path)
+            try:
+                sheet = book[module.MARKET_SHEET_NAME]
+                self.assertEqual(sheet['V2'].value.ref, 'V2:X2')
+                self.assertEqual(sheet['V2'].value.text, '=SEQUENCE(1,3)')
+                self.assertEqual(sheet['W2'].value, 2)
+                self.assertEqual(sheet['W2'].number_format, '0.00%')
+                self.assertIsNone(sheet['X2'].value)
+                self.assertEqual(sheet['Y2'].value, 3)
+            finally: book.close()
+
+
     def test_missing_tail_dates_are_extended_and_read_back(self):
         module = load_module("market_tail_extension", Path(__file__).resolve().parents[2] / "市场表更新/update_market_table.py")
         with tempfile.TemporaryDirectory() as folder:

@@ -100,7 +100,7 @@ class Generate500kVBlockageMapTest(unittest.TestCase):
             self.assertIn('"edge": "凤城-水乡"', html)
             self.assertIn('"is_section": true', html)
 
-    def test_generate_blockage_map_removes_legacy_excel_outputs(self):
+    def test_generate_blockage_map_preserves_existing_outputs(self):
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             raw_prices = tmp_path / "实时节点电价查询.xlsx"
@@ -142,8 +142,11 @@ class Generate500kVBlockageMapTest(unittest.TestCase):
             self.assertTrue(result.html_path.exists())
             self.assertEqual(
                 sorted(path.name for path in output_dir.iterdir()),
-                ["实时节点电价查询_500kV分析.html"],
+                sorted(["实时节点电价查询_500kV分析.html", "500kv_section_price_gap_analysis.xlsx", "实时节点电价查询_500kV去重.xlsx", "guangdong_500kv_section_map.html"]),
             )
+            self.assertEqual((output_dir / "500kv_section_price_gap_analysis.xlsx").read_bytes(), b"legacy")
+            self.assertEqual((output_dir / "实时节点电价查询_500kV去重.xlsx").read_bytes(), b"legacy")
+            self.assertEqual((output_dir / "guangdong_500kv_section_map.html").read_text(), "legacy")
 
 
 if __name__ == "__main__":

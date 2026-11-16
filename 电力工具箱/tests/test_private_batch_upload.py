@@ -46,6 +46,43 @@ class BatchPlanNodeTests(unittest.TestCase):
         if not node_available():
             self.skipTest("node 不可用")
 
+    def test_batch_failure_reports_completed_and_uncertain_files_without_retry(self):
+        self.run_node("""
+          const {default: assert} = await import('node:assert/strict');
+          const batches = m.planBatches([file('first.xlsx', 1), file('second,revision.xlsx', 1), file('third.xlsx', 1)], {maxFiles:1});
+          let calls = 0;
+          await assert.rejects(m.submitImportBatches(batches, async () => {
+            calls++;
+            if (calls === 2) throw new Error('timeout');
+            return m.parseImportResponse({retCode:'T200',data:[]});
+          }), error => /第1批/.test(error.message) && /first.xlsx/.test(error.message)
+               && /当前批次可能已提交：second,revision.xlsx/.test(error.message) && !/third.xlsx/.test(error.message));
+          assert.equal(calls, 2);
+          const result = await m.submitImportBatches(batches.slice(0,1), async () => m.parseImportResponse({retCode:'T200',data:[]}));
+          assert.equal(result.unconfirmedBatches, 1);
+          assert.equal(result.succeeded.length, 0);
+          calls = 0;
+          await assert.rejects(m.submitImportBatches(batches, async () => {
+            calls++; return m.parseImportResponse({retCode:'T200',data:[{date:'2026-11-16',dataType:'TRADE',detail:'invalid'}]});
+          }), /已停止后续批次/);
+          assert.equal(calls, 1);
+          console.log(JSON.stringify(true));
+        """)
+
+    def test_import_response_shapes_and_unconfirmed_submission(self):
+        self.run_node("""
+          const {default: assert} = await import('node:assert/strict');
+          for (const payload of [null, {}, {retCode:'T200'}, {retCode:'T200',data:{}}, {retCode:'T200',data:[null]}, {retCode:'T200',data:[{}]}, {retCode:'T200',data:[{date:'2026-99-99',dataType:'TRADE'}]}, {retCode:'T500',data:[]}]) {
+            assert.throws(() => m.parseImportResponse(payload));
+          }
+          assert.equal(m.parseImportResponse({retCode:'T200',data:[]}).confirmed, false);
+          assert.equal(m.parseImportResponse({retCode:'T200',data:[{date:'2026-11-16',dataType:'TRADE',detail:''}]}).confirmed, true);
+          assert.equal(m.isDirectoryUploadFile('日前节点电价查询.xlsx'), false);
+          assert.equal(m.isDirectoryUploadFile('日前,修订.xlsx'), true);
+          console.log(JSON.stringify(true));
+        """)
+
+
     def test_batches_split_on_twelve_files(self) -> None:
         sizes = self.run_node(
             "const files = Array.from({length:13}, (_, i) => file('a'+i+'.xlsx', 1000));\n"
@@ -69,7 +106,7 @@ class BatchPlanNodeTests(unittest.TestCase):
 
     def test_import_result_marks_files_with_detail_as_failed(self) -> None:
         summary = self.run_node(
-            "const s = m.summarizeImport([{date:'2026-11-05'},{date:'2026-11-04',detail:'模板不匹配'}]);\n"
+            "const s = m.summarizeImport([{date:'2026-11-05',dataType:'TRADE'},{date:'2026-11-04',dataType:'TRADE',detail:'模板不匹配'}]);\n"
             "console.log(JSON.stringify({ok:s.succeeded.length, failed:s.failed.map(f=>f.detail)}));"
         )
         self.assertEqual(summary, {"ok": 1, "failed": ["模板不匹配"]})
@@ -164,6 +201,13 @@ class PrivateBatchCommandTests(unittest.TestCase):
         path.write_bytes(b"0" * size)
         return path
 
+    def test_comma_in_filename_is_preserved_as_one_argument(self):
+        first, second = self.make_file('日前,修订.xlsx'), self.make_file('实时.xlsx')
+        command = commands.private_batch(self.paths, '汕头', [first, second])
+        self.assertEqual([command[i + 1] for i, value in enumerate(command) if value == '--file'], [str(first), str(second)])
+        self.assertNotIn('--files', command)
+
+
     def test_command_uses_batch_mode_with_unit_and_files(self) -> None:
         file = self.make_file("日前.xlsx")
         command = commands.private_batch(self.paths, "汕头", [file])
@@ -172,7 +216,7 @@ class PrivateBatchCommandTests(unittest.TestCase):
         self.assertNotIn("--execute", command)
         self.assertNotIn("--source", command)
         self.assertEqual(command[command.index("--unit") + 1], "汕头")
-        self.assertEqual(command[command.index("--files") + 1], str(file))
+        self.assertEqual(command[command.index("--file") + 1], str(file))
         self.assertNotIn("--summary-type", command)
         self.assertNotIn("--no-verify", command)
 
@@ -257,7 +301,7 @@ class PrivateBatchPageTests(unittest.TestCase):
         self.page.unit.set("海门")
         command = self.page.build_upload_command()
         self.assertEqual(command[command.index("--unit") + 1], "海门")
-        self.assertEqual(command[command.index("--files") + 1], str(path))
+        self.assertEqual(command[command.index("--file") + 1], str(path))
         self.assertNotIn("--power-source", command)
 
     def test_monthly_checkbox_controls_summary_type(self) -> None:

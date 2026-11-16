@@ -159,6 +159,14 @@ class DailyPairTests(unittest.TestCase):
         self.assertEqual(tuple(pair.actual), MODULE.CATEGORY_ORDER)
 
 
+class ExplicitYearLegacyDateTests(unittest.TestCase):
+    def test_old_formats_preserve_explicit_year(self):
+        for value in ('2020.2.29', '2020年2月29日', '2020/2/29 00:00:00'):
+            self.assertEqual(MODULE._as_date(value, epoch=openpyxl.utils.datetime.CALENDAR_WINDOWS_1900), date(2020, 2, 29))
+        self.assertIsNone(MODULE._as_date('2月29日', epoch=openpyxl.utils.datetime.CALENDAR_WINDOWS_1900))
+
+
+
 class CellDateTests(unittest.TestCase):
     def test_datetime_and_date_values(self):
         epoch = openpyxl.Workbook().epoch
@@ -260,10 +268,11 @@ class StartDateTests(TempFolderTest, TailWorkbookMixin):
         self.assertEqual(MODULE.resolve_start_date(workbook, RUN_DATE + timedelta(days=1)),
                          RUN_DATE + timedelta(days=1))
 
-    def test_mismatched_input_is_rejected(self):
+    def test_explicit_historical_date_is_accepted_and_future_gap_is_rejected(self):
         workbook = self.build()
+        self.assertEqual(MODULE.resolve_start_date(workbook, RUN_DATE), RUN_DATE)
         with self.assertRaisesRegex(ValueError, "开始日期必须是 2026-10-11"):
-            MODULE.resolve_start_date(workbook, RUN_DATE)
+            MODULE.resolve_start_date(workbook, RUN_DATE + timedelta(days=2))
 
 
 class ValueComparisonTests(unittest.TestCase):

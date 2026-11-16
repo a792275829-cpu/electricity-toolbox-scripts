@@ -160,6 +160,47 @@ class WpsBrowserRecoveryTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.addCleanup(self.context.close)
 
+    def test_timeouts_report_phase_and_never_retry_writes(self):
+        for phase in ('读取', '写入', '保存', '回读'):
+            with self.subTest(phase=phase):
+                self.page.reload()
+                self.page.evaluate("""phase => {
+                  const original = window.testApp.Worksheets;
+                  window.testApp.Worksheets = name => {
+                    const sheet = original(name);
+                    const range = sheet.Range;
+                    sheet.Range = address => {
+                      const cell = range(address);
+                      if (phase === '读取') Object.defineProperty(cell, 'MergeCells', {
+                        get: () => new Promise(resolve => setTimeout(() => resolve(false), 150))
+                      });
+                      if (phase === '写入' || phase === '回读') Object.defineProperty(cell, 'Value', {
+                        get: () => ((phase === '写入' && window.writes > 0)
+                          || (phase === '回读' && window.saves > 0)) ? new Promise(() => {}) : null,
+                        set: value => { window.writes++; window.cells[address] = value; }
+                      });
+                      return cell;
+                    };
+                    return sheet;
+                  };
+                  if (phase === '保存') window.WPSOpenApi.save = () => {
+                    window.saves++; return new Promise(() => {});
+                  };
+                }""", phase)
+                with mock.patch.object(self.module, 'WPS_STAGE_TIMEOUT_MS', 30):
+                    with self.assertRaisesRegex(RuntimeError, phase + '阶段超时') as caught:
+                        self.module.write_to_wps(self.page.url, self.mappings()[:1], lambda _: None, browser_mode='cdp')
+                self.page.wait_for_timeout(180)
+                writes, saves = self.page.evaluate('() => [window.writes, window.saves]')
+                self.assertEqual(writes, 0 if phase == '读取' else 1)
+                self.assertEqual(saves, 1 if phase in ('保存', '回读') else 0)
+                self.assertIn('尚未写入' if phase == '读取' else '可能已部分写入', str(caught.exception))
+
+    def test_online_read_has_a_deadline(self):
+        self.page.evaluate('() => { window.testApp.Worksheets = () => new Promise(() => {}); }')
+        with self.assertRaisesRegex(Exception, '读取阶段超时'):
+            self.module.evaluate_wps_operation(self.page, 'async () => new Promise(() => {})', None, lambda _: None, .03)
+
     def mappings(self):
         values = [[[0.125]], [["2026-09-27 08:30:00"]], [[""]], [[False]], [[0]], [[1, "文本"], [2, ""]]]
         return [

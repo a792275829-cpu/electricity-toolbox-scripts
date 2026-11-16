@@ -29,7 +29,9 @@ def private_batch(paths, unit, files, *, summary_type="none", verify=True, power
     if not files:
         raise ValueError("请至少选择一个上传文件。")
     command = [node_executable(), str(paths.private_uploader), "--batch",
-               "--unit", str(unit), "--files", ",".join(str(path) for path in files)]
+               "--unit", str(unit)]
+    for path in files:
+        command.extend(["--file", str(path)])
     if summary_type in {"formal", "temporary"}:
         command.extend(("--summary-type", summary_type))
     if power_source and power_source != "不适用":

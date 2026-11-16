@@ -221,6 +221,21 @@ class DailyPdfUploadResponseTests(unittest.TestCase):
 
 
 class DailyPdfUploadPageTests(unittest.TestCase):
+    def test_upload_modes_disable_cancellation_but_parse_remains_cancellable(self):
+        root = tk.Tk(); root.withdraw()
+        self.addCleanup(root.destroy)
+        page = DailyPdfParserPage(root, ToolPaths(ROOT), TaskRegistry())
+        with tempfile.TemporaryDirectory() as folder:
+            source, output = Path(folder) / 'source.pdf', Path(folder) / 'output.xlsx'
+            source.write_bytes(b'pdf'); output.write_bytes(b'xlsx')
+            page.pdf_path.set(str(source)); page.output_path.set(str(output))
+            for mode in ('both', 'upload', 'parse'):
+                page.mode.set(mode)
+                with mock.patch.object(page, 'run_process') as run, mock.patch('toolbox.daily_pdf_page.messagebox.askyesno', return_value=True):
+                    page.start_parse()
+                self.assertEqual(run.call_args.kwargs['cancellable'], mode == 'parse')
+        page.destroy()
+
     def test_page_defaults_to_both_and_builds_correct_mode_argument(self):
         try:
             root = tk.Tk()

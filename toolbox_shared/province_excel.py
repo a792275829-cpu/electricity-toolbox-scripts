@@ -62,11 +62,16 @@ def write_formula_result_as_value(workbook_path: Path, sheet_name: str, cell: st
         workbook.close()
 
 
-def _verify_values(path, sheet_name, values, formats):
+def _verify_values(path, sheet_name, values, formats, original_formula=None):
     from openpyxl import load_workbook
     book = load_workbook(path, data_only=False, read_only=True)
     try:
         sheet = book[sheet_name]
+        if original_formula is not None:
+            saved = book.defined_names.get('_toolbox_province_c2_formula')
+            expected = '"' + original_formula.replace('"', '""') + '"'
+            if saved is None or saved.attr_text != expected:
+                raise RuntimeError('省内数据原始公式来源回读不一致。')
         for cell, expected in values.items():
             if sheet[cell].value != expected or sheet[cell].number_format != formats[cell]:
                 raise RuntimeError(f"省内数据写入回读不一致：{cell}")
@@ -77,8 +82,8 @@ def _verify_values(path, sheet_name, values, formats):
 def write_province_workbook(source, target, run_date, startup_max, capacity_average, *, log=lambda _: None):
     """Calculate in memory, serialize once, verify, then publish atomically.
 
-    Existing numeric C2 values are preserved exactly; only supported formulas
-    have the capacity term substituted and their numeric result written.
+    Persist the original formula and recalculate it on every run.
+    Numeric legacy workbooks are reusable only on their original date.
     """
     from openpyxl import load_workbook
     source, target = Path(source), Path(target)
@@ -88,20 +93,33 @@ def write_province_workbook(source, target, run_date, startup_max, capacity_aver
     temporary = None
     try:
         sheet = book['省内数据'] if '省内数据' in book.sheetnames else book.active
-        sheet['A2'] = datetime.strptime(run_date, '%Y-%m-%d')
+        previous_date = sheet['A2'].value
+        requested_date = datetime.strptime(run_date, '%Y-%m-%d')
+        sheet['A2'] = requested_date
         sheet['B2'] = startup_max
         current = sheet['C2'].value
-        if isinstance(current, str) and current.startswith('='):
-            formula = replace_capacity_in_formula(current, capacity_average)
+        provenance = book.defined_names.get('_toolbox_province_c2_formula')
+        original_formula = current if isinstance(current, str) and current.startswith('=') else (
+            provenance.attr_text[1:-1].replace('""', '"') if provenance is not None else None
+        )
+        if original_formula is not None:
+            from openpyxl.workbook.defined_name import DefinedName
+            formula = replace_capacity_in_formula(original_formula, capacity_average)
+            book.defined_names.add(DefinedName(
+                '_toolbox_province_c2_formula',
+                attr_text='"' + original_formula.replace('"', '""') + '"', hidden=True,
+            ))
             result = evaluate_simple_excel_formula(formula)
             sheet['C2'] = int(round(result)) if abs(result - round(result)) < .000001 else result
-            if hasattr(book, 'calculation'):
+            if getattr(book, 'calculation', None) is not None:
                 book.calculation.fullCalcOnLoad = True
                 book.calculation.forceFullCalc = True
         else:
             if number_or_none(current) is None:
                 raise RuntimeError(f"C2 不是公式，无法按模板更新：{current!r}")
-            log(f"C2 已是数值，保留现有结果：{current}")
+            if not isinstance(previous_date, datetime) or previous_date.date() != requested_date.date():
+                raise RuntimeError('C2 为历史数值且没有原始公式，禁止跨日自动复用；请明确选择包含 C2 原始公式的省内模板。')
+            log(f"C2 为同日数值，保留现有结果：{current}")
         sheet_name = sheet.title
         values = {cell: sheet[cell].value for cell in ('A2', 'B2', 'C2')}
         formats = {cell: sheet[cell].number_format for cell in values}
@@ -116,7 +134,7 @@ def write_province_workbook(source, target, run_date, startup_max, capacity_aver
     finally:
         book.close()
     try:
-        _verify_values(temporary, sheet_name, values, formats)
+        _verify_values(temporary, sheet_name, values, formats, original_formula)
         assert_workbook_unchanged(source, source_fingerprint)
         if target.with_name(f'~${target.name}').exists():
             raise RuntimeError(f"省内数据目标文件正在被 Excel 打开，请先关闭：{target.name}")
@@ -124,7 +142,7 @@ def write_province_workbook(source, target, run_date, startup_max, capacity_aver
         if target_fingerprint is not None:
             prepared = SimpleNamespace(original=target, temporary=temporary,
                                        source_fingerprint=target_fingerprint)
-            commit_workbooks((prepared,), lambda path, _: _verify_values(path, sheet_name, values, formats),
+            commit_workbooks((prepared,), lambda path, _: _verify_values(path, sheet_name, values, formats, original_formula),
                              create_backup=False)
         else:
             with workbook_commit_lock((target,)):

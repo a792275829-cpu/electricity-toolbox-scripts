@@ -13,7 +13,30 @@ from toolbox.runtime import load_module
 
 
 class WpsBatchReadTests(unittest.TestCase):
-    def test_multiple_ranges_use_one_open_and_keep_values_in_mapping_order(self) -> None:
+    def test_uncached_formula_stops_but_cached_zero_and_empty_string_are_valid(self):
+        import zipfile
+        module = importlib.import_module('toolbox_shared.wps_service')
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / 'formula.xlsx'
+            book = Workbook(); book.active['A1'] = '=1-1'; book.active['B1'] = None
+            book.save(source); book.close()
+            with self.assertRaisesRegex(ValueError, '来源公式缺少计算缓存'):
+                module.read_excel_range(source, 'Sheet', 'A1:B1')
+            self.assertEqual(module.read_excel_range(source, 'Sheet', 'B1')[0], [['']])
+            for cache, expected in (('<v>0</v>', 0), ('<v></v>', '')):
+                with zipfile.ZipFile(source) as archive:
+                    files = {name: archive.read(name) for name in archive.namelist()}
+                xml = files['xl/worksheets/sheet1.xml'].decode()
+                import re
+                xml = re.sub(r'<v>.*?</v>', cache, xml)
+                if expected == '':
+                    xml = xml.replace('r="A1"', 'r="A1" t="str"')
+                files['xl/worksheets/sheet1.xml'] = xml.encode()
+                with zipfile.ZipFile(source, 'w') as archive:
+                    for name, data in files.items(): archive.writestr(name, data)
+                self.assertEqual(module.read_excel_range(source, 'Sheet', 'A1')[0], [[expected]])
+
+    def test_multiple_ranges_share_formula_and_value_readers_and_keep_mapping_order(self) -> None:
         root = Path(__file__).resolve().parents[2]
         module = importlib.import_module('toolbox_shared.wps_service')
         with tempfile.TemporaryDirectory() as directory:
@@ -51,7 +74,7 @@ class WpsBatchReadTests(unittest.TestCase):
             ) as opened:
                 prepared = module.prepare_mappings(mappings)
 
-            self.assertEqual(1, opened.call_count)
+            self.assertEqual(2, opened.call_count)
             self.assertEqual([1, 2, 3], [item.index for item in prepared])
             self.assertEqual([["2026-09-24 08:30:00", 0.125]], prepared[0].values)
             self.assertEqual([["完成"]], prepared[1].values)

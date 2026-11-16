@@ -66,7 +66,7 @@ class TransactionInfoUpdatePage(ToolPage):
         ).pack(side="left")
         ttk.Label(
             date_line,
-            text="开始日期可留空：先补空值，再表尾接续",
+            text="开始日期可留空；指定历史日期可修订",
             style="Muted.TLabel",
             wraplength=DATE_HINT_WRAP,
         ).pack(side="left", padx=(DATE_ROW_GAP, 0))

@@ -29,18 +29,18 @@ cp "电力工具脚本/private-data-uploader-tool/upload.config.example.json" \
 
 ```sh
 node scripts/upload-private-data.mjs --batch --unit 汕头 \
-  --files "/path/日前.xlsx,/path/实时.xlsx"
+  --file "/path/日前,修订.xlsx" --file "/path/实时.xlsx"
 ```
 
 - `--unit`：海风、鮀莲、归湖、东莞、汕头、海门（也接受 金平、潮州、潮安、谢岗 等别名）。
-- `--files`：逗号分隔，可重复传多次；脚本按网站限制拆批（最多 12 个文件、合计 10MB）。
+- `--file`：每个文件单独传参，可重复，文件名可含逗号；GUI 使用此格式。旧 `--files` 仍按逗号分隔。脚本按网站限制拆批（最多 12 个文件、合计 10MB）。
 - `--summary-type formal|temporary`：上传月度结算单时使用，对应网站的“正式账单／临时账单”。
 - `--power-source 北京东润环能|国能日新|南瑞|北京华软恒信|其他`：新能源单元上传原始功率预测数据时的“数据来源”。不传则只固定申报功率预测数据为“调度OPS平台”。
 - `--no-verify`：跳过上传后的数据状态回读。
 - `--date YYYY-MM-DD`：接口没回逐文件明细时，用它或文件名里的 `YYYYMMDD` 决定回读日期。
 - `--login --batch`：只登录并保存批量上传自己的登录态。
 
-上传直接 `POST /gdfire/api/data/personal/import`（multipart，`files` 字段重复出现，另带 `personalDataTypeSourceMap`），不经过“点按钮选文件”的界面操作；日志会打印实际调用的接口、HTTP 状态和本批文件数。接口返回逐文件结果，`detail` 非空即该文件失败，脚本按文件汇报并在末尾汇总失败项；返回空数组时按整批成功处理，并用 `--date` 或文件名日期回读核对。上传后的回读只输出一行已上传条数汇总，不逐条列出当日其它未上传的数据项。
+上传直接 `POST /gdfire/api/data/personal/import`（multipart，`files` 字段重复出现，另带 `personalDataTypeSourceMap`），不经过“点按钮选文件”的界面操作；日志会打印实际调用的接口、HTTP 状态和本批文件数。响应须为结果数组，或带 `T200` 成功码及结果数组的对象；明细须含日期和数据类型，`detail` 非空表示导入失败。空数组或明细不足只表示“提交成功、结果未确认”，不计为全部文件成功。失败即停止后续批次，报告已完成批次及文件名，并标明当前批次是否可能已提交；核对后只选择未完成文件重传。上传后的回读只输出一行已上传条数汇总，不逐条列出当日其它未上传的数据项。
 
 `personalDataTypeSourceMap` 是“数据类型 → 来源编码”的 JSON：新能源单元固定带 `DECLARE_POWER_PREDICT: DISPATCH_OPS_PLATFORM`，原始功率预测数据按 `--power-source` 填 `RAW_POWER_PREDICT`（东润 `BEIJING_DR_HN`、国能日新 `GUO_HN_RI_XIN`、南瑞 `NAN_RUI`、华软 `BEIJING_HR_HX`、其他 `OTHER`）。
 
@@ -60,3 +60,5 @@ auth_state.json / auth_state.json.lock / .browser-profile-uploader/   # 目录�
 ```
 
 真实配置及登录态保存在本地忽略目录，不进入版本控制。
+
+目录预览和上传明确排除名称含“节点电价”的 Excel，避免将断面分析的节点价格文件作为私有数据上传。手工批量选择仍按用户明确选择的文件提交。状态回读的已上传总数仅供参考，不能据此证明本次每个文件导入成功。

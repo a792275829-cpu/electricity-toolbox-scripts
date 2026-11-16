@@ -265,7 +265,11 @@ def collect_pairs(
     end_date: date,
     *,
     config: Config | None = None,
+    dates: Iterable[date] | None = None,
 ) -> tuple[DailyLoadPair, ...]:
+    selected_dates = tuple(date_range(start_date, end_date) if dates is None else dates)
+    if not selected_dates:
+        return ()
     config = config or load_config()
     auth = load_auth_module()
     pairs: list[DailyLoadPair] = []
@@ -274,7 +278,7 @@ def collect_pairs(
             context = auth.launch_context(playwright, headless=config.headless)
             try:
                 auth.ensure_login(context, config)
-                for day_ahead_date in date_range(start_date, end_date):
+                for day_ahead_date in selected_dates:
                     actual_date = day_ahead_date - timedelta(days=DATE_OFFSET_DAYS)
                     log(
                         f"正在读取：日前 {day_ahead_date.isoformat()} / "
@@ -309,7 +313,7 @@ def _as_date(value: Any, *, epoch) -> date | None:
             return None
         return converted.date() if isinstance(converted, datetime) else converted
     if isinstance(value, str):
-        for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y年%m月%d日", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
             try:
                 return datetime.strptime(value.strip(), fmt).date()
             except ValueError:
@@ -408,11 +412,12 @@ def resolve_start_date(path: Path, requested: date | None) -> date:
     groups = inspect_workbook_groups(path)
     pending = [day for day, (_, cells) in groups.items() if len(cells) < INPUT_CELL_COUNT]
     expected = min(pending) if pending else tail.day_ahead_date + timedelta(days=1)
-    if requested is not None and requested != expected:
-        raise ValueError(
-            f"为保持日期连续，开始日期必须是 {expected.isoformat()}；"
-            f"当前输入为 {requested.isoformat()}。"
-        )
+    if requested is not None:
+        if requested <= tail.day_ahead_date and requested not in groups:
+            raise ValueError("指定历史日期没有完整日期组，停止修订。")
+        if requested > tail.day_ahead_date + timedelta(days=1):
+            raise ValueError(f"开始日期必须是 {tail.day_ahead_date + timedelta(days=1)} 或已有历史日期。")
+        return requested
     return expected
 
 
@@ -775,16 +780,14 @@ def prepare_workbook(
     source_fingerprint = workbook_fingerprint(original)
     tail = inspect_workbook_tail(original)
     groups = inspect_workbook_groups(original)
-    pending = [day for day, (_, cells) in groups.items() if len(cells) < INPUT_CELL_COUNT]
-    expected_start = min(pending) if pending else tail.day_ahead_date + timedelta(days=1)
-    if pair_tuple[0].day_ahead_date != expected_start:
-        raise ValueError(
-            f"新数据必须从 {expected_start.isoformat()} 开始，"
-            f"实际为 {pair_tuple[0].day_ahead_date.isoformat()}。"
-        )
-    for previous, current in zip(pair_tuple, pair_tuple[1:]):
-        if current.day_ahead_date != previous.day_ahead_date + timedelta(days=1):
-            raise ValueError("待写入的日前日期必须连续。")
+    days = [pair.day_ahead_date for pair in pair_tuple]
+    if days != sorted(set(days)):
+        raise ValueError("待写入的日前日期必须递增且不能重复。")
+    if any(day <= tail.day_ahead_date and day not in groups for day in days):
+        raise ValueError("指定历史日期没有完整日期组，停止修订。")
+    appended = [day for day in days if day > tail.day_ahead_date]
+    if appended and appended != list(date_range(tail.day_ahead_date + timedelta(days=1), appended[-1])):
+        raise ValueError("新增日前日期必须从表尾连续接续。")
     for pair in pair_tuple:
         if pair.day_ahead_date - pair.actual_date != timedelta(days=DATE_OFFSET_DAYS):
             raise ValueError("每组数据必须满足日前 D、实际 D-3。")
@@ -831,6 +834,12 @@ def commit_prepared_workbook(
     )[prepared.original]
 
 
+def needed_update_dates(path: Path, start: date, end: date, *, overwrite: bool) -> tuple[date, ...]:
+    groups = inspect_workbook_groups(path)
+    return tuple(day for day in date_range(start, end)
+                 if overwrite or day not in groups or len(groups[day][1]) < INPUT_CELL_COUNT)
+
+
 def update_workbook(
     workbook_path: Path,
     start_date: date | None,
@@ -839,14 +848,18 @@ def update_workbook(
     config: Config | None = None,
     create_backup: bool = True,
     overwrite: bool = True,
-) -> PreparedWorkbook:
+) -> PreparedWorkbook | None:
     start = resolve_start_date(workbook_path, start_date)
     if end_date < start:
         raise ValueError(
             f"结束日期 {end_date.isoformat()} 早于待接续日期 "
             f"{start.isoformat()}，无需更新。"
         )
-    pairs = collect_pairs(start, end_date, config=config)
+    needed = needed_update_dates(workbook_path, start, end_date, overwrite=overwrite)
+    if not needed:
+        log("所选日期均已有完整数据，无需抓取或写入。")
+        return None
+    pairs = collect_pairs(start, end_date, config=config, dates=needed)
     prepared = prepare_workbook(workbook_path, pairs, overwrite=overwrite)
     backup = commit_prepared_workbook(prepared, create_backup=create_backup)
     log(
@@ -902,7 +915,8 @@ def main() -> int:
             )
             return 0
         if args.dry_run:
-            pairs = collect_pairs(start_date, end_date, config=config)
+            needed = needed_update_dates(args.workbook, start_date, end_date, overwrite=not args.skip_existing)
+            pairs = collect_pairs(start_date, end_date, config=config, dates=needed)
             log(
                 f"校验通过：{len(pairs)} 组，日前 {start_date} 至 {end_date}，"
                 f"实际 {start_date - timedelta(days=3)} 至 {end_date - timedelta(days=3)}。"

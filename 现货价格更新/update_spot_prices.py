@@ -293,7 +293,7 @@ def parse_price_payload(
                 continue
             raise RuntimeError(message)
         try:
-            result[row_date] = tuple(
+            prices = tuple(
                 _number(value, label=f"{label} {row_date.isoformat()} {hour:02d}:00")
                 for hour, value in enumerate(raw_prices)
             )
@@ -302,6 +302,9 @@ def parse_price_payload(
                 log(f"跳过：{exc}")
                 continue
             raise
+        if row_date in result:
+            raise RuntimeError(f"{label} {row_date.isoformat()} 出现重复完整记录，停止更新。")
+        result[row_date] = prices
 
     missing = [item.isoformat() for item in expected_dates if item not in result]
     if missing:

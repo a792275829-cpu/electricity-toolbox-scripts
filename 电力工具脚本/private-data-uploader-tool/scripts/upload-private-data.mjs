@@ -17,8 +17,10 @@ import {
   planBatches,
   resolveTarget,
   sourceName,
-  summarizeImport,
   summarizeStatus,
+  parseImportResponse,
+  submitImportBatches,
+  isDirectoryUploadFile,
 } from './batch-plan.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -81,6 +83,11 @@ function parseArgs(argv) {
     else if (arg === '--source') args.source = argv[++i];
     else if (arg === '--config') args.configPath = argv[++i];
     else if (arg === '--unit') args.unit = argv[++i];
+    else if (arg === '--file') {
+      const value = argv[++i];
+      if (!value) throw new Error('--file 必须指定一个文件路径');
+      args.files.push(value);
+    }
     else if (arg === '--files') {
       args.files.push(...String(argv[++i] ?? '').split(',').map((value) => value.trim()).filter(Boolean));
     }
@@ -162,8 +169,7 @@ function sleep(ms) {
 }
 
 function isExcelFile(name) {
-  const lower = name.toLowerCase();
-  return !name.startsWith('~$') && (lower.endsWith('.xlsx') || lower.endsWith('.xls'));
+  return isDirectoryUploadFile(name);
 }
 
 async function collectPlan(sourceDir) {
@@ -474,20 +480,25 @@ async function uploadFile(page, filePath, current, total) {
   try {
     await page.locator('input[name="files"][type="file"], input[type="file"]').first().setInputFiles(filePath);
     const response = await responsePromise;
-    const body = await response.json().catch(async () => ({ text: await response.text() }));
+    const body = await response.json();
     if (response.status() >= 400 || body.retCode !== 'T200') {
-      throw new Error(`上传失败 HTTP ${response.status()}: ${JSON.stringify(body).slice(0, 500)}`);
+      throw new Error(`上传失败 HTTP ${response.status()}`);
     }
+    const result = parseImportResponse(body);
+    if (result.failed.length) throw new Error(`导入返回 ${result.failed.length} 条失败明细，请核对网站。`);
+    log(result.confirmed ? '导入结果已确认。' : '提交成功；接口未返回明细，结果未确认，请核对网站。');
   } finally {
     clearInterval(heartbeat);
   }
-  log(`[${current}/${total}] 成功：${path.basename(filePath)}`);
+  log(`[${current}/${total}] 已提交：${path.basename(filePath)}`);
 }
 
 async function executeUpload(plan, config) {
   const releaseLock = await acquireAuthLock(config, undefined, log);
   let browser;
   let context;
+  const completed = [];
+  let current;
   try {
     ({ browser, context } = await launchContext(config));
     await ensureLogin(context, config);
@@ -499,10 +510,15 @@ async function executeUpload(plan, config) {
       await switchTenant(page, config, item.target);
       for (const file of item.files) {
         currentFile += 1;
+        current = `${item.target.key}：${path.basename(file)}`;
         await uploadFile(page, file, currentFile, totalFiles);
+        completed.push(current);
+        current = undefined;
       }
     }
     await saveAuthState(context, config);
+  } catch (error) {
+    throw new Error(`${safeErrorMessage(error)}；已提交文件：${completed.join("、") || "无"}；当前文件可能已提交：${current || "无"}。请核对后只重传未完成文件。`);
   } finally {
     await context?.close().catch(() => {});
     await browser?.close().catch(() => {});
@@ -571,10 +587,10 @@ async function postBatch(context, config, batch, fields) {
     } catch {
       throw new Error(`上传接口返回内容不是 JSON（HTTP ${response.status()}）：${text.slice(0, 300)}`);
     }
-    if (response.status() >= 400 || (parsed?.retCode && parsed.retCode !== 'T200')) {
+    if (response.status() >= 400) {
       throw new Error(`上传失败 HTTP ${response.status()}：${JSON.stringify(parsed).slice(0, 500)}`);
     }
-    return summarizeImport(Array.isArray(parsed) ? parsed : parsed?.data);
+    return parseImportResponse(parsed);
   } finally {
     clearInterval(heartbeat);
   }
@@ -600,7 +616,7 @@ async function fetchImportStatus(context, config, dates) {
   const body = await response.json().catch(() => undefined);
   if (body?.retCode !== 'T200') return undefined;
   const rows = body?.data?.data ?? body?.data?.records ?? body?.data;
-  return Array.isArray(rows) ? rows : [];
+  return Array.isArray(rows) ? rows : undefined;
 }
 
 function formatStatusRow(row) {
@@ -680,54 +696,30 @@ async function runBatch(config, args) {
   const releaseLock = await acquireAuthLock(config, undefined, log);
   let browser;
   let context;
-  const succeeded = [];
-  const failed = [];
+  let progress;
   try {
     ({ browser, context } = await launchContext(config));
     await ensureLogin(context, config);
     const page = await context.newPage();
     await switchTenantForImport(page, config, target);
 
-    for (let index = 0; index < batches.length; index += 1) {
-      const batch = batches[index];
-      log(`[${index + 1}/${batches.length}] 上传 ${batch.files.length} 个文件（${(batch.bytes / 1048576).toFixed(2)}MB）`);
-      for (const file of batch.files) log(`   ${path.basename(file.path)}`);
-      const result = await postBatch(context, config, batch, fields);
-      succeeded.push(...result.succeeded);
-      failed.push(...result.failed);
-      if (result.items.length === 0) {
-        // 网站前端把空数组当作“全部成功”，此时没有逐文件明细可展示。
-        succeeded.push(...batch.files.map(() => ({ date: '', dataType: '' })));
-        log('   接口未返回逐文件明细，按本批全部提交成功处理。');
-        continue;
-      }
-      for (const item of result.succeeded) {
-        log(`   成功：${[item.date, item.dataType].filter(Boolean).join(' ')}`.trim());
-      }
-      for (const item of result.failed) {
-        log(`   失败：${[item.date, item.dataType, item.detail].filter(Boolean).join(' ')}`);
-      }
-      if (result.items.length < batch.files.length) {
-        log(`   提示：本批返回 ${result.items.length} 条结果，少于提交的 ${batch.files.length} 个文件，请核对网站下拉框中的明细。`);
-      }
-    }
+    progress = await submitImportBatches(batches, batch => postBatch(context, config, batch, fields), log);
 
     await saveAuthState(context, config);
     if (args.verify) {
-      const reported = datesOf([...succeeded, ...failed]);
+      const reported = datesOf([...progress.succeeded, ...progress.failed]);
       await logImportStatus(context, config, reported.length > 0 ? reported : inferDatesFromNames(files, args.date));
     }
+  } catch (error) {
+    if (!progress) throw error;  // submitImportBatches already includes partial progress.
+    throw new Error(`${safeErrorMessage(error)}；已提交 ${progress.completed.length} 批，勿全量重传。`);
   } finally {
     await context?.close().catch(() => {});
     await browser?.close().catch(() => {});
     await releaseLock();
   }
 
-  if (failed.length > 0) {
-    const detail = failed.slice(0, 10).map((item) => `${item.date || '未知日期'} ${item.detail}`).join('；');
-    throw new Error(`有 ${failed.length} 个文件导入失败：${detail}`);
-  }
-  log(`全部上传完成：成功 ${succeeded.length} 个文件。`);
+  log(`提交完成：${progress.completed.length} 批；导入接口确认 ${progress.succeeded.length} 条成功明细；${progress.unconfirmedBatches} 批结果未确认。`);
 }
 
 async function loginOnly(config) {
@@ -778,7 +770,7 @@ async function main() {
     throw new Error('没有可上传文件，已停止。');
   }
   await executeUpload(plan, config);
-  log('全部上传完成。');
+  log('全部文件已提交；结果确认情况见逐文件日志。');
 }
 
 main().catch((error) => {

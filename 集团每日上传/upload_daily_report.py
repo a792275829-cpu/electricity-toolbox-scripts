@@ -482,7 +482,10 @@ def run_api_upload(
                     errors = payload.get("data") or []
                     if errors:
                         raise RuntimeError(f"{spec['name']} 导入返回校验信息：{json.dumps(errors, ensure_ascii=False)[:1000]}")
-                    log(f"{spec['name']} 导入成功。")
+                    status = get_daily_status(context, target_date, data_type, province_id)
+                    if status is None or status.get('dataStatus') != 1:
+                        raise RuntimeError(f"{spec['name']} 已提交，但未确认上传状态；请先核对网站，勿直接重传。")
+                    log(f"{spec['name']} 导入成功，日期、类型、省份和上传状态已核对。")
                 if create_report:
                     create_daily_report(context, target_date, headless=config.headless)
                 log("数据上传和日报步骤已完成，正在收尾...")
@@ -514,10 +517,13 @@ def run_browser_upload(paths: list[Path], *, headless: bool, create_report: bool
                 set_report_date(page, target_date)
                 for upload in uploads:
                     upload_one_file(page, upload)
+                    status = get_daily_status(context, target_date, str(UPLOAD_TYPES[upload.kind]['data_type']), DEFAULT_PROVINCE_ID)
+                    if status is None or status.get('dataStatus') != 1:
+                        raise RuntimeError('文件已选择或提交，但上传结果未确认；请核对网站后再操作。')
                 if create_report:
                     create_daily_report(context, target_date, headless=headless)
                 save_auth_state(context)
-                log("\n两个文件处理完成，请在网页上确认上传结果。")
+                log("\n两个文件上传状态已核对。")
                 if not headless:
                     log("浏览器窗口会保持打开；确认无误后可手动关闭。")
                     input("按 Enter 结束脚本...")

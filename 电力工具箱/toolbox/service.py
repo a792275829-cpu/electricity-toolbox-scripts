@@ -82,7 +82,8 @@ class ToolboxService:
             writable = tool_id in {"market-table", "transaction-info", "power-benefit", "spot-price",
                                    "group-upload", "private-batch-upload"}
             cancellable = action not in {"run", "update"} or not (writable or tool_id in {"wps-writer", "guangdong-price"} or
-                          tool_id == "summary-upload" and p["mode"] != "summary")
+                          tool_id == "summary-upload" and p["mode"] != "summary" or
+                          tool_id == "daily-pdf-parser" and p["mode"] != "parse")
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix="toolbox-task-", suffix=".json", delete=False) as stream:
                 request_path = Path(stream.name)
                 json.dump(dict(tool_id=tool_id, action=action, values=p), stream, ensure_ascii=False)

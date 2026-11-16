@@ -57,13 +57,6 @@ def generate_blockage_map(
             temp_processed_path,
             maintenance_data,
         )
-    for legacy_path in (
-        output_dir / "500kv_section_price_gap_analysis.xlsx",
-        output_dir / f"{raw_price_path.stem}_500kV去重{raw_price_path.suffix}",
-        output_dir / "guangdong_500kv_section_map.html",
-    ):
-        if legacy_path != html_path:
-            legacy_path.unlink(missing_ok=True)
     return result
 
 

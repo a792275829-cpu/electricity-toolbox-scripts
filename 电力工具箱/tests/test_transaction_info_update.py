@@ -14,6 +14,35 @@ from toolbox.runtime import ToolPaths, load_module
 
 
 class TransactionInfoUpdateTests(unittest.TestCase):
+    def test_skip_existing_fetches_only_dates_that_need_changes_and_historical_revision_reads_back(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'transaction.xlsx'; self._build_fixture(path)
+            first = date(2026, 9, 10)
+            pairs = [self.module.build_daily_load_pair(day, self._payload(day), self._payload(day - timedelta(days=3)))
+                     for day in (first, first + timedelta(days=1), first + timedelta(days=2))]
+            prepared = self.module.prepare_workbook(path, pairs, overwrite=True)
+            self.module.commit_prepared_workbook(prepared, create_backup=False)
+            book = openpyxl.load_workbook(path); book['Sheet1']['E8'] = None; book.save(path); book.close()
+            with mock.patch.object(self.module, 'collect_pairs', return_value=(pairs[1],)) as fetch:
+                self.module.update_workbook(path, first, first + timedelta(days=2), overwrite=False, create_backup=False)
+            self.assertEqual(fetch.call_args.kwargs['dates'], (first + timedelta(days=1),))
+            with mock.patch.object(self.module, 'collect_pairs') as fetch:
+                self.assertIsNone(self.module.update_workbook(path, first, first + timedelta(days=2), overwrite=False))
+                fetch.assert_not_called()
+            revised = self.module.DailyLoadPair(first, first - timedelta(days=3),
+                {key: (9, 8, 7, 6) for key in self.module.DAY_AHEAD_REQUIRED},
+                {key: (5, 4, 3, 2) for key in self.module.CATEGORY_ORDER})
+            with mock.patch.object(self.module, 'collect_pairs', return_value=(revised,)):
+                self.module.update_workbook(path, first, first, overwrite=True, create_backup=False)
+            book = openpyxl.load_workbook(path)
+            try:
+                self.assertEqual(book['Sheet1']['E1'].value, 9)
+                self.assertEqual(book['Sheet1']['L1'].value, 5)
+                self.assertEqual(book['Sheet1']['C1'].value.date(), first)
+                self.assertEqual(book['Sheet1']['J1'].value.date(), first - timedelta(days=3))
+            finally: book.close()
+
+
     def test_omitted_blank_inputs_are_inserted_and_read_back(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "transaction.xlsx"

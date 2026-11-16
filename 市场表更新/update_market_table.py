@@ -442,7 +442,19 @@ def cell_is_non_empty(cell) -> bool:
 def cell_holds_formula(cell) -> bool:
     """覆盖非空也不改写公式：只换 <v> 会让公式结果与公式体不一致。"""
     value = cell.value
-    return isinstance(value, str) and value.startswith("=")
+    if cell.data_type == "f" or (isinstance(value, str) and value.startswith("=")):
+        return True
+    # Array and dynamic-spill results are protected even when the cell itself
+    # is numeric or empty. openpyxl exposes the anchor's full range here.
+    sheet = cell.parent
+    references = list(getattr(sheet, "array_formulae", {}).values())
+    references.extend(info["ref"] for info in getattr(sheet, "formula_attributes", {}).values()
+                      if info.get("ref"))
+    for reference in references:
+        min_col, min_row, max_col, max_row = openpyxl.utils.range_boundaries(reference)
+        if min_row <= cell.row <= max_row and min_col <= cell.column <= max_col:
+            return True
+    return False
 
 
 def write_count_text(summary: dict[str, Any]) -> str:
