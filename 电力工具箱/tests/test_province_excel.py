@@ -56,10 +56,10 @@ class ProvinceExcelTests(unittest.TestCase):
             self.assertEqual(source.read_bytes(), before)
             self.assertFalse(list(Path(temp).glob('.province-*')))
 
-    def test_same_day_in_place_numeric_value_is_preserved(self):
+    def test_in_place_numeric_value_is_preserved(self):
         with tempfile.TemporaryDirectory() as temp:
             source = self.template(temp, value=108314.96)
-            province.write_province_workbook(source, source, '2026-10-26', 162, 25219.7)
+            province.write_province_workbook(source, source, '2026-10-27', 162, 25219.7)
             book = load_workbook(source)
             try:
                 self.assertEqual(book.active['C2'].value, 108314.96)

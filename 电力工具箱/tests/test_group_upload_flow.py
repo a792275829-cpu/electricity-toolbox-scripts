@@ -266,7 +266,7 @@ class GroupUploadRuntimeTests(unittest.TestCase):
         self.assertEqual(updated_sheet["B2"].value, 20)
         self.assertEqual(updated_sheet["C2"].value, 108314.96)
 
-    def test_group_upload_rejects_numeric_c2_from_nearest_template(self) -> None:
+    def test_group_upload_accepts_numeric_c2_from_nearest_template(self) -> None:
         from openpyxl import Workbook, load_workbook
         from toolbox.runtime import ToolPaths, load_module
 
@@ -294,13 +294,20 @@ class GroupUploadRuntimeTests(unittest.TestCase):
                 mock.patch.object(module.upload_flow, "fetch_startup_max", return_value=20),
                 mock.patch.object(module.upload_flow, "fetch_capacity_average", return_value=50000.0),
             ):
-                with self.assertRaisesRegex(RuntimeError, "禁止跨日自动复用"):
-                    module.update_province_excel_for_upload(object(), "2026-07-05", uploads)
-            self.assertFalse((folder / "广东-省内数据-20260705.xlsx").exists())
-            original = load_workbook(province_path)
-            self.assertEqual(original.active['C2'].value, 108314.96)
-            self.assertEqual(original.active['A2'].value.date(), date(2026, 7, 4))
-            original.close()
+                updated_uploads = module.update_province_excel_for_upload(
+                    object(),
+                    "2026-07-05",
+                    uploads,
+                )
+
+            target_path = folder / "广东-省内数据-20260705.xlsx"
+            updated = load_workbook(target_path, data_only=True)
+            updated_sheet = updated["省内数据"]
+
+        self.assertEqual(updated_uploads[0].path, target_path.resolve())
+        self.assertEqual(updated_sheet["A2"].value.date(), date(2026, 7, 5))
+        self.assertEqual(updated_sheet["B2"].value, 20)
+        self.assertEqual(updated_sheet["C2"].value, 108314.96)
 
     def test_group_upload_prefers_guangdong_branch_tenant(self) -> None:
         from toolbox.runtime import ToolPaths, load_module
