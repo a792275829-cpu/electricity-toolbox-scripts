@@ -147,11 +147,13 @@ class PrepareUploadFilesTests(TempFolderTest):
         self.assertEqual([item.kind for item in uploads], ["省内", "能销"])
         self.assertEqual([item.date for item in uploads], ["2026-10-11", "2026-10-12"])
 
-    def test_single_energy_file_auto_picks_province_sibling(self):
+    def test_single_energy_file_uses_builtin_despite_province_sibling(self):
         energy = touch(self.folder, "能销数据-20261012.xlsx")
         touch(self.folder, "广东-省内数据-20261011.xlsx")
         run_date, uploads = MODULE.prepare_upload_files([energy])
         self.assertEqual(run_date, "2026-10-12")
+        self.assertTrue(uploads[0].builtin_template)
+        self.assertEqual(uploads[0].path, MODULE.BUILTIN_PROVINCE_TEMPLATE.resolve())
         self.assertEqual([item.kind for item in uploads], ["省内", "能销"])
 
     def test_single_province_file_is_rejected(self):

@@ -67,7 +67,7 @@ class WebUI:
             try:
                 module = load_module("toolbox_group_upload", self.paths.group_upload)
                 target_date, uploads = module.prepare_upload_files(paths)
-                return dict(files=[str(item.path) for item in uploads],_summary=f"已识别日期：{target_date}；目标省份：广东省",_selection="\n".join(f"{module.UPLOAD_TYPES[item.kind]['name']}：{item.path.name}" for item in uploads))
+                return dict(files=[str(item.path) for item in uploads if item.kind == "能销"],_summary=f"已识别日期：{target_date}；目标省份：广东省",_selection="\n".join(f"{module.UPLOAD_TYPES[item.kind]['name']}：{item.path.name}" for item in uploads))
             except Exception as exc:
                 return dict(files=[str(path) for path in paths],_summary=f"文件校验失败：{exc}")
         if method == "ui.daily.output":

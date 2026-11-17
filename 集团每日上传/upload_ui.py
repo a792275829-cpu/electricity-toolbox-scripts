@@ -20,13 +20,13 @@ def choose_files_interactively() -> list[Path]:
         import tkinter as tk
         from tkinter import filedialog
     except Exception as exc:
-        raise RuntimeError("无法打开文件选择窗口，请改用命令行传入两个文件路径。") from exc
+        raise RuntimeError("无法打开文件选择窗口，请改用命令行传入能销文件路径。") from exc
 
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
-    selected = filedialog.askopenfilenames(
-        title="请选择能销数据 Excel；也可同时选择省内数据",
+    selected = filedialog.askopenfilename(
+        title="请选择能销数据 Excel（省内数据自动生成）",
         initialdir=str(SCRIPT_DIR),
         filetypes=[
             ("Excel 文件", "*.xlsx *.xls"),
@@ -34,7 +34,7 @@ def choose_files_interactively() -> list[Path]:
         ],
     )
     root.destroy()
-    return [Path(item) for item in selected]
+    return [Path(selected)] if selected else []
 
 
 def run_gui() -> None:
@@ -71,7 +71,7 @@ def run_gui() -> None:
     selected_paths: list[Path] = []
     log_events: queue.Queue[tuple[str, str]] = queue.Queue()
     force_var = tk.BooleanVar(value=False)
-    summary_var = tk.StringVar(value="请选择能销数据 Excel；省内数据缺省时使用内置模板")
+    summary_var = tk.StringVar(value="请选择能销数据 Excel；省内数据使用内置模板自动生成")
     file_lines_var = tk.StringVar(value="未选择文件")
 
     def gui_log(message: str) -> None:
@@ -86,7 +86,7 @@ def run_gui() -> None:
     def refresh_selection_text() -> None:
         if not selected_paths:
             file_lines_var.set("未选择文件")
-            summary_var.set("请选择能销数据 Excel；省内数据缺省时使用内置模板")
+            summary_var.set("请选择能销数据 Excel；省内数据使用内置模板自动生成")
             return
         try:
             target_date, uploads = prepare_upload_files(selected_paths)
@@ -99,8 +99,8 @@ def run_gui() -> None:
 
     def choose_files() -> None:
         nonlocal selected_paths
-        selected = filedialog.askopenfilenames(
-            title="请选择能销数据 Excel；也可同时选择省内数据",
+        selected = filedialog.askopenfilename(
+            title="请选择能销数据 Excel（省内数据自动生成）",
             initialdir=str(SCRIPT_DIR),
             filetypes=[
                 ("Excel 文件", "*.xlsx *.xls"),
@@ -109,7 +109,7 @@ def run_gui() -> None:
         )
         if not selected:
             return
-        selected_paths = [Path(item) for item in selected]
+        selected_paths = [Path(selected)]
         refresh_selection_text()
 
     def set_busy(is_busy: bool) -> None:

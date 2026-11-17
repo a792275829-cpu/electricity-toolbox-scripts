@@ -79,6 +79,21 @@ class GroupUploadTemplateTests(unittest.TestCase):
         self.assertEqual(repeated_date, run_date)
         self.assertEqual(repeated, uploads)
 
+    def test_web_selection_keeps_only_energy_and_can_replace_it(self):
+        from types import SimpleNamespace
+        from toolbox.runtime import ToolPaths
+        from toolbox.web_ui import WebUI
+        ui = WebUI(SimpleNamespace(paths=ToolPaths(ROOT)))
+        first = ui.call("ui.group.inspect", {"files": [str(self.energy)]})
+        self.assertEqual(first["files"], [str(self.energy)])
+        self.assertIn("省内数据模板.xlsx", first["_selection"])
+        other = self.folder / "广东-能销数据-20261024.xlsx"
+        other.write_bytes(b"new-energy")
+        replacement = ui.call("ui.group.inspect", {"files": [str(other)]})
+        self.assertEqual(replacement["files"], [str(other)])
+        self.assertIn("2026-10-24", replacement["_summary"])
+        self.assertNotIn(str(self.template), replacement["files"])
+
     def test_undated_province_and_excel_lock_file_do_not_block_fallback(self):
         (self.folder / "省内数据.xlsx").write_bytes(b"undated")
         (self.folder / "~$广东-省内数据-20261023.xlsx").write_bytes(b"lock")
@@ -108,14 +123,13 @@ class GroupUploadTemplateTests(unittest.TestCase):
         self.assert_output(self.folder / "广东-省内数据-20261023.xlsx")
         self.assertFalse(observed[1].parent.exists())
 
-    def test_same_directory_template_is_staged_even_when_only_energy_is_selected(self):
+    def test_same_directory_template_is_ignored_when_only_energy_is_selected(self):
         from shutil import copy2
         province = self.folder / "广东-省内数据-20261022.xlsx"
         copy2(self.template, province)
         def upload(paths, *, force):
-            self.assertEqual(paths[0].name, province.name)
-            self.assertNotEqual(paths[0].parent, province.parent)
-            self.assertFalse(self.module.prepare_upload_files(paths)[1][0].builtin_template)
+            self.assertEqual(paths[0], self.template)
+            self.assertTrue(self.module.prepare_upload_files(paths)[1][0].builtin_template)
             self.update(paths)
         with mock.patch.object(self.module, "run_api_upload", side_effect=upload):
             run_group_upload_with_staging(self.module, [self.energy], force=False, on_log=lambda _: None)

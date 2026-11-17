@@ -194,6 +194,14 @@ export function PageForms(props: Props) {
         saveFile,
       );
       if (selected) {
+        if (id === "group-upload" && field === "files") {
+          update(
+            await call("ui.group.inspect", {
+              files: Array.isArray(selected) ? selected : [selected],
+            }),
+          );
+          return;
+        }
         update({
           [field]: multiple
             ? [
@@ -204,17 +212,6 @@ export function PageForms(props: Props) {
               ]
             : selected,
         });
-        if (id === "group-upload" && field === "files")
-          update(
-            await call("ui.group.inspect", {
-              files: [
-                ...new Set([
-                  ...(v.files ?? []),
-                  ...(Array.isArray(selected) ? selected : [selected]),
-                ]),
-              ],
-            }),
-          );
         if (id === "daily-pdf-parser" && field === "pdf_path")
           update({
             output_path: await call<string>("ui.daily.output", {
@@ -657,7 +654,7 @@ export function PageForms(props: Props) {
             void choose(
               "files",
               false,
-              true,
+              !group,
               group ? ["xlsx", "xls"] : ["xlsx", "xls", "csv", "pdf", "zip"],
             );
           },
@@ -686,7 +683,7 @@ export function PageForms(props: Props) {
     body = (
       <Frame title={group ? "待上传文件" : "上传单元与文件"}>
         {group ? (
-          <p>{v._summary ?? "请选择能销数据，或同时选择省内和能销数据。"}</p>
+          <p>{v._summary ?? "请选择能销数据；省内数据使用内置模板自动生成。"}</p>
         ) : (
           <>
             <div className="form-row">

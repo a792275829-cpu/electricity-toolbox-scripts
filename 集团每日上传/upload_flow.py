@@ -330,16 +330,26 @@ def get_daily_status(context, run_date: str, data_type: str, province_id: str) -
     if not isinstance(rows, list):
         raise RuntimeError("查询日报上传状态返回格式不正确。")
     matching = []
+    type_aliases = {str(spec["data_type"]): str(spec["name"]) for spec in UPLOAD_TYPES.values()}
+    expected_types = {str(data_type), type_aliases.get(str(data_type), str(data_type))}
     for row in rows:
         if not isinstance(row, dict):
             raise RuntimeError("日报状态记录结构异常，停止上传。")
-        if (str(row.get('date') or '')[:10] != run_date
-                or str(row.get('groupDataType', row.get('dataType', ''))) != str(data_type)
-                or str(row.get('provinceId', '')) != str(province_id)):
-            raise RuntimeError("日报状态的日期、类型或省份与本次上传不一致，停止上传。")
+        # The page API returns all provinces; its dataType is a Chinese label,
+        # while dataItemName (and some versions' groupDataType) is the API enum.
+        row_types = [str(row[key]) for key in ("groupDataType", "dataItemName", "dataType")
+                     if row.get(key) not in (None, "")]
+        if not row.get("date") or row.get("provinceId") in (None, "") or not row_types:
+            raise RuntimeError("日报状态缺少日期、类型或省份，停止上传。")
+        if (str(row['date'])[:10] != run_date
+                or str(row['provinceId']) != str(province_id)
+                or not all(value in expected_types for value in row_types)):
+            continue
         if type(row.get('dataStatus')) is not int or row['dataStatus'] not in (0, 1):
             raise RuntimeError("日报上传状态无效，停止上传。")
         matching.append(row)
+    if rows and not matching:
+        raise RuntimeError(f"日报状态未找到本次上传记录（日期={run_date}，类型={data_type}，省份={province_id}），停止上传。")
     if len(matching) > 1:
         raise RuntimeError("日报状态出现重复记录，停止上传。")
     return matching[0] if matching else None

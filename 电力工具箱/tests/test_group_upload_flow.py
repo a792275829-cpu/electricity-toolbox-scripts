@@ -44,6 +44,28 @@ class GroupStatusContractTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, '重复'):
             module.get_daily_status(context, '2026-11-16', '1', '044')
 
+    def test_real_page_response_filters_other_provinces_and_accepts_enum_and_label(self):
+        import json
+        from toolbox.runtime import ToolPaths, load_module
+        module = load_module('group_status_real_schema', ToolPaths(Path(__file__).resolve().parents[2]).group_upload)
+        context = mock.Mock()
+        context.request.get.return_value.status = 200
+        for kind, spec in module.UPLOAD_TYPES.items():
+            valid = dict(date='2026-11-15 00:00:00', dataItemName=spec['data_type'],
+                         dataType=spec['name'], provinceId='44', dataStatus=1)
+            rows = [dict(valid, provinceId='11', dataStatus=None), valid,
+                    dict(valid, provinceId='90'), dict(valid, date='2026-11-14')]
+            context.request.get.return_value.text.return_value = json.dumps(dict(retCode='T200', data=rows))
+            with self.subTest(kind=kind):
+                self.assertEqual(module.get_daily_status(context, '2026-11-15', spec['data_type'], '44'), valid)
+            for broken in ([dict(valid, dataItemName='WRONG')], [valid, valid],
+                           [dict(valid, dataStatus=True)], [dict(valid, provinceId=None)]):
+                context.request.get.return_value.text.return_value = json.dumps(dict(retCode='T200', data=broken))
+                with self.subTest(broken=broken), self.assertRaises(RuntimeError):
+                    module.get_daily_status(context, '2026-11-15', spec['data_type'], '44')
+        context.request.get.return_value.text.return_value = json.dumps(dict(retCode='T200', data=[]))
+        self.assertIsNone(module.get_daily_status(context, '2026-11-15', 'DAY_MARKET_INFO', '44'))
+
 
 
 class GroupUploadRuntimeTests(unittest.TestCase):
@@ -643,7 +665,7 @@ class GroupUploadPageTests(unittest.TestCase):
                 today=date(2026, 6, 17),
             )
 
-        self.assertEqual(page.selected_paths, [province_template.resolve(), energy.resolve()])
+        self.assertEqual(page.selected_paths, [energy.resolve()])
         self.assertIn("能销数据", page.selection_var.get())
 
     def test_group_upload_page_keeps_auto_province_template_in_selection(self) -> None:
@@ -671,9 +693,9 @@ class GroupUploadPageTests(unittest.TestCase):
                 today=date(2026, 7, 7),
             )
 
-        self.assertEqual(page.selected_paths, [province_template.resolve(), energy.resolve()])
+        self.assertEqual(page.selected_paths, [energy.resolve()])
         command = page.build_upload_command(page.selected_paths, force=False)
-        self.assertIn(str(province_template.resolve()), command)
+        self.assertNotIn(str(province_template.resolve()), command)
         self.assertIn(str(energy.resolve()), command)
 
     def test_group_upload_template_error_lists_visible_excel_files(self) -> None:
@@ -705,13 +727,13 @@ class GroupUploadPageTests(unittest.TestCase):
                 "group_upload": self.paths.group_upload, "group_upload_dir": folder,
             })()
             page = GroupUploadPage(self.root, paths, self.registry, today=date(2026, 10, 25))
-            self.assertEqual(page.selected_paths, [module.BUILTIN_PROVINCE_TEMPLATE, energy.resolve()])
+            self.assertEqual(page.selected_paths, [energy.resolve()])
             self.assertIn("2026-10-23", page.summary_var.get())
             self.assertIn("省内数据模板.xlsx", page.selection_var.get())
             _, uploads = module.prepare_upload_files(page.selected_paths)
             self.assertTrue(uploads[0].builtin_template)
 
-    def test_group_upload_auto_template_prefers_nearest_province_date(self) -> None:
+    def test_group_upload_uses_builtin_despite_nearest_province_file(self) -> None:
         from toolbox.runtime import load_module
 
         module = load_module("group_upload_nearest_template_test", self.paths.group_upload)
@@ -728,10 +750,10 @@ class GroupUploadPageTests(unittest.TestCase):
             target_date, uploads = module.prepare_upload_files([energy])
 
         self.assertEqual(target_date, "2026-07-05")
-        self.assertEqual(uploads[0].path, nearest.resolve())
+        self.assertEqual(uploads[0].path, module.BUILTIN_PROVINCE_TEMPLATE.resolve())
         self.assertEqual(uploads[1].path, energy.resolve())
 
-    def test_group_upload_auto_template_probes_standard_names_when_listing_is_empty(self) -> None:
+    def test_group_upload_uses_builtin_when_directory_listing_is_empty(self) -> None:
         from toolbox.runtime import load_module
 
         module = load_module("group_upload_template_probe_test", self.paths.group_upload)
@@ -746,7 +768,7 @@ class GroupUploadPageTests(unittest.TestCase):
                 target_date, uploads = module.prepare_upload_files([energy])
 
         self.assertEqual(target_date, "2026-07-05")
-        self.assertEqual(uploads[0].path, nearest.resolve())
+        self.assertEqual(uploads[0].path, module.BUILTIN_PROVINCE_TEMPLATE.resolve())
         self.assertEqual(uploads[1].path, energy.resolve())
 
 

@@ -57,7 +57,7 @@ def desktop_catalog(paths):
                               f("mode", "执行功能", "select", "both", choices=[["both", "解析并上传"], ["parse", "仅解析"], ["upload", "仅上传"]])], [("run", "开始执行")]),
         "summary-upload": ([f("mode", "执行功能", "select", "both", choices=[["summary", "仅汇总"], ["upload", "仅上传"], ["both", "汇总并上传"]]),
                             f("input_dir", "复盘文件夹", "directory", str(Path.home() / "Desktop/复盘" / f"{(today + timedelta(days=1)).month}-{(today + timedelta(days=1)).day}"))], [("preview", "预览上传文件"), ("run", "开始执行")]),
-        "group-upload": ([f("files", "能销数据；也可同时选择省内数据", "files", [], extensions=["xlsx", "xls"]),
+        "group-upload": ([f("files", "能销数据（省内数据自动生成）", "files", [], extensions=["xlsx", "xls"]),
                           f("force", "已上传数据也覆盖", "boolean", False)], [("run", "开始上传"), ("login", "登录")]),
         "private-batch-upload": ([f("unit", "上传单元", "select", "海风",
                                     choices=[["海风", "海风"], ["鮀莲", "鮀莲"], ["归湖", "归湖"],

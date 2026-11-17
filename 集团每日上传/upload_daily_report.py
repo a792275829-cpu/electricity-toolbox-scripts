@@ -535,7 +535,7 @@ def run_browser_upload(paths: list[Path], *, headless: bool, create_report: bool
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="上传集团日报省内数据和能销数据")
-    parser.add_argument("files", nargs="*", help="可选：两个 Excel 文件路径。不传则弹出文件选择窗口。")
+    parser.add_argument("files", nargs="*", help="能销 Excel 文件路径（省内数据使用内置模板自动生成）。不传则弹出文件选择窗口。")
     parser.add_argument("--login", action="store_true", help="登录并保存会话")
     parser.add_argument("--headless", action="store_true", help="无界面运行")
     parser.add_argument("--browser", action="store_true", help="使用浏览器页面上传模式")

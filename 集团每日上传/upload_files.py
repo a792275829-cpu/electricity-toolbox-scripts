@@ -79,13 +79,13 @@ def choose_files_interactively() -> list[Path]:
         import tkinter as tk
         from tkinter import filedialog
     except Exception as exc:
-        raise RuntimeError("无法打开文件选择窗口，请改用命令行传入两个文件路径。") from exc
+        raise RuntimeError("无法打开文件选择窗口，请改用命令行传入能销文件路径。") from exc
 
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
-    selected = filedialog.askopenfilenames(
-        title="请选择能销数据 Excel；也可同时选择省内数据",
+    selected = filedialog.askopenfilename(
+        title="请选择能销数据 Excel（省内数据自动生成）",
         initialdir=str(SCRIPT_DIR),
         filetypes=[
             ("Excel 文件", "*.xlsx *.xls"),
@@ -93,7 +93,7 @@ def choose_files_interactively() -> list[Path]:
         ],
     )
     root.destroy()
-    return [Path(item) for item in selected]
+    return [Path(selected)] if selected else []
 
 
 def probe_standard_province_templates(folder: Path, target_date: str, *, days: int = 45) -> list[Path]:
@@ -183,9 +183,13 @@ def prepare_upload_files(paths: list[Path], *, template: Path,
     if len(uploads) == 1:
         only_upload = uploads[0]
         if only_upload.kind != "能销":
-            raise ValueError("只选择一个文件时必须选择能销数据文件，省内数据会自动从同目录或内置模板生成。")
-        uploads.append(find_province_template(
-            only_upload.path.parent, only_upload.date, template=template, log=log))
+            raise ValueError("只选择一个文件时必须选择能销数据文件，省内数据会自动从内置模板生成。")
+        if not template.is_file():
+            raise FileNotFoundError(f"内置省内模板不存在：{template}")
+        log("省内数据使用内置模板，按能销日期自动生成。")
+        uploads.append(UploadFile(
+            path=template.resolve(), kind="省内", date=only_upload.date,
+            auto_template=True, builtin_template=True))
         seen.add("省内")
 
     missing = set(UPLOAD_TYPES) - seen
