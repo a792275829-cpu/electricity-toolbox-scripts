@@ -1,4 +1,4 @@
-"""Build macOS icons from the original artwork without its oversized margin."""
+"""Build matching Tk/Tauri macOS icons, preserving the full transparent canvas."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -12,13 +12,8 @@ def build() -> None:
     output = ROOT / "desktop/src-tauri/icons"
     with tempfile.TemporaryDirectory(prefix="toolbox-icons-") as temporary:
         staging = Path(temporary)
-        master = staging / "master.png"
-        # Original: 1254 square; opaque artwork bounds (141, 164, 1113, 1114).
-        # Keep the entire artwork, centered in a 1000 square with a small margin.
-        subprocess.run([
-            "sips", "--cropToHeightWidth", "1000", "1000", "--cropOffset", "139", "127",
-            str(source), "--out", str(master),
-        ], check=True, capture_output=True)
+        # Tk uses the full canvas; preserve identical margins for WebView/Dock.
+        master = source
         iconset = staging / "icon.iconset"
         iconset.mkdir()
         for size in (16, 32, 128, 256, 512):
@@ -36,6 +31,9 @@ def build() -> None:
             ("256x256.png", "icon_256x256.png"),
         ):
             (output / name).write_bytes((iconset / source_name).read_bytes())
+        (ROOT / "desktop/assets/app-icon-256.png").write_bytes(
+            (output / "256x256.png").read_bytes()
+        )
         subprocess.run([
             "iconutil", "-c", "icns", str(iconset), "-o", str(output / "icon.icns"),
         ], check=True)
