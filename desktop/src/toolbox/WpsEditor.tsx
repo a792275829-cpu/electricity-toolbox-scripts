@@ -3,7 +3,7 @@ import { ask, message } from "@tauri-apps/plugin-dialog";
 import { call } from "../api";
 import { Button, Check, Frame, Modal, Segments, choosePath } from "./controls";
 import { TextField } from "./PageForms";
-import type { Values } from "./types";
+import { wpsConnectionStatus, copyTableRow, type Values } from "./types";
 
 const regionFields = [
   ["source_sheet", "来源工作表"],
@@ -397,11 +397,11 @@ function DocumentEditor({
           </Button>
           <Button
             run={() => {
-              if (selected.length)
-                set("regions", [
-                  ...draft.regions,
-                  copy(draft.regions[selected[0]]),
-                ]);
+              if (selected.length) {
+                const result = copyTableRow(draft.regions, selected[0]);
+                set("regions", result.rows);
+                setSelected([result.selected]);
+              }
             }}
           >
             复制
@@ -505,7 +505,7 @@ export function WpsEditor({
         operation: JSON.stringify({}),
         selected_indexes: "1",
       });
-      setBrowserStatus("浏览器已连接");
+      setBrowserStatus(wpsConnectionStatus(result));
       setLogin(result.message ?? "检查完成");
     } catch (error) {
       setBrowserStatus("浏览器连接失败");
@@ -630,16 +630,11 @@ export function WpsEditor({
           </Button>
           <Button
             run={() => {
-              if (selected.length)
-                void persist({
-                  configs: [
-                    ...configs,
-                    {
-                      ...copy(configs[selected[0]]),
-                      name: configs[selected[0]].name + " 副本",
-                    },
-                  ],
-                });
+              if (selected.length) {
+                const result = copyTableRow(configs, selected[0], true);
+                setSelected([result.selected]);
+                void persist({ configs: result.rows });
+              }
             }}
           >
             复制

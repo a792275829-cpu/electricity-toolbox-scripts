@@ -21,11 +21,11 @@ func emit(_ value: [String: Any], code: Int32 = 0) -> Never {
 
 let args = Array(CommandLine.arguments.dropFirst())
 guard args.count >= 2, args[0] == "--pid", let pid = Int32(args[1]), pid > 0 else {
-    emit(["error": "Usage: --pid PID [--press NAME | --set NAME VALUE]"], code: 2)
+    emit(["error": "Usage: --pid PID [--press NAME | --press-id ID | --set NAME VALUE | --set-id ID VALUE]"], code: 2)
 }
 let operation = Array(args.dropFirst(2))
 guard operation.isEmpty || (operation.count == 2 && ["--press", "--press-id"].contains(operation[0]))
-        || (operation.count == 3 && operation[0] == "--set") else {
+        || (operation.count == 3 && ["--set", "--set-id"].contains(operation[0])) else {
     emit(["error": "Invalid operation"], code: 2)
 }
 guard AXIsProcessTrusted() else {
@@ -41,7 +41,7 @@ var nodes: [[String: Any]] = []
 var traversalErrors: [String] = []
 
 func walk(_ element: AXUIElement, _ depth: Int) {
-    if depth > 20 || nodes.count >= 500 { return }
+    if depth > 25 || nodes.count >= 2000 { return }
     if elements.contains(where: { CFEqual($0, element) }) { return }
     elements.append(element)
     var settable = DarwinBoolean(false)
@@ -55,11 +55,12 @@ func walk(_ element: AXUIElement, _ depth: Int) {
     let identifierAttribute = nativeIdentifier.isEmpty && supportsDOMIdentifier ? "AXDOMIdentifier" : kAXIdentifierAttribute
     let identifier = string(element, identifierAttribute)
     let secondIdentifier = string(element, identifierAttribute)
+    let sensitive = identifier == "account-username" || identifier == "account-password" || string(element, kAXSubroleAttribute) == "AXSecureTextField" || (string(element, kAXRoleAttribute) == kAXTextFieldRole && ["账号", "密码"].contains(string(element, kAXTitleAttribute)))
     nodes.append([
         "depth": depth, "role": string(element, kAXRoleAttribute),
         "title": string(element, kAXTitleAttribute),
         "description": string(element, kAXDescriptionAttribute),
-        "value": string(element, kAXValueAttribute),
+        "value": sensitive ? "<redacted>" : string(element, kAXValueAttribute),
         "enabled": string(element, kAXEnabledAttribute),
         "identifier": identifier, "secondIdentifier": secondIdentifier,
         "identifierAttribute": identifierAttribute,
@@ -84,7 +85,7 @@ var output: [String: Any] = ["pid": pid, "trusted": true, "nodes": nodes,
 if !operation.isEmpty {
     let name = operation[1]
     let matches = elements.filter {
-        operation[0] == "--press-id" ? (string($0, kAXIdentifierAttribute) == name || string($0, "AXDOMIdentifier") == name) : (string($0, kAXTitleAttribute) == name || string($0, kAXDescriptionAttribute) == name)
+        operation[0].hasSuffix("-id") ? (string($0, kAXIdentifierAttribute) == name || string($0, "AXDOMIdentifier") == name) : (string($0, kAXTitleAttribute) == name || string($0, kAXDescriptionAttribute) == name)
     }
     guard matches.count == 1 else {
         output["error"] = "Expected one matching control, found \(matches.count): \(name)"
@@ -104,13 +105,13 @@ if !operation.isEmpty {
     let deadline = Date(timeIntervalSinceNow: 1.5)
     repeat {
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
-        if operation[0] != "--set" || string(target, kAXValueAttribute) == operation[2] { break }
+        if !operation[0].hasPrefix("--set") || string(target, kAXValueAttribute) == operation[2] { break }
     } while Date() < deadline
     output["operation"] = operation[0]
     output["target"] = name
     output["result"] = result.rawValue
-    output["valueAfter"] = string(target, kAXValueAttribute)
-    if operation[0] == "--set", result == .success,
+    output["valueAfter"] = ["account-username", "account-password"].contains(name) || ["账号", "密码"].contains(name) ? "<redacted>" : string(target, kAXValueAttribute)
+    if operation[0].hasPrefix("--set"), result == .success,
             string(target, kAXValueAttribute) != operation[2] {
         output["error"] = "AX reported success but value readback does not match"
         emit(output, code: 2)

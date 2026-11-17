@@ -131,6 +131,7 @@ export function Modal({
   return createPortal(
     <dialog
       ref={ref}
+      aria-label={title}
       className={`tb-modal ${wide ? "wide" : ""}`}
       onCancel={(event) => {
         event.preventDefault();
@@ -139,7 +140,7 @@ export function Modal({
     >
       <header>
         <h2>{title}</h2>
-        <Button run={onClose} aria-label="关闭">
+        <Button id={`modal-close-${title}`} run={onClose} aria-label="关闭">
           ×
         </Button>
       </header>

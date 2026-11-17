@@ -9,6 +9,8 @@ import { WpsEditor } from "./WpsEditor";
 import {
   terminal,
   taskLabels,
+  restoreTaskLogs,
+  type EventBatch,
   type Bootstrap,
   type Task,
   type Tool,
@@ -649,8 +651,9 @@ export function ToolboxApp({
       call<Bootstrap>("ui.bootstrap"),
       call<Task[]>("tasks"),
       call<Values>("wps.get"),
+      call<EventBatch>("events", { after: 0 }),
     ])
-      .then(([data, history, config]) => {
+      .then(([data, history, config, batch]) => {
         setBoot(data);
         setForms(
           Object.fromEntries(
@@ -670,7 +673,11 @@ export function ToolboxApp({
         setTasks(history);
         history.filter(terminal).forEach((task) => ended.current.add(task.id));
         setWps(config);
-        setLogs({ "online-energy": `[${stamp()}] 请选择日期范围后开始导出。` });
+        cursor.current = batch.cursor;
+        setLogs({
+          "online-energy": `[${stamp()}] 请选择日期范围后开始导出。\n`,
+          ...restoreTaskLogs(history, batch),
+        });
       })
       .catch((error) => setError(String(error)));
   }, []);

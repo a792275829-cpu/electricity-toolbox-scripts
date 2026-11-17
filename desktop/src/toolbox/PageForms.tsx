@@ -450,7 +450,7 @@ export function PageForms(props: Props) {
     const summary = id === "summary-upload";
     const labels = summary
       ? { summary: "开始汇总", upload: "开始上传", both: "汇总并上传" }
-      : { both: "解析并上传", parse: "开始解析", upload: "开始上传" };
+      : { both: "解析并上传", parse: "开始解析", upload: "上传已有文件" };
     toolbar = (
       <>
         {action((labels as any)[v.mode] ?? "开始执行", () => run(), true)}

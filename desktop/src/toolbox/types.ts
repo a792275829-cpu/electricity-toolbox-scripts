@@ -39,3 +39,55 @@ export const taskLabels: Record<string, string> = {
   failed: "失败",
   cancelled: "取消",
 };
+
+export function wpsConnectionStatus(result: {
+  state?: string;
+  started?: boolean;
+}): string {
+  if (result.state === "logged_in") return "浏览器已连接";
+  if (result.state === "logged_out") return "等待 WPS 登录";
+  return result.started
+    ? "专用浏览器已打开，待确认登录"
+    : "尚未确认连接与登录状态";
+}
+
+export type EventBatch = {
+  cursor: number;
+  truncated: boolean;
+  events: { task_id: string; kind: string; message: string }[];
+};
+
+export function restoreTaskLogs(
+  history: Task[],
+  batch: EventBatch,
+): Record<string, string> {
+  const logs: Record<string, string> = {};
+  const add = (tool: string, text: string) => {
+    logs[tool] = (logs[tool] ?? "") + text + "\n";
+  };
+  if (batch.truncated) {
+    for (const tool of new Set(history.map((task) => task.tool_id)))
+      add(tool, "较早日志已超出后台保留范围，以下为仍可恢复的记录。");
+  }
+  for (const event of batch.events) {
+    const task = history.find((task) => task.id === event.task_id);
+    if (task && event.kind === "log") add(task.tool_id, event.message);
+  }
+  for (const task of history.filter(terminal)) {
+    add(
+      task.tool_id,
+      `${task.result?.message ?? taskLabels[task.state]}${task.error ? `：${task.error}` : ""}`,
+    );
+  }
+  return logs;
+}
+
+export function copyTableRow(rows: Values[], index: number, config = false) {
+  if (!Number.isInteger(index) || index < 0 || index >= rows.length)
+    throw new Error("请选择有效的行");
+  const cloned = structuredClone(rows[index]);
+  if (config) cloned.name = `${cloned.name}（副本）`;
+  const result = [...rows];
+  result.splice(index + 1, 0, cloned);
+  return { rows: result, selected: index + 1 };
+}
