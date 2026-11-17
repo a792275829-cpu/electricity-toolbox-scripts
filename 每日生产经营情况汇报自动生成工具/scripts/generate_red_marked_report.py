@@ -6,9 +6,6 @@ import json
 import math
 import re
 import sys
-import time
-import urllib.parse
-import urllib.request
 from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
@@ -28,6 +25,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 APP_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name in {"scripts", "\u811a\u672c"} else SCRIPT_DIR
 if str(APP_ROOT.parent) not in sys.path:
     sys.path.insert(0, str(APP_ROOT.parent))
+from toolbox_shared.morning_weather import fetch_guangdong_weather, weather_code_label
 from toolbox_shared.dates import normalize_date_input
 from toolbox_shared.storage import data_path
 from toolbox_shared.clearing_layout import brief_row_index, qingyuan_plan_values
@@ -44,8 +42,6 @@ TEMPLATE_PATH = LOCAL_TEMPLATE_PATH if LOCAL_TEMPLATE_PATH.exists() else (
 
 
 LOAD_SUBJECT_CODES = ["1", "6", "2", "3"]
-GUANGDONG_WEATHER_LATITUDE = 23.1291
-GUANGDONG_WEATHER_LONGITUDE = 113.2644
 QINGYUAN_DAILY_CLEARING_VALUES = [
     "清  远",
     "清  远",
@@ -481,69 +477,13 @@ def load_change_text(diff_mw: float, unit: str = "\u4e07\u5343\u74e6") -> str:
     return delta_phrase(diff_mw, unit=unit, scale=0.1)
 
 
-def weather_code_label(code: Any) -> str:
-    try:
-        value = int(code)
-    except (TypeError, ValueError):
-        return "\u591a\u4e91"
-    if value == 0:
-        return "\u6674"
-    if value in {1, 2}:
-        return "\u591a\u4e91"
-    if value == 3:
-        return "\u9634"
-    if value in {45, 48}:
-        return "\u96fe"
-    if value in {51, 53, 55, 56, 57, 61, 80}:
-        return "\u5c0f\u96e8"
-    if value in {63, 66, 81}:
-        return "\u4e2d\u96e8"
-    if value in {65, 67, 82}:
-        return "\u5927\u96e8"
-    if value in {71, 73, 75, 77, 85, 86}:
-        return "\u96ea"
-    if value in {95, 96, 99}:
-        return "\u96f7\u9635\u96e8"
-    return "\u591a\u4e91"
-
-
 def fetch_guangdong_weather_text(report_date: str) -> str:
-    start = datetime.strptime(report_date, "%Y-%m-%d").date()
-    end = start + timedelta(days=2)
-    query = urllib.parse.urlencode(
-        {
-            "latitude": GUANGDONG_WEATHER_LATITUDE,
-            "longitude": GUANGDONG_WEATHER_LONGITUDE,
-            "daily": "weather_code,temperature_2m_max,temperature_2m_min",
-            "timezone": "Asia/Shanghai",
-            "start_date": start.strftime("%Y-%m-%d"),
-            "end_date": end.strftime("%Y-%m-%d"),
-        }
-    )
-    url = f"https://api.open-meteo.com/v1/forecast?{query}"
-    last_error: Exception | None = None
-    for _ in range(3):
-        try:
-            with urllib.request.urlopen(url, timeout=30) as response:
-                data = json.load(response)
-            break
-        except Exception as exc:
-            last_error = exc
-            time.sleep(2)
-    else:
-        raise RuntimeError(f"\u8bfb\u53d6\u5e7f\u4e1c\u5929\u6c14\u5931\u8d25\uff1a{last_error}") from last_error
-    daily = data.get("daily") or {}
-    labels = [weather_code_label(code) for code in daily.get("weather_code") or []]
-    max_values = [parse_float(value) for value in daily.get("temperature_2m_max") or [] if value is not None]
-    min_values = [parse_float(value) for value in daily.get("temperature_2m_min") or [] if value is not None]
-    if not labels or not max_values or not min_values:
-        raise RuntimeError("\u672a\u8bfb\u53d6\u5230\u5e7f\u4e1c\u672a\u6765\u4e09\u5929\u5929\u6c14\u6570\u636e")
-    weather_text = labels[0] if labels[0] == labels[-1] else f"{labels[0]}\u8f6c{labels[-1]}"
-    return f"\u672a\u6765\u4e09\u5929{weather_text}\uff0c\u6c14\u6e29{round(min(min_values))}\u2103-{round(max(max_values))}\u2103\uff0c"
+    return fetch_guangdong_weather(report_date, log=log)["text"]
 
 
-def replace_weather_prefix(paragraph, report_date: str) -> None:
-    prefix = fetch_guangdong_weather_text(report_date)
+def replace_weather_prefix(paragraph, report_date: str) -> dict:
+    weather = fetch_guangdong_weather(report_date, log=log)
+    prefix = weather["text"]
     text = paragraph.text
     updated = re.sub(r"^\u672a\u6765\u4e09\u5929.*?\uff0c\u6c14\u6e29\s*.*?\u2103\s*-\s*.*?\u2103\uff0c", prefix, text, count=1)
     if updated == text:
@@ -552,6 +492,7 @@ def replace_weather_prefix(paragraph, report_date: str) -> None:
     if updated == text:
         updated = prefix + text
     replace_paragraph(paragraph, updated)
+    return weather
 
 
 def parse_float(value: Any) -> float:
@@ -2143,8 +2084,9 @@ def generate(
         lambda text: text.startswith("未来三天") and "气温" in text,
     )
     weather_error = None
+    weather_source = None
     try:
-        replace_weather_prefix(weather_paragraph, report_date)
+        weather_source = replace_weather_prefix(weather_paragraph, report_date)
     except Exception as exc:
         weather_error = str(exc)
         clear_paragraph_red(weather_paragraph)
@@ -2213,6 +2155,7 @@ def generate(
         "onlineEnergyPendingDate": plan["actualOnlineEnergyDate"] if online_energy_error else None,
         "dailyClearingError": daily_clearing_error,
         "weatherError": weather_error,
+        "weatherSource": weather_source,
         "knownGaps": [
             "上网电量取 D-1 出清情况工作簿「快报」表：火电三厂与清远取 J 列，新能源取 K 列，总数为 J7＋新能源合计；尚未出数或读取失败时保留模板电量数字，将日期更新为D-1并标红、明确提示旧数字需人工核对；后半句日前均价独立更新为黑字。",
             "P14 日前出清电量和日前价格来自报告日出清情况 Excel；火电按厂名定位取快报（日前）F/G，新能源取 G/H，清远计划电量按基础信息清远上网电量区的合计行取 AA+AC 后除以10，并计入分公司总电量。",
