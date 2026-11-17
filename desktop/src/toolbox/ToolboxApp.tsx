@@ -436,7 +436,7 @@ function LogConsole({
   const contents = last.current + text;
   return (
     <div
-      className={`task-console ${tool.id === "online-energy" ? "short-log" : ""} ${tool.id === "wps-writer" ? "wps-log" : ""}`}
+      className={`task-console ${tool.id === "wps-writer" ? "wps-log" : ""}`}
     >
       {tool.id !== "wps-writer" && (
         <>

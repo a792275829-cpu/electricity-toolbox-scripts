@@ -512,9 +512,6 @@
   background: #fff;
   user-select: text;
 }
-.short-log .log-text {
-  height: 53px;
-}
 .wps-log .log-text {
   height: 90px;
 }
