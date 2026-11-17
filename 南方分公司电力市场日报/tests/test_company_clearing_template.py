@@ -67,6 +67,30 @@ def template(six):
 
 
 class TemplateCompatibilityTests(unittest.TestCase):
+    def test_province_price_comparison_survives_wording_merge_and_render(self):
+        from gd_power_report.pipeline import _merge_market_text_cards
+        from gd_power_report.report import _prepare_market_cards
+
+        for wording, expected in (("降低", -5.45), ("下降", -5.45),
+                                  ("减少", -5.45), ("上涨", 5.45),
+                                  ("上升", 5.45), ("增加", 5.45)):
+            for realtime in (False, True):
+                with self.subTest(wording=wording, realtime=realtime):
+                    period = "实时" if realtime else "日前"
+                    prefix = "较日前" if realtime else "环比"
+                    card = reader._market_average_price_card(
+                        f"全省{period}出清均价436.05元/兆瓦时，{prefix}{wording}5.45元/兆瓦时。",
+                        realtime=realtime,
+                    )
+                    self.assertEqual((card["value"], card["delta"]), (436.05, expected))
+                    merged = _merge_market_text_cards([], [card], {card["label"]})
+                    visible = _prepare_market_cards(merged, realtime=realtime)[0]
+                    self.assertEqual(visible["delta_text"], f"{'▼' if expected < 0 else '▲'} 5.45")
+                    self.assertEqual(visible["delta_prefix"], prefix)
+
+        card = reader._market_average_price_card("全省日前出清均价436.05元/兆瓦时。")
+        self.assertIsNone(card["delta"])
+
     def test_six_unit_strategy_profits_and_placeholders(self):
         for count in (4, 6):
             with self.subTest(count=count):

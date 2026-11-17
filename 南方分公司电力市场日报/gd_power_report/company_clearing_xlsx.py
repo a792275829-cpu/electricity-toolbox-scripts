@@ -1331,7 +1331,7 @@ def _text_delta(text: str, pattern: str) -> float | None:
     if not match:
         return None
     number = float(match.group(2).replace(",", ""))
-    return -number if match.group(1) in {"下降", "减少"} else number
+    return -number if match.group(1) in {"下降", "减少", "降低"} else number
 
 
 def _market_average_price_card(text: str, *, realtime: bool = False) -> dict[str, Any]:
@@ -1348,7 +1348,7 @@ def _market_average_price_card(text: str, *, realtime: bool = False) -> dict[str
     for prefix in (("较日前", "环比") if realtime else ("环比",)):
         delta = _text_delta(
             text,
-            rf"{marker}(?:为)?\s*[\d,.]+\s*{unit}[^。；]*?{prefix}(下降|上涨|上升|减少|增加)\s*([\d,.]+)\s*{unit}",
+            rf"{marker}(?:为)?\s*[\d,.]+\s*{unit}[^。；]*?{prefix}(下降|降低|上涨|上升|减少|增加)\s*([\d,.]+)\s*{unit}",
         )
         if delta is not None:
             delta_prefix = prefix
