@@ -130,7 +130,21 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.errors, [])
 
     def matrix(self):
-        return self.page.locator('#view').evaluate('(g)=>{const m=g.transform.baseVal.consolidate().matrix;return {k:Number(g.ownerSVGElement.dataset.viewScale),x:m.e,y:m.f};}')
+        # 画布尺寸变化时 ResizeObserver 会按差值的一半平移视图；等两帧尺寸和
+        # 变换都不再变化再读数，否则首次布局长出滚动条时会把 10 像素左右的
+        # 位移算进滚轮结果里（CI 上偶发）。
+        previous = None
+        for _ in range(20):
+            self.page.evaluate('()=>new Promise(requestAnimationFrame)')
+            state = self.page.locator('#view').evaluate('''(g)=>{
+                const m=g.transform.baseVal.consolidate().matrix;
+                const svg=g.ownerSVGElement;
+                return [svg.clientWidth,svg.clientHeight,Number(svg.dataset.viewScale),m.e,m.f];
+            }''')
+            if state == previous:
+                return {'k': state[2], 'x': state[3], 'y': state[4]}
+            previous = state
+        return {'k': previous[2], 'x': previous[3], 'y': previous[4]}
 
     def wheel(self, dx, dy, ctrl=False):
         prevented = self.page.locator('#canvas').evaluate('''(e,payload)=>{const v=new WheelEvent('wheel',{bubbles:true,cancelable:true,...payload});e.dispatchEvent(v);return v.defaultPrevented;}''',
