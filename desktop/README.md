@@ -1,8 +1,8 @@
 # Tauri 桌面版
 
-桌面版分为三层：原版 Tk 界面、Rust/Tauri 应用管理、独立 Python 业务服务。Tauri 负责单实例、系统托盘、进程生命周期和请求转发；原界面通过服务执行任务，React 仅保留启动故障提示。当前仅维护 Apple 芯片 Mac（macOS 14+），不包含 Intel Mac。
+桌面版分为三层：原版 Tk 界面、Rust/Tauri 应用管理、独立 Python 业务服务。Tauri 负责单实例、系统托盘、进程生命周期和请求转发；原界面通过服务执行任务，正式模式的 React 保留启动故障提示；完整 WebView / React 源码版见下文。当前仅维护 Apple 芯片 Mac（macOS 14+），不包含 Intel Mac。
 
-主界面没有另一套网页实现：原来的布局、控件、字体主题、日期选择、文件对话框、快捷键、任务取消、账号保存、日志、WPS 配置表格和弹窗，都由原版代码执行。Mac 发行包固定携带 Tcl/Tk 8.6.18，与本机原版一致，避免 Tk 9 的字体／缩放差异。启动和重新打开时后台检查 GitHub 正式版，发现新版在“电力工作台”下显示红色 `new`。点击可查看更新说明，点击“开始更新”后自动执行后续流程，可在下载阶段取消；优先下载增量补丁，在临时副本中还原并校验完整应用，再生成安装镜像。补丁不适用时自动下载完整 DMG。镜像准备完成后自动只读挂载并校验应用，正常退出工具箱，由独立进程运行镜像安装器并重新打开新版；无需手动操作。右下角更新入口已移除，Mac 菜单栏图标仍保留手动检查。侧栏仅展示业务模块，启动默认进入“导出上网电量”。现有 Tk 启动器保留。
+正式版主界面仍由 Tk 实现：原来的布局、控件、字体主题、日期选择、文件对话框、快捷键、任务取消、账号保存、日志、WPS 配置表格和弹窗，都由原版代码执行。Mac 发行包固定携带 Tcl/Tk 8.6.18，与本机原版一致，避免 Tk 9 的字体／缩放差异。启动和重新打开时后台检查 GitHub 正式版，发现新版在“电力工作台”下显示红色 `new`。点击可查看更新说明，点击“开始更新”后自动执行后续流程，可在下载阶段取消；优先下载增量补丁，在临时副本中还原并校验完整应用，再生成安装镜像。补丁不适用时自动下载完整 DMG。镜像准备完成后自动只读挂载并校验应用，正常退出工具箱，由独立进程运行镜像安装器并重新打开新版；无需手动操作。右下角更新入口已移除，Mac 菜单栏图标仍保留手动检查。侧栏仅展示业务模块，启动默认进入“导出上网电量”。现有 Tk 启动器保留。
 
 三层的接口、生命周期和验证说明见 [架构说明](docs/architecture.md)。外壳通过 `LSUIElement` 和后台激活策略保持隐藏，只有原生界面显示工具箱 Dock 图标。分层不等于单进程：空闲时有应用管理、界面和业务服务三个进程，耗时业务按需启动工作进程。
 
@@ -16,9 +16,32 @@
 
 首次开发需要 Node 22、Rust stable、项目根目录 `.venv`。需要 Xcode Command Line Tools；Python 依赖由根目录 `setup_macos.command` 初始化。前端首次执行 `cd desktop && npm ci`。
 
-开发启动器运行 `npm run dev`，自动编译必要的 Rust 改动。界面仍维护原 Python 页面；任务适配在 `toolbox/ui_tasks.py`，业务服务和工作流在 `toolbox/service.py`、`toolbox/workflows.py`。修改已加载的界面或服务后重启应用；脚本任务在下一次运行时读取业务脚本源码。React/CSS 只影响启动故障提示。`00_启动/电力工具箱.command` 保留不依赖 Node/Rust 的原版源码启动方式。
+开发启动器运行 `npm run dev`，自动编译必要的 Rust 改动。界面仍维护原 Python 页面；任务适配在 `toolbox/ui_tasks.py`，业务服务和工作流在 `toolbox/service.py`、`toolbox/workflows.py`。修改已加载的界面或服务后重启应用；脚本任务在下一次运行时读取业务脚本源码。不带参数时 React/CSS 影响启动故障提示；`--webview-ui` 使用完整 React 界面。`00_启动/电力工具箱.command` 保留不依赖 Node/Rust 的原版源码启动方式。
 
 接收电脑安装发行包即可使用，内置 Python 3.11.15、Node 22.18.0（随 Playwright 轮子）、Playwright 1.55.0 和 Chromium。浏览器登录和网站取数仍需要网络。
+
+## WebView / React 完整界面源码版
+
+```bash
+./00_启动/Tauri开发版.command --webview-ui
+# 不联网的验收模式
+./00_启动/Tauri开发版.command --webview-ui-sample
+```
+
+完整 React 界面按原版 16 个页面的三栏布局、字段、按钮和说明复刻，包含双月日期选择、任务中心、账号、诊断、日志、手动市场数据及 WPS 配置／区域编辑器。业务继续调用原 `ToolboxService`、任务引擎、解析器及写入逻辑。正式安装版和不带参数的启动入口仍使用 Tk，待真实业务验收后切换。
+
+两种模式均使用独立应用标识 `com.electricity.toolbox.webview-ui`，仅在 debug 构建启用。数据分别位于 `~/Library/Application Support/com.electricity.toolbox/development/data/webview-ui/data/` 和 `webview-ui-sample/data/`，不读取正式版账号与浏览器状态。真实模式需要自行填写账号和业务文件；样例模式仅允许运行上网电量导出（最多 3 天），其他页面可查看和编辑本地配置。样例模式不会登录网站或上传业务数据。
+
+需要根 `.venv`、Node/npm、Rust 和 Xcode Command Line Tools。右下角“重启源码版”会先保存完整账号、检查任务和未应用的接线图编辑，然后重新启动开发入口及业务服务。版本入口复用原更新服务；源码开发环境不用于实际安装发行包。
+
+验收与原版对照：
+
+```bash
+./00_启动/源码调试版.command --ui-reference
+.venv/bin/python tooling/webview_ui_audit.py --pid <logs/webview-ui-process.json 中的 ui_pid>
+```
+
+原版捕获使用隔离配置，输出 16 页截图与控件树至 `logs/ui-reference/`。AX 验收要求控制端已有 macOS 辅助功能权限，只允许操作离线样例窗口；检查 16 页导航、日期读写、取消、真实样例 Excel 回读、WPS 区域弹窗及侧栏开合，输出 `logs/ui-replica/summary.json`。不通过 DOM 注入替代系统操作。真实网站登录、上传、在线 WPS 写入和安装更新需另行业务验收；目前不宣称逐像素相同。结果与边界见[完整界面验证记录](docs/2026-11-17-webview-ui.md)。
 
 ## WebView / React 导出页试用
 

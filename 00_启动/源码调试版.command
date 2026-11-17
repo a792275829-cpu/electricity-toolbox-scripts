@@ -17,6 +17,10 @@ if [[ "${1:-}" == "--accessibility-probe" && "${TOOLBOX_SMOKE:-}" != "1" ]]; the
   exec "$root_dir/.venv/bin/python" "$root_dir/tooling/accessibility_probe.py"
 fi
 
+if [[ "${1:-}" == "--ui-reference" && "${TOOLBOX_SMOKE:-}" != "1" ]]; then
+  exec "$root_dir/.venv/bin/python" "$root_dir/desktop/python/source_debug.py" --ui-reference
+fi
+
 if [[ "${TOOLBOX_SMOKE:-}" == "1" ]]; then
   print -r -- "DEBUG_SOURCE=$TOOLBOX_CODE_ROOT"
   print -r -- "DEBUG_DATA=$TOOLBOX_DATA_ROOT"

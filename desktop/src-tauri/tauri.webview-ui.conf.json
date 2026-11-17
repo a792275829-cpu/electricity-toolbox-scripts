@@ -1,0 +1,16 @@
+{
+  "identifier": "com.electricity.toolbox.webview-ui",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "电力工作工具箱 · WebView 源码版",
+        "visible": true,
+        "width": 1440,
+        "height": 820,
+        "minWidth": 1100,
+        "minHeight": 600
+      }
+    ]
+  }
+}

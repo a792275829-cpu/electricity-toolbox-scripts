@@ -21,6 +21,16 @@ fn webview_pilot() -> bool {
     cfg!(debug_assertions) && std::env::var("TOOLBOX_WEBVIEW_PILOT").as_deref() == Ok("1")
 }
 
+fn webview_replica() -> bool {
+    cfg!(debug_assertions) && std::env::var("TOOLBOX_WEBVIEW_UI").as_deref() == Ok("1")
+}
+
+fn webview_host() -> bool { webview_pilot() || webview_replica() }
+
+fn webview_fixture() -> bool {
+    webview_pilot() || (webview_replica() && std::env::var("TOOLBOX_WEBVIEW_UI_SAMPLE").as_deref() == Ok("1"))
+}
+
 struct Backend {
     input: Arc<Mutex<ChildStdin>>,
     child: Mutex<Child>,
@@ -62,7 +72,7 @@ impl Backend {
         };
         let runtime = resources.join("runtime");
         let bundled = runtime.join("python/bin/python3");
-        let python = if webview_pilot() {
+        let python = if webview_host() {
             root.join(".venv/bin/python")
         } else if bundled.is_file() {
             bundled
@@ -101,7 +111,7 @@ impl Backend {
         let native_bundle = ui && cfg!(target_os = "macos") && gui_python.is_file();
         let mut command = Command::new(if native_bundle { &gui_python } else { &python });
         let entry = root.join(if ui { "desktop/python/native_bridge.py" } else { "desktop/python/service_bridge.py" });
-        let entry = if !ui && webview_pilot() {
+        let entry = if !ui && webview_fixture() {
             root.join("desktop/tests/python/webview_pilot_entry.py")
         } else { entry };
         #[cfg(debug_assertions)]
@@ -119,7 +129,7 @@ impl Backend {
             .env("PYTHONDONTWRITEBYTECODE", "1")
             .env("TOOLBOX_CODE_ROOT", &root)
             .env("TOOLBOX_APP_VERSION", app.package_info().version.to_string());
-        if webview_pilot() {
+        if webview_fixture() {
             // This pilot has no live-site mode, even when started manually.
             command.env("TOOLBOX_WEBVIEW_PILOT_FIXTURE", "1");
         }
@@ -283,10 +293,13 @@ fn finish_after_ui(app: &tauri::AppHandle) {
 }
 
 fn request_native(app: &tauri::AppHandle, method: &'static str) {
-    if webview_pilot() {
+    if webview_host() {
         match method {
             "activate" => show_updater(app),
-            "request_close" | "installer_close" => finish_after_ui(app),
+            "request_close" | "installer_close" => {
+                if webview_replica() { let _ = app.emit("toolbox-close-requested", ()); }
+                else { finish_after_ui(app); }
+            }
             _ => {}
         }
         return;
@@ -312,7 +325,35 @@ fn request_native(app: &tauri::AppHandle, method: &'static str) {
 
 #[tauri::command]
 fn webview_pilot_config() -> Option<Value> {
-    webview_pilot().then(|| json!({"fixture": true}))
+    webview_host().then(|| json!({"fixture": webview_fixture(), "replica": webview_replica()}))
+}
+
+#[tauri::command]
+async fn webview_close(app: tauri::AppHandle, cancel: bool, restart: Option<bool>) -> Result<(), String> {
+    if !webview_replica() { return Err("当前不是 WebView 界面".into()); }
+    let backend = app.state::<State>().backend.clone()?;
+    tauri::async_runtime::spawn_blocking(move || backend.request("shutdown", json!({"cancel":cancel})))
+        .await.map_err(|error| error.to_string())??;
+    app.state::<State>().native_closed.store(true, Ordering::Release);
+    if restart.unwrap_or(false) {
+        // Restart the development launcher as well: Tauri CLI tears down Vite
+        // when its child exits, so app.restart() would reopen a blank WebView.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        std::fs::create_dir_all(root.join("logs")).map_err(|e| e.to_string())?;
+        let log = std::fs::OpenOptions::new().create(true).append(true)
+            .open(root.join("logs/webview-restart.log")).map_err(|e| e.to_string())?;
+        Command::new("/bin/zsh")
+            .arg("-c")
+            .arg("while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; sleep 1; exec \"$2\" \"$3\"")
+            .arg("toolbox-restart")
+            .arg(std::process::id().to_string())
+            .arg(root.join("00_启动/Tauri开发版.command"))
+            .arg(if webview_fixture() { "--webview-ui-sample" } else { "--webview-ui" })
+            .stdin(Stdio::null()).stdout(log.try_clone().map_err(|e|e.to_string())?).stderr(log)
+            .spawn().map_err(|e| e.to_string())?;
+    }
+    app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -374,7 +415,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let backend = Backend::launch(app.handle(), false, None);
-            let ui = if webview_pilot() {
+            let ui = if webview_host() {
                 Err("WebView 试验使用业务服务，不启动 Tk 界面。".into())
             } else {
                 match &backend {
@@ -382,13 +423,13 @@ fn main() {
                     Err(error) => Err(error.clone()),
                 }
             };
-            let failed = backend.is_err() || (!webview_pilot() && ui.is_err());
+            let failed = backend.is_err() || (!webview_host() && ui.is_err());
             app.manage(State {
                 backend,
                 ui,
                 native_closed: AtomicBool::new(false),
             });
-            if webview_pilot() {
+            if webview_host() {
                 #[cfg(target_os = "macos")]
                 app.set_activation_policy(tauri::ActivationPolicy::Regular);
                 show_updater(app.handle());
@@ -423,12 +464,14 @@ fn main() {
             backend_call,
             open_path,
             webview_pilot_config,
+            webview_close,
             native_activate
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                if webview_pilot() { finish_after_ui(window.app_handle()); }
+                if webview_replica() { let _ = window.app_handle().emit("toolbox-close-requested", ()); }
+                else if webview_pilot() { finish_after_ui(window.app_handle()); }
                 else { let _ = window.hide(); }
             }
         })
@@ -437,7 +480,7 @@ fn main() {
         .run(|app, event| {
             #[cfg(target_os = "macos")]
             if matches!(&event, tauri::RunEvent::Ready) {
-                let _ = app.set_activation_policy(if webview_pilot() { tauri::ActivationPolicy::Regular } else { tauri::ActivationPolicy::Accessory });
+                let _ = app.set_activation_policy(if webview_host() { tauri::ActivationPolicy::Regular } else { tauri::ActivationPolicy::Accessory });
             }
             if let Some(state) = app.try_state::<State>() {
                 if let Ok(backend) = &state.backend {

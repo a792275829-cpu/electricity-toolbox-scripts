@@ -40,6 +40,12 @@ class FixtureRunner(ProcessRunner):
 
 class FixtureService(DesktopService):
     def call(self, method, params):
+        if method == "auto_match":
+            return {"files": []}
+        if method == "ui.credentials.verify":
+            return dict(text="样例模式不联网验证",kind="neutral",running=False,retry=False)
+        if method.startswith("ui.") or method in {"wps.get","wps.save","wps.import","wps.export"}:
+            return super().call(method, params)
         if method == "online_energy.settings":
             output = output_directory()
             output.mkdir(parents=True, exist_ok=True)
@@ -96,8 +102,8 @@ if __name__ == "__main__":
         import service_bridge
         toolbox.service.ProcessRunner = FixtureRunner
         service_bridge.DesktopService = FixtureService
-        if os.environ.get("TOOLBOX_WEBVIEW_PILOT") == "1":
-            receipt = ROOT / "logs/webview-pilot-process.json"
+        if os.environ.get("TOOLBOX_WEBVIEW_PILOT") == "1" or os.environ.get("TOOLBOX_WEBVIEW_UI") == "1":
+            receipt = ROOT / ("logs/webview-ui-process.json" if os.environ.get("TOOLBOX_WEBVIEW_UI") == "1" else "logs/webview-pilot-process.json")
             receipt.parent.mkdir(exist_ok=True)
             temporary = receipt.with_suffix(".tmp")
             temporary.write_text(json.dumps(dict(ui_pid=os.getppid(), service_pid=os.getpid()), indent=2))

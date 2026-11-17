@@ -10,6 +10,14 @@ if [[ "${TOOLBOX_SMOKE:-}" == "1" ]]; then
     print -r -- "WEBVIEW_PILOT_CONFIG=$root_dir/desktop/src-tauri/tauri.webview-pilot.conf.json"
     print -r -- 'WEBVIEW_PILOT_MODE=offline'
   fi
+  if [[ "${1:-}" == "--webview-ui" || "${1:-}" == "--webview-ui-sample" ]]; then
+    print -r -- "WEBVIEW_UI_CONFIG=$root_dir/desktop/src-tauri/tauri.webview-ui.conf.json"
+    if [[ "${1:-}" == "--webview-ui-sample" ]]; then
+      print -r -- "WEBVIEW_UI_MODE=offline"
+    else
+      print -r -- "WEBVIEW_UI_MODE=live"
+    fi
+  fi
   exit 0
 fi
 if [[ "$(uname -m)" != "arm64" ]]; then
@@ -31,6 +39,15 @@ if [[ ! -d node_modules ]]; then
 fi
 # Resources are generated only for distributions. Dev mode uses the shared source tree.
 mkdir -p src-tauri/payload
+if [[ "${1:-}" == "--webview-ui" || "${1:-}" == "--webview-ui-sample" ]]; then
+  export TOOLBOX_WEBVIEW_UI=1
+  export TOOLBOX_APP_HOME="$HOME/Library/Application Support/com.electricity.toolbox/development/data/webview-ui"
+  if [[ "${1:-}" == "--webview-ui-sample" ]]; then
+    export TOOLBOX_WEBVIEW_UI_SAMPLE=1
+    export TOOLBOX_APP_HOME="$HOME/Library/Application Support/com.electricity.toolbox/development/data/webview-ui-sample"
+  fi
+  exec npm run dev -- --config src-tauri/tauri.webview-ui.conf.json
+fi
 if [[ "${1:-}" == "--webview-pilot" ]]; then
   export TOOLBOX_WEBVIEW_PILOT=1
   export TOOLBOX_WEBVIEW_PILOT_FIXTURE=1

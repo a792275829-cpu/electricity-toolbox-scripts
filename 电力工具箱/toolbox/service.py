@@ -156,6 +156,11 @@ class ToolboxService:
     def call(self, method, params):
         if not isinstance(params, dict):
             raise ValueError("请求参数必须是对象")
+        if method.startswith("ui."):
+            if not hasattr(self, "_web_ui"):
+                from .web_ui import WebUI
+                self._web_ui = WebUI(self)
+            return self._web_ui.call(method, params)
         if method == "ping":
             return dict(protocol=PROTOCOL_VERSION, ui="headless", workspace=str(self.paths.workspace), pid=os.getpid())
         if method == "catalog":
@@ -257,6 +262,8 @@ class ToolboxService:
                     raise ValueError("仍有不可安全中断的写入任务，请等待完成")
                 if self.registry.terminate_all():
                     raise ValueError("后台任务尚未退出，请稍后重试")
+                if hasattr(self, "_web_ui"):
+                    self._web_ui.close()
                 self.closed.set()
                 return True
         raise ValueError("不支持的服务操作")

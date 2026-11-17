@@ -24,7 +24,7 @@ guard args.count >= 2, args[0] == "--pid", let pid = Int32(args[1]), pid > 0 els
     emit(["error": "Usage: --pid PID [--press NAME | --set NAME VALUE]"], code: 2)
 }
 let operation = Array(args.dropFirst(2))
-guard operation.isEmpty || (operation.count == 2 && operation[0] == "--press")
+guard operation.isEmpty || (operation.count == 2 && ["--press", "--press-id"].contains(operation[0]))
         || (operation.count == 3 && operation[0] == "--set") else {
     emit(["error": "Invalid operation"], code: 2)
 }
@@ -84,7 +84,7 @@ var output: [String: Any] = ["pid": pid, "trusted": true, "nodes": nodes,
 if !operation.isEmpty {
     let name = operation[1]
     let matches = elements.filter {
-        string($0, kAXTitleAttribute) == name || string($0, kAXDescriptionAttribute) == name
+        operation[0] == "--press-id" ? (string($0, kAXIdentifierAttribute) == name || string($0, "AXDOMIdentifier") == name) : (string($0, kAXTitleAttribute) == name || string($0, kAXDescriptionAttribute) == name)
     }
     guard matches.count == 1 else {
         output["error"] = "Expected one matching control, found \(matches.count): \(name)"
@@ -92,7 +92,7 @@ if !operation.isEmpty {
     }
     let target = matches[0]
     let result: AXError
-    if operation[0] == "--press" {
+    if operation[0].hasPrefix("--press") {
         result = AXUIElementPerformAction(target, kAXPressAction as CFString)
     } else {
         // WebKit commits edits asynchronously and may require the field's

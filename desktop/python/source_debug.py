@@ -13,6 +13,7 @@ import sysconfig
 def main() -> None:
     root = Path(__file__).resolve().parents[2]
     probe = sys.argv[1:] == ["--accessibility-probe"]
+    reference = sys.argv[1:] == ["--ui-reference"]
     bundle_name = "电力工具箱辅助功能验证" if probe else "电力工具箱源码调试"
     bundle = root / f".toolbox/source-debug/{bundle_name}.app"
     contents = bundle / "Contents"
@@ -44,6 +45,8 @@ def main() -> None:
     env.pop("__PYVENV_LAUNCHER__", None)
     entry = ([str(root / "tooling/accessibility_probe.py"), "--run-page"] if probe
              else [str(root / "电力工具箱/toolbox_launcher.pyw")])
+    if reference:
+        entry = [str(root / "tooling/capture_ui_reference.py")]
     os.execve(binary, [str(binary), *entry], env)
 
 
