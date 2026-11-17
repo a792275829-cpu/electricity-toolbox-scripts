@@ -489,7 +489,7 @@ export function WpsEditor({
     draft: Values;
   } | null>(null);
   const [browserStatus, setBrowserStatus] = useState("尚未检查浏览器连接");
-  const [login, setLogin] = useState("尚未检查");
+  const [login, setLogin] = useState({ state: "unknown", message: "尚未检查" });
   const [preview, setPreview] = useState<any>(null);
   const configRef = useRef(config);
   configRef.current = config;
@@ -508,10 +508,13 @@ export function WpsEditor({
         selected_indexes: "1",
       });
       setBrowserStatus(wpsConnectionStatus(result));
-      setLogin(result.message ?? "检查完成");
+      setLogin({
+        state: result.state ?? "unknown",
+        message: result.message ?? "检查完成",
+      });
     } catch (error) {
       setBrowserStatus("浏览器连接失败");
-      setLogin(String(error));
+      setLogin({ state: "unknown", message: String(error) });
     }
   }
   async function apply(previewOnly = false) {
@@ -582,7 +585,7 @@ export function WpsEditor({
             value={config.browser_mode}
             onChange={(browser_mode) => {
               void persist({ browser_mode });
-              setLogin("尚未检查");
+              setLogin({ state: "unknown", message: "尚未检查" });
             }}
           />
         </div>
@@ -621,7 +624,19 @@ export function WpsEditor({
         </div>
         <div className="form-row short">
           <label>WPS 登录状态</label>
-          <span>{login}</span>
+          <span
+            role="status"
+            style={{
+              color:
+                login.state === "logged_in"
+                  ? "#15803d"
+                  : login.state === "logged_out"
+                    ? "#b45309"
+                    : "#666666",
+            }}
+          >
+            {login.message}
+          </span>
         </div>
       </Frame>
       <Frame title="写入配置" className="wps-configurations">
