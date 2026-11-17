@@ -731,9 +731,6 @@ export function PageForms(props: Props) {
     <>
       <div className="tool-toolbar">
         {toolbar}
-        {id !== "section-analysis" &&
-          tool.actions.some((item) => item.id === "login") &&
-          businessAction("登录", "login", false)}
       </div>
       <div
         className={`page-content ${id}`}

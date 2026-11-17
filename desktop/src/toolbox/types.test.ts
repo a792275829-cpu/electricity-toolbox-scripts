@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   wpsConnectionStatus,
+  needsManualLogin,
   copyTableRow,
   restoreTaskLogs,
   type Task,
@@ -100,4 +101,34 @@ describe("WPS copy selection", () => {
     expect(result.rows[1]).not.toHaveProperty("name");
     expect(result.selected).toBe(1);
   });
+});
+
+describe("manual login recovery", () => {
+  const task: Task = {
+    id: "task",
+    tool_id: "online-energy",
+    name: "导出",
+    state: "failed",
+    cancellable: false,
+    message: "",
+    error: "需要人工验证",
+    error_detail: { login_kind: "verification" },
+    result: null,
+  };
+  it("offers recovery for a structured verification failure", () => {
+    expect(needsManualLogin(task)).toBe(true);
+  });
+  it("does not infer login from error text or unrelated failures", () => {
+    expect(needsManualLogin({ ...task, error_detail: null })).toBe(false);
+    expect(
+      needsManualLogin({ ...task, error_detail: { login_kind: "network" } }),
+    ).toBe(false);
+    expect(needsManualLogin()).toBe(false);
+  });
+  it.each(["running", "succeeded", "cancelled"])(
+    "clears recovery after a newer %s task",
+    (state) => {
+      expect(needsManualLogin({ ...task, state })).toBe(false);
+    },
+  );
 });

@@ -10,6 +10,7 @@ import {
   terminal,
   taskLabels,
   restoreTaskLogs,
+  needsManualLogin,
   type EventBatch,
   type Bootstrap,
   type Task,
@@ -40,11 +41,13 @@ function Credentials({
   login,
   sample,
   loginAvailable,
+  loginTask,
 }: {
   register: (flush: (required?: boolean) => Promise<boolean>) => void;
   login: () => void;
   sample: boolean;
   loginAvailable: boolean;
+  loginTask?: Task;
 }) {
   const [pair, setPair] = useState({ username: "", password: "" });
   const latest = useRef(pair);
@@ -251,22 +254,14 @@ function Credentials({
           重试验证
         </Button>
       )}
-      <div className="account-explicit-actions">
-        <Button
-          id="account-save-verify"
-          disabled={state.running}
-          run={() => {
-            void verify();
-          }}
-        >
-          保存并验证
-        </Button>
-        {!sample && loginAvailable && (
+      {!sample &&
+        loginAvailable &&
+        !state.running &&
+        (state.kind === "manual" || needsManualLogin(loginTask)) && (
           <Button id="account-login" run={login}>
-            登录当前工具
+            打开登录窗口
           </Button>
         )}
-      </div>
     </div>
   );
 }
@@ -1378,8 +1373,10 @@ export function ToolboxApp({
             sample={sample}
             loginAvailable={
               current !== "wps-writer" &&
+              current !== "section-analysis" &&
               tool.actions.some((item) => item.id === "login")
             }
+            loginTask={tasks.filter((task) => task.tool_id === current).at(-1)}
             register={(handler) => {
               flush.current = handler;
             }}

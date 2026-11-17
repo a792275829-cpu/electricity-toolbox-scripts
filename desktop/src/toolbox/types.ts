@@ -21,8 +21,12 @@ export type Task = {
   cancellable: boolean;
   message: string;
   error: string | null;
+  error_detail?: { login_kind?: string } | null;
   result: any;
 };
+export const needsManualLogin = (task?: Task) =>
+  task?.state === "failed" && task.error_detail?.login_kind === "verification";
+
 export type Bootstrap = {
   catalog: Tool[];
   initial?: Record<string, Values>;

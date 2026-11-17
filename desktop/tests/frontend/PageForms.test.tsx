@@ -60,9 +60,17 @@ function render(tool: Tool) {
 describe("all original business routes are reachable in React", () => {
   it("uses the live 16-tool catalog", () => expect(tools).toHaveLength(16));
   for (const tool of tools) {
-    it(`${tool.id}: exposes every operation`, () => {
+    it(`${tool.id}: exposes business operations and the appropriate login entrance`, () => {
       const html = render(tool);
       for (const action of tool.actions) {
+        // Qingneng login is offered in the shared account panel when needed.
+        if (
+          action.id === "login" &&
+          !["wps-writer", "section-analysis"].includes(tool.id)
+        ) {
+          expect(html, tool.id).not.toContain('data-action="login"');
+          continue;
+        }
         // Online inspection is inside the WPS document editor, not its main toolbar.
         if (tool.id === "wps-writer" && action.id === "inspect") continue;
         expect(html, `${tool.id}/${action.id}`).toContain(
