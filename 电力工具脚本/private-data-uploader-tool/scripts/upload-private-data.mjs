@@ -1,4 +1,3 @@
-import { chromium } from 'playwright';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
@@ -148,7 +147,22 @@ async function pathExists(filePath) {
   }
 }
 
+// 预览（--plan）不需要浏览器，只有真正登录/上传时才加载 playwright，
+// 这样没装 node_modules 的开发机也能先核对批次。
+let chromiumModule;
+async function playwrightChromium() {
+  if (!chromiumModule) {
+    try {
+      chromiumModule = (await import('playwright')).chromium;
+    } catch {
+      throw new Error('缺少 playwright 依赖：请在 电力工具脚本/private-data-uploader-tool 执行 npm install（安装包已内置）');
+    }
+  }
+  return chromiumModule;
+}
+
 async function defaultChromeExecutablePath() {
+  const chromium = await playwrightChromium();
   if (process.env.TOOLBOX_PORTABLE === '1' && await pathExists(chromium.executablePath())) {
     return chromium.executablePath();
   }
@@ -259,6 +273,7 @@ async function launchContext(config) {
   }
 
   await fs.mkdir(config.userDataDir, { recursive: true });
+  const chromium = await playwrightChromium();
   const context = await chromium.launchPersistentContext(config.userDataDir, {
     ...launchOptions,
     acceptDownloads: true,

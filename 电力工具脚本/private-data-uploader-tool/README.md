@@ -10,7 +10,7 @@
 node scripts/upload-private-data.mjs --plan --source "$HOME/Desktop/复盘/5-12"
 ```
 
-确认预览后可使用 `--execute` 执行真实上传；`--login` 用于重新登录。
+确认预览后可使用 `--execute` 执行真实上传；`--login` 用于重新登录。预览只做文件扫描与批次计算，不需要安装 playwright；只有登录和真实上传才会加载浏览器依赖。
 
 ## 首次配置与登录
 
