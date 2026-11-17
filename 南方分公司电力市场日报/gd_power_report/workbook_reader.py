@@ -5,6 +5,7 @@ from contextvars import ContextVar
 from functools import wraps
 from pathlib import Path
 import sys
+import warnings
 
 from openpyxl import load_workbook as _load_workbook
 
@@ -16,15 +17,29 @@ from toolbox_shared.native_excel import load_value_workbook as _load_value_workb
 _workbooks: ContextVar[dict | None] = ContextVar("report_workbooks", default=None)
 
 
+def _read_report_input(path, **kwargs):
+    # Reports consume cells/styles, never embedded Excel charts. Some WPS
+    # workbooks contain unsupported chart externalData; openpyxl skips those
+    # charts successfully but emits stderr that the desktop host treats as fatal.
+    # Keep every other warning and all exceptions visible, and never rewrite
+    # the source workbook to repair an unused chart.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message=r"^Unable to read chart ", category=UserWarning,
+            module=r"^openpyxl\.reader\.drawings$",
+        )
+        return _load_workbook(path, **kwargs)
+
+
 def load_workbook(path, **kwargs):
     cache = _workbooks.get()
     if cache is None:
-        return _load_workbook(path, **kwargs)
+        return _read_report_input(path, **kwargs)
     source = Path(path).expanduser().resolve()
     state = source.stat()
     key = (source, state.st_mtime_ns, state.st_size, tuple(sorted(kwargs.items())))
     if key not in cache:
-        cache[key] = _load_workbook(source, **kwargs)
+        cache[key] = _read_report_input(source, **kwargs)
     return cache[key]
 
 

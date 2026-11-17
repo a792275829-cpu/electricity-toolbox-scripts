@@ -6,6 +6,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
+from zipfile import ZipFile
+from xml.etree import ElementTree as ET
 from contextlib import ExitStack
 from datetime import date, timedelta
 from pathlib import Path
@@ -36,6 +39,63 @@ def write_pdf(path, pages=1, version="new"):
 
 
 class ReportInputAndErrorTests(unittest.TestCase):
+    def test_unsupported_excel_chart_does_not_break_date_or_cell_formats(self):
+        from openpyxl.chart import BarChart, Reference
+        from gd_power_report.company_clearing_xlsx import infer_report_date
+        with tempfile.TemporaryDirectory() as directory:
+            original = Path(directory) / 'original.xlsx'
+            source = Path(directory) / 'unsupported-chart.xlsx'
+            book = Workbook()
+            sheet = book.active
+            sheet.title = '新快报'
+            sheet['A6'] = date(2026, 11, 17)
+            sheet['B6'] = 0.125
+            sheet['B6'].number_format = '0.0%'
+            sheet.merge_cells('C6:D6')
+            sheet['C6'] = '合并表头'
+            chart = BarChart()
+            chart.add_data(Reference(sheet, min_col=2, min_row=6, max_row=6))
+            sheet.add_chart(chart, 'F1')
+            book.save(original)
+            book.close()
+            with ZipFile(original) as reader, ZipFile(source, 'w') as writer:
+                for entry in reader.infolist():
+                    data = reader.read(entry.filename)
+                    if entry.filename == 'xl/charts/chart1.xml':
+                        xml = ET.fromstring(data)
+                        ET.SubElement(xml, '{http://schemas.openxmlformats.org/drawingml/2006/chart}externalData')
+                        data = ET.tostring(xml)
+                    writer.writestr(entry, data)
+            before = source.read_bytes()
+            with warnings.catch_warnings(record=True) as raw:
+                warnings.simplefilter('always')
+                book = workbook_reader._load_workbook(source, data_only=True)
+                book.close()
+            self.assertTrue(any('Unable to read chart' in str(w.message) for w in raw))
+            with warnings.catch_warnings(record=True) as seen:
+                warnings.simplefilter('always')
+                self.assertEqual(infer_report_date(source), date(2026, 11, 17))
+                book = workbook_reader.load_workbook(source, data_only=True)
+                try:
+                    self.assertEqual(book['新快报']['B6'].value, 0.125)
+                    self.assertEqual(book['新快报']['B6'].number_format, '0.0%')
+                    self.assertIn('C6:D6', book['新快报'].merged_cells)
+                finally:
+                    book.close()
+            self.assertEqual(seen, [])
+            self.assertEqual(source.read_bytes(), before)
+
+    def test_other_workbook_warnings_and_exceptions_remain_visible(self):
+        def warning_loader(*args, **kwargs):
+            warnings.warn('保留其他工作簿警告', UserWarning)
+            return mock.sentinel.workbook
+        with mock.patch.object(workbook_reader, '_load_workbook', side_effect=warning_loader):
+            with self.assertWarnsRegex(UserWarning, '保留其他工作簿警告'):
+                self.assertIs(workbook_reader.load_workbook('input.xlsx'), mock.sentinel.workbook)
+        with mock.patch.object(workbook_reader, '_load_workbook', side_effect=ValueError('工作簿损坏')):
+            with self.assertRaisesRegex(ValueError, '工作簿损坏'):
+                workbook_reader.load_workbook('input.xlsx')
+
     def test_cli_validation_date_inference_and_pipeline_open_each_workbook_once(self):
         with tempfile.TemporaryDirectory() as directory:
             paths = [Path(directory) / f"{index}.xlsx" for index in range(3)]
