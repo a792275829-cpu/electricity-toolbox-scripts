@@ -56,31 +56,53 @@ function Credentials({
   });
   const dirty = useRef(false);
   const box = useRef<HTMLDivElement>(null);
+  const usernameInput = useRef<HTMLInputElement>(null);
+  const passwordInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (usernameInput.current) usernameInput.current.value = pair.username;
+  }, [pair.username]);
+  useEffect(() => {
+    if (passwordInput.current) passwordInput.current.value = pair.password;
+  }, [pair.password]);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const generation = useRef(0);
   async function verify() {
+    clearTimeout(timer.current);
+    if (!(await flush(true, false))) return;
     try {
       setState(await call("ui.credentials.verify"));
     } catch {
       setState({ text: "✗ 验证失败，请重试", kind: "error", retry: true });
     }
   }
-  async function flush(required = false) {
+  async function flush(required = false, autoVerify = true) {
     clearTimeout(timer.current);
-    if (!dirty.current) return true;
-    const current = latest.current;
+    const current = {
+      username: usernameInput.current?.value ?? latest.current.username,
+      password: passwordInput.current?.value ?? latest.current.password,
+    };
+    if (
+      current.username !== latest.current.username ||
+      current.password !== latest.current.password
+    ) {
+      latest.current = current;
+      generation.current++;
+      dirty.current = true;
+      setPair(current);
+    }
     if (!current.username.trim() || !current.password) {
       if (required)
         setState({ text: "账号和密码需填写完整，尚未保存", kind: "error" });
       return !required;
     }
+    if (!dirty.current) return true;
     try {
       const revision = generation.current;
       const result = await call("ui.credentials.save", current);
       if (generation.current === revision) {
         dirty.current = false;
         setState(result);
-        if (!box.current?.contains(document.activeElement))
+        if (autoVerify && !box.current?.contains(document.activeElement))
           timer.current = setTimeout(() => {
             void verify();
           }, 500);
@@ -140,7 +162,8 @@ function Credentials({
   function edit(key: "username" | "password", value: string) {
     generation.current++;
     dirty.current = true;
-    setPair({ ...latest.current, [key]: value });
+    latest.current = { ...latest.current, [key]: value };
+    setPair(latest.current);
     clearTimeout(timer.current);
     void call("ui.credentials.cancel");
     setState({ text: "账号已修改，等待自动保存", kind: "neutral" });
@@ -153,18 +176,23 @@ function Credentials({
       ref={box}
       className="credentials-panel"
       onBlur={() => {
+        const needsVerification =
+          dirty.current || state.text === "账号已保存，待验证";
         setTimeout(() => {
           if (!box.current?.contains(document.activeElement)) {
-            void flush().then((ok) => {
+            void flush(false, false).then((ok) => {
               if (
                 ok &&
+                needsVerification &&
                 !dirty.current &&
                 latest.current.username &&
                 latest.current.password
-              )
+              ) {
+                clearTimeout(timer.current);
                 timer.current = setTimeout(() => {
                   void verify();
                 }, 500);
+              }
             });
           }
         }, 0);
@@ -172,9 +200,7 @@ function Credentials({
       onKeyDown={(event) => {
         if (event.key === "Enter") {
           event.preventDefault();
-          void flush().then((ok) => {
-            if (ok) void verify();
-          });
+          void verify();
         }
       }}
     >
@@ -183,17 +209,19 @@ function Credentials({
         <label htmlFor="account-username">账号</label>
         <input
           id="account-username"
+          ref={usernameInput}
           autoComplete="username"
-          value={pair.username}
-          onChange={(event) => edit("username", event.target.value)}
+          defaultValue={pair.username}
+          onInput={(event) => edit("username", event.currentTarget.value)}
         />
         <label htmlFor="account-password">密码</label>
         <input
           id="account-password"
+          ref={passwordInput}
           type={show ? "text" : "password"}
           autoComplete="current-password"
-          value={pair.password}
-          onChange={(event) => edit("password", event.target.value)}
+          defaultValue={pair.password}
+          onInput={(event) => edit("password", event.currentTarget.value)}
         />
       </div>
       <div className="account-actions">
@@ -223,9 +251,22 @@ function Credentials({
           重试验证
         </Button>
       )}
-      {state.kind === "manual" && loginAvailable && (
-        <Button run={login}>打开登录窗口</Button>
-      )}
+      <div className="account-explicit-actions">
+        <Button
+          id="account-save-verify"
+          disabled={state.running}
+          run={() => {
+            void verify();
+          }}
+        >
+          保存并验证
+        </Button>
+        {!sample && loginAvailable && (
+          <Button id="account-login" run={login}>
+            登录当前工具
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1352,7 +1393,9 @@ export function ToolboxApp({
       <footer className="toolbox-status">
         <span>当前功能：{tool.name}</span>
         <span className="toolbar-spacer" />
-        {sample && <span className="sample-indicator">离线样例</span>}
+        <span className="sample-indicator">
+          {sample ? "离线样例" : "真实业务模式"}
+        </span>
         <Button className="quiet" run={() => setRail(!rail)}>
           {rail ? "收起辅助面板" : "展开辅助面板"}
         </Button>

@@ -430,6 +430,15 @@ fn main() {
                 native_closed: AtomicBool::new(false),
             });
             if webview_host() {
+                if webview_replica() {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.set_title(if webview_fixture() {
+                            "电力工具箱 · WebView 离线样例"
+                        } else {
+                            "电力工具箱 · WebView 真实业务测试版"
+                        });
+                    }
+                }
                 #[cfg(target_os = "macos")]
                 app.set_activation_policy(tauri::ActivationPolicy::Regular);
                 show_updater(app.handle());

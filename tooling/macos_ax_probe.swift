@@ -92,6 +92,10 @@ if !operation.isEmpty {
         emit(output, code: 2)
     }
     let target = matches[0]
+    // Secure fields intentionally mask AXValue; verify their effect through the
+    // application's save result rather than comparing a password with bullets.
+    let protectedValue = string(target, kAXSubroleAttribute) == "AXSecureTextField"
+    output["readbackProtected"] = protectedValue
     let result: AXError
     if operation[0].hasPrefix("--press") {
         result = AXUIElementPerformAction(target, kAXPressAction as CFString)
@@ -105,13 +109,13 @@ if !operation.isEmpty {
     let deadline = Date(timeIntervalSinceNow: 1.5)
     repeat {
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
-        if !operation[0].hasPrefix("--set") || string(target, kAXValueAttribute) == operation[2] { break }
+        if !operation[0].hasPrefix("--set") || protectedValue || string(target, kAXValueAttribute) == operation[2] { break }
     } while Date() < deadline
     output["operation"] = operation[0]
     output["target"] = name
     output["result"] = result.rawValue
     output["valueAfter"] = ["account-username", "account-password"].contains(name) || ["账号", "密码"].contains(name) ? "<redacted>" : string(target, kAXValueAttribute)
-    if operation[0].hasPrefix("--set"), result == .success,
+    if operation[0].hasPrefix("--set"), !protectedValue, result == .success,
             string(target, kAXValueAttribute) != operation[2] {
         output["error"] = "AX reported success but value readback does not match"
         emit(output, code: 2)
