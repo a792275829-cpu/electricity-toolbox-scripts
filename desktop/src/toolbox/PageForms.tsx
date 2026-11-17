@@ -575,7 +575,9 @@ export function PageForms(props: Props) {
       <>
         {businessAction(market ? "生成日报" : "开始生成")}
         {action("打开输出目录", openOutput)}
-        {market && action("手动填写数据", manual)}
+        {market
+          ? action("手动填写数据", manual)
+          : action("按日期自动匹配 Excel", autoMatch)}
       </>
     );
     const inner = (
@@ -593,10 +595,7 @@ export function PageForms(props: Props) {
             <span className="muted">选择 D 日收益表后自动识别</span>
           </div>
         ) : (
-          <div className="form-row">
-            {dates("报告日期", "report_date")}
-            {action("按日期自动匹配 Excel", autoMatch)}
-          </div>
+          dates("报告日期", "report_date")
         )}
         {market ? (
           <>
@@ -683,7 +682,9 @@ export function PageForms(props: Props) {
     body = (
       <Frame title={group ? "待上传文件" : "上传单元与文件"}>
         {group ? (
-          <p>{v._summary ?? "请选择能销数据；省内数据使用内置模板自动生成。"}</p>
+          <p>
+            {v._summary ?? "请选择能销数据；省内数据使用内置模板自动生成。"}
+          </p>
         ) : (
           <>
             <div className="form-row">
@@ -729,9 +730,7 @@ export function PageForms(props: Props) {
   }
   return (
     <>
-      <div className="tool-toolbar">
-        {toolbar}
-      </div>
+      <div className="tool-toolbar">{toolbar}</div>
       <div
         className={`page-content ${id}`}
         style={

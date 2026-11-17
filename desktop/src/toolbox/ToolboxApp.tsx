@@ -1308,11 +1308,13 @@ export function ToolboxApp({
             }}
           />
         )}
-        <TaskResults
-          task={tasks
-            .filter((task) => task.tool_id === current && terminal(task))
-            .at(-1)}
-        />
+        {current !== "report" && (
+          <TaskResults
+            task={tasks
+              .filter((task) => task.tool_id === current && terminal(task))
+              .at(-1)}
+          />
+        )}
         <LogConsole
           key={current}
           tool={tool}
