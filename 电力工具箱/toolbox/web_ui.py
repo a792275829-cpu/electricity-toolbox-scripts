@@ -118,7 +118,10 @@ class WebUI:
         if method in {"ui.market.fields","ui.market.preview","ui.market.report_date"}:
             if method == "ui.market.report_date":
                 from .market_report_dates import report_date_from_day_report
-                return report_date_from_day_report(Path(params["path"])).isoformat()
+                path = str(params.get("path") or "").strip()
+                if not path:
+                    raise ValueError("请先选择 D 日收益表，报告日期将自动识别。")
+                return report_date_from_day_report(Path(path).expanduser()).isoformat()
             module = load_module("web_manual_market",self.paths.workspace/"南方分公司电力市场日报/gd_power_report/manual_market.py")
             if method == "ui.market.fields": return [asdict(field) for field in module.MARKET_FIELDS]
             return module.preview_manual_market(params["data"],parse_date_input(params["date"]))

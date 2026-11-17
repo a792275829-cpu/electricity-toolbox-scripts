@@ -60,6 +60,41 @@ class WebUITests(unittest.TestCase):
         self.assertTrue(self.service.call('ui.requires_credentials', {'tool_id':'online-energy'}))
         self.assertEqual(len(self.service.call('ui.market.fields', {})), 9)
         with self.assertRaisesRegex(ValueError, '不支持'): self.service.call('ui.unknown', {})
+    def test_manual_market_requires_day_workbook_and_uses_workbook_date(self):
+        from datetime import date
+        import openpyxl
+        for path in ("", "  "):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "请先选择 D 日收益表"):
+                self.service.call('ui.market.report_date', {'path': path})
+        path = self.data / '日期识别.xlsx'
+        book = openpyxl.Workbook()
+        book.active.title = '新快报'
+        book.active['A6'] = date(2026, 11, 17)
+        book.save(path)
+        book.close()
+        self.assertEqual(self.service.call('ui.market.report_date', {'path': str(path)}), '2026-11-17')
+
+    def test_manual_market_preview_validates_all_36_values_and_normalizes_for_save(self):
+        day = '2026-11-17'
+        fields = self.service.call('ui.market.fields', {})
+        data = {'report_date': day, **{
+            period: {field['key']: {'value': '100', 'comparison': '90'} for field in fields}
+            for period in ('day_ahead', 'realtime')
+        }}
+        result = self.service.call('ui.market.preview', {'date': day, 'data': data})
+        for period in ('day_ahead', 'realtime'):
+            self.assertEqual(len(result['data'][period]), 9)
+            self.assertTrue(all(pair == {'value': 100, 'comparison': 90}
+                                for pair in result['data'][period].values()))
+            self.assertEqual(set(result['deltas'][period].values()), {10})
+        data['realtime']['coal']['value'] = '1.5'
+        with self.assertRaisesRegex(ValueError, '非负整数'):
+            self.service.call('ui.market.preview', {'date': day, 'data': data})
+        data['realtime']['coal']['value'] = '100'
+        with self.assertRaisesRegex(ValueError, '日期'):
+            self.service.call('ui.market.preview', {'date': '2026-11-18', 'data': data})
+        self.assertEqual(self.service.call('ui.market.preview', {'date': day, 'data': {'report_date': day}})['data'], {})
+
     def test_relative_business_path_and_blank_guard(self):
         actual = self.service.call('ui.business.directory', {'path':'data.xlsx','workbook':True})
         self.assertEqual(actual, str(self.service.paths.guangdong_price_dir.resolve()))

@@ -6,6 +6,7 @@ import { call } from "../api";
 import { Button, Check, Modal, choosePath } from "./controls";
 import { PageForms, TextField } from "./PageForms";
 import { WpsEditor } from "./WpsEditor";
+import { ManualMarket } from "./ManualMarket";
 import {
   terminal,
   taskLabels,
@@ -532,149 +533,6 @@ function LogConsole({
         </Modal>
       )}
     </div>
-  );
-}
-
-function ManualMarket({
-  reportDate,
-  initial,
-  onSave,
-  onClose,
-}: {
-  reportDate: string;
-  initial: Values;
-  onSave: (value: Values) => void;
-  onClose: () => void;
-}) {
-  const [fields, setFields] = useState<any[]>([]);
-  const [period, setPeriod] = useState("day_ahead");
-  const [data, setData] = useState<Values>({
-    ...initial,
-    report_date: reportDate,
-  });
-  const [preview, setPreview] = useState<any>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    void call<any[]>("ui.market.fields").then(setFields);
-  }, []);
-  useEffect(() => {
-    let stale = false;
-    const timer = setTimeout(() => {
-      void call<any>("ui.market.preview", { data, date: reportDate })
-        .then((result) => {
-          if (!stale) {
-            setPreview(result);
-            setError("");
-          }
-        })
-        .catch((error) => {
-          if (!stale) setError(String(error));
-        });
-    }, 180);
-    return () => {
-      stale = true;
-      clearTimeout(timer);
-    };
-  }, [data]);
-  function readManual() {
-    const current = { ...data, [period]: { ...data[period] } };
-    document
-      .querySelectorAll<HTMLInputElement>("input[data-market-key]")
-      .forEach((input) => {
-        const key = input.dataset.marketKey!;
-        current[period][key] = {
-          ...current[period][key],
-          [input.dataset.marketType!]: input.value,
-        };
-      });
-    return current;
-  }
-  function change(key: string, type: string, value: string) {
-    setData({
-      ...data,
-      [period]: {
-        ...data[period],
-        [key]: { ...data[period]?.[key], [type]: value },
-      },
-    });
-  }
-  const shift = (days: number) => {
-    const day = new Date(reportDate + "T12:00:00");
-    day.setDate(day.getDate() + days);
-    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
-  };
-  return (
-    <Modal title="手动填写数据" wide onClose={onClose}>
-      <div className="tb-tabs" role="tablist">
-        {[
-          ["day_ahead", "日前市场"],
-          ["realtime", "实时市场"],
-        ].map(([key, name]) => (
-          <button
-            key={key}
-            role="tab"
-            aria-selected={period === key}
-            onClick={() => {
-              setData(readManual());
-              setPeriod(key);
-            }}
-          >
-            {name}
-          </button>
-        ))}
-      </div>
-      <div className="manual-market">
-        <p className="muted">
-          当前：{period === "day_ahead" ? reportDate : shift(-2)}{" "}
-          {period === "day_ahead" ? "日前" : "实时"}　 对比：
-          {period === "day_ahead" ? shift(-1) : shift(-2)} 日前
-        </p>
-        <table>
-          <thead>
-            <tr>
-              {["指标", "当前值", "对比值", "增减（自动）"].map((label) => (
-                <th key={label}>{label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {fields.map((field) => (
-              <tr key={field.key}>
-                <td>
-                  {field.name}（{field.unit}）
-                </td>
-                {["value", "comparison"].map((type) => (
-                  <td key={type}>
-                    <input
-                      data-market-key={field.key}
-                      data-market-type={type}
-                      aria-label={`${field.name}${type === "value" ? "当前值" : "对比值"}`}
-                      value={data[period]?.[field.key]?.[type] ?? ""}
-                      onChange={(event) =>
-                        change(field.key, type, event.target.value)
-                      }
-                    />
-                  </td>
-                ))}
-                <td>{preview?.deltas?.[period]?.[field.key] ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <Button run={() => setData({ ...data, [period]: {} })}>清空本页</Button>
-        {error && <p role="alert">{error}</p>}
-      </div>
-      <footer>
-        <Button run={onClose}>取消</Button>
-        <Button
-          run={() => {
-            if (!error) onSave(readManual());
-          }}
-        >
-          保存并返回
-        </Button>
-      </footer>
-    </Modal>
   );
 }
 
@@ -1298,7 +1156,14 @@ export function ToolboxApp({
             }}
             reportDate={(path) => {
               void call<string>("ui.market.report_date", { path })
-                .then((day) => update({ _report_date: day, manual_market: "" }))
+                .then((day) =>
+                  update({
+                    _report_date: day,
+                    ...(day !== values._report_date
+                      ? { manual_market: "" }
+                      : {}),
+                  }),
+                )
                 .catch((error) =>
                   message(String(error), {
                     title: "报告日期识别失败",
@@ -1421,7 +1286,11 @@ export function ToolboxApp({
           initial={values.manual_market ? JSON.parse(values.manual_market) : {}}
           onClose={() => setManual(false)}
           onSave={(data) => {
-            update({ manual_market: JSON.stringify(data) });
+            update({
+              manual_market: Object.keys(data).length
+                ? JSON.stringify(data)
+                : "",
+            });
             setManual(false);
           }}
         />
