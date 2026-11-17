@@ -65,6 +65,28 @@ class WebUITests(unittest.TestCase):
         self.assertEqual(actual, str(self.service.paths.guangdong_price_dir.resolve()))
         with self.assertRaises(ValueError): self.service.call('ui.business.directory', {'path':'  '})
 
+    def test_output_directory_uses_selected_station_and_pdf_default(self):
+        selected = self.data/'海风'/'收益.xlsx'
+        values = dict(guihu_workbook=str(self.data/'归湖'/'收益.xlsx'),haifeng_workbook=str(selected),haifeng_selected=True)
+        self.assertEqual(self.service.call('ui.output.directory',{'tool_id':'power-benefit','values':values}),str(selected.parent))
+        self.assertEqual(self.service.call('ui.output.directory',{'tool_id':'daily-pdf-parser','values':{'pdf_path':str(self.data/'日报.pdf')}}),str(self.data))
+        with self.assertRaises(ValueError):self.service.call('ui.output.directory',{'tool_id':'trade-analysis','values':{}})
+    def test_output_directory_uses_current_online_config(self):
+        from toolbox_shared.credentials import write_private_json
+        output=self.data/'导出目录'
+        write_private_json(self.data/'上网电量抓取/config.json',{'outputDir':str(output)})
+        self.assertEqual(self.service.call('ui.output.directory',{'tool_id':'online-energy'}),str(output))
+    def test_editor_apply_queue_and_shutdown_are_forwarded(self):
+        with patch('webbrowser.open_new_tab',return_value=True):
+            self.service.call('ui.section.editor',{})
+        browser=self.service._web_ui.browser
+        browser.applied.put(self.data/'验证拓扑.json')
+        self.assertEqual(self.service.call('ui.section.status',{})['applied'],str(self.data/'验证拓扑.json'))
+        self.assertIsNone(self.service.call('ui.section.status',{})['applied'])
+        self.service.call('shutdown',{'cancel':True})
+        self.assertTrue(browser.closed)
+        self.assertFalse(browser.thread.is_alive())
+
 
 class MemoryStore:
     def __init__(self): self.value = dict(username='sample',password='sample',revision='first')

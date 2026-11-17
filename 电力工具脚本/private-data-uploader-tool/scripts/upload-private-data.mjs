@@ -110,7 +110,9 @@ async function readJson(filePath, fallback = undefined) {
 }
 
 async function loadConfig(args) {
-  const config = await readJson(args.configPath);
+  // Fresh managed/development data roots may have no optional override file.
+  // Use the existing macOS defaults; explicit custom paths still fail loudly.
+  const config = await readJson(args.configPath, args.configPath === defaultConfigPath ? {} : undefined);
   const loginConfigPath = dataPath(path.resolve(config.loginConfigPath ?? path.join(dataDir, 'config.json')));
   const loginConfig = await readJson(loginConfigPath, {});
   const sharedAccount = await loadSharedAccount(path.resolve(rootDir, '../..'));

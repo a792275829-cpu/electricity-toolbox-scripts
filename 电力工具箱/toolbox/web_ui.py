@@ -80,6 +80,36 @@ class WebUI:
             if not path.is_absolute(): path = self.paths.guangdong_price_dir / path
             path = path.resolve()
             return str(path.parent if params.get("workbook") else path)
+        if method == "ui.output.directory":
+            tool = params["tool_id"]
+            values = params.get("values", {})
+            directories = {
+                "online-energy": lambda: self.service.call("online_energy.settings", {})["output_dir"],
+                "wind-forecast": lambda: self.paths.wind_forecast_output_dir,
+                "report": lambda: data_path(self.paths.report_root / "输出"),
+                "market-report": lambda: self.paths.market_report_output_dir,
+            }
+            if tool in directories:
+                return str(Path(directories[tool]()).expanduser().resolve())
+            key = {"guangdong-price":"prediction_output_dir", "summary-upload":"input_dir",
+                   "trade-analysis":"output_dir", "section-analysis":"output_root"}.get(tool)
+            if key:
+                text = str(values.get(key, "")).strip()
+                if not text: raise ValueError("请先选择输出目录")
+                return str(Path(text).expanduser().resolve())
+            if tool == "daily-pdf-parser":
+                from .file_rules import default_output_for_pdf
+                text = values.get("output_path") or (default_output_for_pdf(values["pdf_path"]) if values.get("pdf_path") else "")
+            elif tool in {"transaction-info", "market-table"}:
+                text = values.get("workbook", "")
+            elif tool in {"power-benefit", "spot-price"}:
+                keys = [key for key in ("guihu", "tuolian", "haifeng") if values.get(key + "_selected")]
+                keys = keys or ["guihu", "tuolian", "haifeng"]
+                text = next((values[key + "_workbook"] for key in keys if values.get(key + "_workbook")), "")
+            else:
+                raise ValueError("该工具没有独立输出目录")
+            if not str(text).strip(): raise ValueError("请先选择工作簿或输出位置")
+            return str(Path(text).expanduser().resolve().parent)
         if method == "ui.local.sheets":
             import openpyxl
             book = openpyxl.load_workbook(Path(params["path"]).expanduser(),read_only=True,data_only=True)

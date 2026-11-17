@@ -1,9 +1,4 @@
 {
-  "baseUrl": "https://example.com",
-  "sourceDir": "C:/path/to/source/files",
-  "loginConfigPath": "C:/path/to/config.json",
-  "authStatePath": "auth_state.json",
-  "userDataDir": ".browser-profile-uploader",
-  "chromeExecutablePath": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "baseUrl": "https://xhxt.chng.com.cn",
   "headless": true
 }

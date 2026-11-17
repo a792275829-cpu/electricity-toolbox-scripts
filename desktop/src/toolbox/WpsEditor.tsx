@@ -295,6 +295,8 @@ function DocumentEditor({
       />
       {button && (
         <Button
+          id={`wps-inspect-${key}`}
+          data-action="inspect"
           disabled={reading}
           run={() => {
             void read(target);
@@ -598,6 +600,8 @@ export function WpsEditor({
         <div className="form-row browser-actions">
           <label />
           <Button
+            id="wps-writer-action-login"
+            data-action="login"
             run={() => {
               void status("login");
             }}
@@ -605,6 +609,8 @@ export function WpsEditor({
             登录 WPS
           </Button>
           <Button
+            id="wps-writer-action-status"
+            data-action="status"
             run={() => {
               void status("status");
             }}
@@ -749,6 +755,8 @@ export function WpsEditor({
           </span>
           <span className="toolbar-spacer" />
           <Button
+            id="wps-writer-action-preview"
+            data-action="preview"
             run={() => {
               void apply(true);
             }}
@@ -756,6 +764,8 @@ export function WpsEditor({
             预览
           </Button>
           <Button
+            id="wps-writer-action-run"
+            data-action="run"
             primary
             run={() => {
               void apply();

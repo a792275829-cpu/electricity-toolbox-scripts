@@ -39,10 +39,12 @@ function Credentials({
   register,
   login,
   sample,
+  loginAvailable,
 }: {
   register: (flush: (required?: boolean) => Promise<boolean>) => void;
   login: () => void;
   sample: boolean;
+  loginAvailable: boolean;
 }) {
   const [pair, setPair] = useState({ username: "", password: "" });
   const latest = useRef(pair);
@@ -221,7 +223,9 @@ function Credentials({
           重试验证
         </Button>
       )}
-      {state.kind === "manual" && <Button run={login}>打开登录窗口</Button>}
+      {state.kind === "manual" && loginAvailable && (
+        <Button run={login}>打开登录窗口</Button>
+      )}
     </div>
   );
 }
@@ -323,6 +327,39 @@ function Diagnostics({ navigation }: { navigation: string }) {
           {copied ? "已复制" : "复制报告"}
         </Button>
       </div>
+    </section>
+  );
+}
+
+function TaskResults({ task }: { task?: Task }) {
+  const outputs: string[] = [
+    ...new Set<string>(
+      (task?.result?.outputs ?? []).filter(
+        (path: unknown) => typeof path === "string" && path,
+      ),
+    ),
+  ];
+  const missing: string[] = task?.result?.missing ?? [];
+  if (!outputs.length && !missing.length) return null;
+  return (
+    <section className="task-results" aria-label="本次结果">
+      <span className="muted">本次结果</span>
+      {outputs.map((path) => (
+        <Button
+          key={path}
+          title={path}
+          run={() => {
+            void invoke("open_path", { path }).catch((error) =>
+              message(String(error), { title: "打开结果失败", kind: "error" }),
+            );
+          }}
+        >
+          打开 {basename(path)}
+        </Button>
+      ))}
+      {!!missing.length && (
+        <span role="status">缺少场站：{missing.join("、")}</span>
+      )}
     </section>
   );
 }
@@ -627,6 +664,7 @@ export function ToolboxApp({
   const [selectedTask, setSelectedTask] = useState("");
   const wpsSave = useRef(Promise.resolve());
   const [wps, setWps] = useState<Values | null>(null);
+  const [editorEpoch, setEditorEpoch] = useState(0);
   const [manual, setManual] = useState(false);
   const [updatePanel, setUpdatePanel] = useState<any>(null);
   const [error, setError] = useState("");
@@ -930,7 +968,11 @@ export function ToolboxApp({
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
-      const state = await call<any>("ui.section.status");
+      const state = await call<any>("ui.section.status").catch((error) => {
+        if (!stopped) setError(`接线图编辑状态读取失败：${String(error)}`);
+        return { closed: true };
+      });
+      if (stopped) return;
       if (state.applied) {
         setForms((previous) => ({
           ...previous,
@@ -954,7 +996,7 @@ export function ToolboxApp({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [current]);
+  }, [current, editorEpoch]);
   async function checkUpdates() {
     try {
       setUpdatePanel({ checking: true });
@@ -1059,22 +1101,20 @@ export function ToolboxApp({
       [current]: { ...previous[current], ...patch },
     }));
   async function openOutput() {
-    let path = boot!.directories[current];
-    if (current === "guangdong-price") path = values.prediction_output_dir;
-    if (current === "summary-upload") path = values.input_dir;
-    if (current === "trade-analysis") path = values.output_dir;
-    if (current === "section-analysis") path = values.output_root;
-    if (current === "daily-pdf-parser")
-      path = String(values.output_path || values.pdf_path || "")
-        .split("/")
-        .slice(0, -1)
-        .join("/");
-    if (["transaction-info", "power-benefit"].includes(current))
-      path = String(values.workbook || values.guihu_workbook || "")
-        .split("/")
-        .slice(0, -1)
-        .join("/");
+    const selected = { ...values };
+    page.current
+      ?.querySelectorAll<HTMLInputElement>("input[data-field]")
+      .forEach((input) => {
+        const key = input.dataset.field!;
+        if (input.type === "checkbox") selected[key] = input.checked;
+        else if (input.type !== "radio" || input.checked)
+          selected[key] = input.value;
+      });
     try {
+      const path = await call<string>("ui.output.directory", {
+        tool_id: current,
+        values: selected,
+      });
       await invoke("open_path", { path });
     } catch (error) {
       await message(String(error), { title: "打开目录失败", kind: "error" });
@@ -1188,18 +1228,37 @@ export function ToolboxApp({
             editor={() => {
               void call("ui.section.editor", {
                 input_path: values.files?.length === 1 ? values.files[0] : null,
-              }).catch((error) =>
-                message(String(error), { title: "浏览器编辑", kind: "error" }),
-              );
+              })
+                .then(() => setEditorEpoch((epoch) => epoch + 1))
+                .catch((error) =>
+                  message(String(error), {
+                    title: "浏览器编辑",
+                    kind: "error",
+                  }),
+                );
             }}
             manual={() => {
-              if (!values._report_date) {
-                void message("请先选择 D 日收益表，识别报告日期后填写数据。", {
-                  title: "缺少报告日期",
-                });
-                return;
-              }
-              setManual(true);
+              const path =
+                page.current?.querySelector<HTMLInputElement>(
+                  '[data-field="day_report"]',
+                )?.value ?? values.day_report;
+              void call<string>("ui.market.report_date", { path })
+                .then((day) => {
+                  update({
+                    day_report: path,
+                    _report_date: day,
+                    ...(day !== values._report_date
+                      ? { manual_market: "" }
+                      : {}),
+                  });
+                  setManual(true);
+                })
+                .catch((error) =>
+                  message(String(error), {
+                    title: "报告日期识别失败",
+                    kind: "error",
+                  }),
+                );
             }}
             reportDate={(path) => {
               void call<string>("ui.market.report_date", { path })
@@ -1213,6 +1272,11 @@ export function ToolboxApp({
             }}
           />
         )}
+        <TaskResults
+          task={tasks
+            .filter((task) => task.tool_id === current && terminal(task))
+            .at(-1)}
+        />
         <LogConsole
           key={current}
           tool={tool}
@@ -1271,6 +1335,10 @@ export function ToolboxApp({
           </section>
           <Credentials
             sample={sample}
+            loginAvailable={
+              current !== "wps-writer" &&
+              tool.actions.some((item) => item.id === "login")
+            }
             register={(handler) => {
               flush.current = handler;
             }}

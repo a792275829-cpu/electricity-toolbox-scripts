@@ -22,7 +22,9 @@ export function Button({
       {...props}
       className={`tb-button ${primary ? "primary" : ""} ${icon ? "file-button" : ""} ${props.className ?? ""}`}
       onClick={run}
-      title={typeof children === "string" ? children : undefined}
+      title={
+        props.title ?? (typeof children === "string" ? children : undefined)
+      }
       aria-label={
         icon && typeof children === "string" ? children : props["aria-label"]
       }

@@ -188,6 +188,7 @@ def plan(paths, tool_id, action, p):
             if not days.is_integer() or not 1 <= days <= 15:
                 raise ValueError("预测天数必须在 1 至 15 之间")
             output = required_path(p, "prediction_output_dir", exists=False) if p["prediction_output_dir"] else paths.guangdong_prediction_output_dir
+            p["prediction_output_dir"] = str(output)
             return [(commands.prediction(paths, master, output, int(days), int(months), p["run_date"]), paths.guangdong_price_dir)]
     elif tool_id == "summary-upload":
         source = required_path(p, "input_dir", directory=True)
@@ -228,6 +229,8 @@ def execute(paths, tool_id, action, p):
     for command, cwd in command_list:
         subprocess.run(script_command(command), cwd=cwd, check=True)
     if command_list:
+        if action == "login":
+            return dict(message="登录流程已结束，请查看日志并继续运行任务", outputs=[])
         outputs = []
         if tool_id == "daily-pdf-parser":
             if not Path(p["output_path"]).is_file():
@@ -247,6 +250,12 @@ def execute(paths, tool_id, action, p):
             outputs.append(str(directories[tool_id]))
         if tool_id in {"market-table", "transaction-info"} and action == "run":
             outputs.append(str(Path(p["workbook"]).expanduser()))
+        if tool_id in {"spot-price", "power-benefit"}:
+            outputs.extend(str(Path(p[key + "_workbook"]).expanduser())
+                           for key in ("guihu", "tuolian", "haifeng") if p[key + "_selected"])
+        if tool_id == "guangdong-price" and action == "predict":
+            outputs.extend([str(Path(p["master_workbook"]).expanduser()),
+                            str(Path(p["prediction_output_dir"]).expanduser())])
         return dict(message="任务已完成，请核对日志及输出文件", outputs=outputs)
     log = lambda text: print(str(text), flush=True)
     if tool_id == "trade-analysis":

@@ -1041,3 +1041,14 @@
 .single-row {
   --label-width: 46px;
 }
+
+.task-results {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 90px;
+  overflow: auto;
+  flex-shrink: 0;
+  padding-top: 8px;
+}

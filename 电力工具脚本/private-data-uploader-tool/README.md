@@ -14,16 +14,11 @@ node scripts/upload-private-data.mjs --plan --source "$HOME/Desktop/复盘/5-12"
 
 ## 首次配置与登录
 
-在仓库根目录复制示例配置：
+默认使用清能网站地址和各上传模式的独立数据目录，不要求预先创建 `upload.config.json`；目录预览仅扫描文件，不启动浏览器或上传。需要覆盖默认地址、无头模式或浏览器路径时，再复制 `upload.config.example.json` 为 `upload.config.json`。显式传入 `--config` 的自定义文件不存在或内容损坏时会报错，不会静默忽略。
 
-```sh
-cp "电力工具脚本/private-data-uploader-tool/upload.config.example.json" \
-   "电力工具脚本/private-data-uploader-tool/upload.config.json"
-```
+如需指定 macOS Chrome，可在配置中设置 `chromeExecutablePath` 为 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`。
 
-按示例填写上传地址、匹配规则和浏览器配置；如需显式指定 macOS Chrome，路径为 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`。
-
-账号由工具箱右侧“清能网站账号”统一配置，上传工具只共享账号密码。首次执行“预览”或“开始上传”时自动建立自己的登录态；两种上传模式的独立目录见下文。网络不可达时检查内网、VPN、代理和 `baseUrl`。
+账号由工具箱右侧“清能网站账号”统一配置，上传工具只共享账号密码。首次执行“登录”或“开始上传”时自动建立自己的登录态；两种上传模式的独立目录见下文。网络不可达时检查内网、VPN、代理和 `baseUrl`。
 
 ## 批量上传模式
 

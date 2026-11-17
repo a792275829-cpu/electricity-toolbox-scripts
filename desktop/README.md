@@ -41,7 +41,7 @@
 .venv/bin/python tooling/webview_ui_audit.py --pid <logs/webview-ui-process.json 中的 ui_pid>
 ```
 
-原版捕获使用隔离配置，输出 16 页截图与控件树至 `logs/ui-reference/`。AX 验收要求控制端已有 macOS 辅助功能权限，只允许操作离线样例窗口；检查 16 页导航、日期读写、取消、真实样例 Excel 回读、WPS 区域弹窗及侧栏开合，输出 `logs/ui-replica/summary.json`。不通过 DOM 注入替代系统操作。真实网站登录、上传、在线 WPS 写入和安装更新需另行业务验收；目前不宣称逐像素相同。结果与边界见[完整界面验证记录](docs/2026-11-17-webview-ui.md)。真实抓取、PDF、出力分析、交易系统副本写入及 WPS 在线读取的结果见[真实业务验证](docs/2026-11-17-webview-business.md)。
+原版捕获使用隔离配置，输出 16 页截图与控件树至 `logs/ui-reference/`。AX 验收要求控制端已有 macOS 辅助功能权限，只允许操作离线样例窗口；检查 16 页导航、日期读写、取消、真实样例 Excel 回读、WPS 区域弹窗及侧栏开合，输出 `logs/ui-replica/summary.json`。不通过 DOM 注入替代系统操作。真实网站登录、上传、在线 WPS 写入和安装更新需另行业务验收；目前不宣称逐像素相同。结果与边界见[完整界面验证记录](docs/2026-11-17-webview-ui.md)。真实抓取、PDF、出力分析、交易系统副本写入及 WPS 在线读取的结果见[真实业务验证](docs/2026-11-17-webview-business.md)。16 个业务、36 个操作的接入清单和覆盖边界见[全业务接入覆盖](docs/2026-11-17-webview-business-coverage.md)。
 
 ## WebView / React 导出页试用
 

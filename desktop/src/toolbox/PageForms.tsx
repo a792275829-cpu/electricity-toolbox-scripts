@@ -117,6 +117,21 @@ export function PageForms(props: Props) {
       {label}
     </Button>
   );
+  const businessAction = (
+    label: string,
+    taskAction = "run",
+    primary = true,
+  ) => (
+    <Button
+      id={`${id}-action-${taskAction}`}
+      data-action={taskAction}
+      primary={primary}
+      disabled={busy}
+      run={() => run(taskAction)}
+    >
+      {label}
+    </Button>
+  );
   const options = (
     <div className="form-options">
       <Check
@@ -305,11 +320,7 @@ export function PageForms(props: Props) {
   if (id === "online-energy" || id === "wind-forecast") {
     toolbar = (
       <>
-        {action(
-          id === "online-energy" ? "开始导出" : "生成截图",
-          () => run(),
-          true,
-        )}
+        {businessAction(id === "online-energy" ? "开始导出" : "生成截图")}
         {action("打开输出目录", openOutput)}
       </>
     );
@@ -325,7 +336,7 @@ export function PageForms(props: Props) {
       </Frame>
     );
   } else if (id === "market-table") {
-    toolbar = action("开始更新", () => run(), true);
+    toolbar = businessAction("开始更新");
     body = (
       <>
         <Frame title="更新设置">
@@ -347,7 +358,7 @@ export function PageForms(props: Props) {
   } else if (["spot-price", "power-benefit", "transaction-info"].includes(id)) {
     toolbar = (
       <>
-        {action("抓取并更新", () => run(), true)}
+        {businessAction("抓取并更新")}
         {id !== "spot-price" && action("打开工作簿目录", openOutput)}
       </>
     );
@@ -397,8 +408,8 @@ export function PageForms(props: Props) {
   } else if (id === "guangdong-price") {
     toolbar = (
       <>
-        {action("补齐数据总表", () => run("update"), true)}
-        {action("运行日前预测", () => run("predict"))}
+        {businessAction("补齐数据总表", "update")}
+        {businessAction("运行日前预测", "predict", false)}
         {action("打开预测目录", openOutput)}
       </>
     );
@@ -421,6 +432,7 @@ export function PageForms(props: Props) {
             <label>滚动训练月数</label>
             <TextField
               field="training_months"
+              label="滚动训练月数"
               type="number"
               value={v.training_months}
               onChange={(value) => update({ training_months: value })}
@@ -434,6 +446,7 @@ export function PageForms(props: Props) {
             <label>预测天数</label>
             <TextField
               field="forecast_days"
+              label="预测天数"
               type="number"
               value={v.forecast_days}
               onChange={(value) => update({ forecast_days: value })}
@@ -453,7 +466,8 @@ export function PageForms(props: Props) {
       : { both: "解析并上传", parse: "开始解析", upload: "上传已有文件" };
     toolbar = (
       <>
-        {action((labels as any)[v.mode] ?? "开始执行", () => run(), true)}
+        {businessAction((labels as any)[v.mode] ?? "开始执行")}
+        {summary && businessAction("预览上传文件", "preview", false)}
         {action("打开输出目录", openOutput)}
       </>
     );
@@ -517,15 +531,15 @@ export function PageForms(props: Props) {
           true,
         )}
         {!section && action("自动匹配D和D-2", autoMatch)}
-        {!section && action("开始分析", () => run(), true)}
+        {!section && businessAction("开始分析")}
         {section && action("移除选中", remove)}
         {action("清空列表", () => update({ files: [] }))}
         {!section && action("移除选中", remove)}
         {section && (
           <>
             {action("浏览器编辑", editor)}
-            {action("检修登录", () => run("login"))}
-            {action("开始分析", () => run(), true)}
+            {businessAction("检修登录", "login", false)}
+            {businessAction("开始分析")}
           </>
         )}
         {action(section ? "打开结果目录" : "打开输出目录", openOutput)}
@@ -541,6 +555,17 @@ export function PageForms(props: Props) {
               "json",
             ])}
             {path("output_root", "结果目录", true, "选择目录")}
+            <div className="form-row">
+              <label htmlFor="field-threshold">价差阈值</label>
+              <TextField
+                field="threshold"
+                label="价差阈值"
+                type="number"
+                value={v.threshold}
+                onChange={(threshold) => update({ threshold })}
+              />
+              <span className="muted">元/MWh，严格大于</span>
+            </div>
           </Frame>
         ) : (
           path("output_dir", "输出目录", true, "选择目录")
@@ -551,7 +576,7 @@ export function PageForms(props: Props) {
     const market = id === "market-report";
     toolbar = (
       <>
-        {action(market ? "生成日报" : "开始生成", () => run(), true)}
+        {businessAction(market ? "生成日报" : "开始生成")}
         {action("打开输出目录", openOutput)}
         {market && action("手动填写数据", manual)}
       </>
@@ -639,7 +664,7 @@ export function PageForms(props: Props) {
           false,
           true,
         )}
-        {action("开始上传", () => run(), true)}
+        {businessAction("开始上传")}
         <span className="toolbar-spacer" />
         {group ? (
           <Check
@@ -707,7 +732,12 @@ export function PageForms(props: Props) {
   }
   return (
     <>
-      <div className="tool-toolbar">{toolbar}</div>
+      <div className="tool-toolbar">
+        {toolbar}
+        {id !== "section-analysis" &&
+          tool.actions.some((item) => item.id === "login") &&
+          businessAction("登录", "login", false)}
+      </div>
       <div
         className={`page-content ${id}`}
         style={

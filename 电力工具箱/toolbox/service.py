@@ -190,7 +190,11 @@ class ToolboxService:
         if method == "prepare_task":
             tool, action = params.get("tool_id"), params.get("action", "run")
             values = validate(self.paths, tool, action, params.get("values", {}))
-            return dict(values=values, confirmation=self.confirmation(tool, action, values))
+            # Internal derived paths belong to the worker, not the public form
+            # contract. Returning them makes the subsequent start reject its own
+            # prepared request (e.g. summary-upload's output_file).
+            public_values = {field["key"]: values[field["key"]] for field in self._tools[tool]["fields"]}
+            return dict(values=public_values, confirmation=self.confirmation(tool, action, values))
         if method == "start":
             return self.start(params)
         if method == "tasks":
