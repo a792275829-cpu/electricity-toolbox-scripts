@@ -1,13 +1,14 @@
 {
   "recent_urls": [],
   "browser_mode": "managed_cdp",
+  "overwrite": false,
   "cdp_url": "http://127.0.0.1:9222",
   "configs": [
     {
       "name": "上网电量写入",
       "source_type": "excel",
       "source_url": "",
-      "kdocs_url": "https://www.kdocs.cn/l/csEQ4dne7HF5",
+      "kdocs_url": "",
       "local_file": "",
       "regions": [
         {
@@ -47,8 +48,8 @@
           "source_start": "A57",
           "source_end": "D80",
           "target_sheet": "东莞",
-          "target_start": "Y3",
-          "target_end": "AB26"
+          "target_start": "X3",
+          "target_end": "AA26"
         },
         {
           "source_sheet": "汇总",
@@ -57,6 +58,22 @@
           "target_sheet": "汕头",
           "target_start": "T3",
           "target_end": "V26"
+        },
+        {
+          "source_sheet": "汇总",
+          "source_start": "A165",
+          "source_end": "A188",
+          "target_sheet": "基础信息",
+          "target_start": "AB42",
+          "target_end": "AB65"
+        },
+        {
+          "source_sheet": "汇总",
+          "source_start": "B165",
+          "source_end": "B188",
+          "target_sheet": "基础信息",
+          "target_start": "AD42",
+          "target_end": "AD65"
         }
       ]
     },
@@ -64,7 +81,7 @@
       "name": "日前电量写入",
       "source_type": "excel",
       "source_url": "",
-      "kdocs_url": "https://www.kdocs.cn/l/cn5wW44OLJNc",
+      "kdocs_url": "",
       "local_file": "",
       "regions": [
         {
@@ -116,14 +133,6 @@
           "target_end": "C27"
         },
         {
-          "source_sheet": "汕头",
-          "source_start": "D4",
-          "source_end": "E27",
-          "target_sheet": "汕头",
-          "target_start": "F3",
-          "target_end": "G26"
-        },
-        {
           "source_sheet": "海门",
           "source_start": "D4",
           "source_end": "E27",
@@ -141,8 +150,8 @@
         },
         {
           "source_sheet": "汕头",
-          "source_start": "F4",
-          "source_end": "G27",
+          "source_start": "D4",
+          "source_end": "E27",
           "target_sheet": "汕头",
           "target_start": "J3",
           "target_end": "K26"
@@ -178,6 +187,22 @@
           "target_sheet": "东莞",
           "target_start": "N3",
           "target_end": "O26"
+        },
+        {
+          "source_sheet": "全省汇总",
+          "source_start": "A2",
+          "source_end": "CR2",
+          "target_sheet": "全省节点均价（日更）",
+          "target_start": "B3",
+          "target_end": "CS3"
+        },
+        {
+          "source_sheet": "海风汇总",
+          "source_start": "A2",
+          "source_end": "CR2",
+          "target_sheet": "全省节点均价（日更）",
+          "target_start": "B5",
+          "target_end": "CS5"
         }
       ]
     },
@@ -185,13 +210,13 @@
       "name": "实时电量写入",
       "source_type": "excel",
       "source_url": "",
-      "kdocs_url": "https://www.kdocs.cn/l/crMmVIQPta18",
+      "kdocs_url": "",
       "local_file": "",
       "regions": [
         {
           "source_sheet": "汕头",
-          "source_start": "I4",
-          "source_end": "J27",
+          "source_start": "G4",
+          "source_end": "H27",
           "target_sheet": "汕头",
           "target_start": "D3",
           "target_end": "E26"
@@ -246,8 +271,8 @@
         },
         {
           "source_sheet": "汕头",
-          "source_start": "M4",
-          "source_end": "N27",
+          "source_start": "I4",
+          "source_end": "J27",
           "target_sheet": "汕头",
           "target_start": "L3",
           "target_end": "M26"
@@ -299,6 +324,22 @@
           "target_sheet": "东莞",
           "target_start": "P3",
           "target_end": "Q26"
+        },
+        {
+          "source_sheet": "全省汇总",
+          "source_start": "A4",
+          "source_end": "CR4",
+          "target_sheet": "全省节点均价（日更）",
+          "target_start": "B4",
+          "target_end": "CS4"
+        },
+        {
+          "source_sheet": "海风汇总",
+          "source_start": "A4",
+          "source_end": "CR4",
+          "target_sheet": "全省节点均价（日更）",
+          "target_start": "B6",
+          "target_end": "CS6"
         }
       ]
     }

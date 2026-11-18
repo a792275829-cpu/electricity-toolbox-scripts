@@ -687,7 +687,11 @@ export function WpsEditor({
                 .then(async (path) => {
                   if (path) {
                     const imported = await call<Values>("wps.import", { path });
-                    await onConfig(imported);
+                    await onConfig({
+                      ...imported,
+                      recent_urls: config.recent_urls,
+                      document_titles: config.document_titles,
+                    });
                     setSelected([]);
                   }
                 })

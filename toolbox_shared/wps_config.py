@@ -96,13 +96,22 @@ def legacy_documents(data: dict[str, Any]) -> list[dict[str, Any]]:
         grouped[key]["regions"].append(region)
     return list(grouped.values())
 
+def _portable_config(data: dict[str, Any]) -> dict[str, Any]:
+    config = normalize_runtime_config(data)
+    config.pop("recent_urls")
+    config.pop("document_titles", None)
+    for row in config["configs"]:
+        for field in ("source_url", "kdocs_url", "local_file"):
+            row.pop(field)
+    return config
+
 def build_config_export(runtime_config: dict[str, Any], exported_at: str | None = None) -> dict[str, Any]:
     export_time = exported_at or datetime.now().replace(microsecond=0).isoformat()
     return {
         "schema": CONFIG_EXPORT_SCHEMA,
         "version": CONFIG_EXPORT_VERSION,
         "exported_at": export_time,
-        **normalize_runtime_config(runtime_config),
+        **_portable_config(runtime_config),
     }
 
 def runtime_config_from_export_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -110,7 +119,7 @@ def runtime_config_from_export_payload(payload: dict[str, Any]) -> dict[str, Any
         raise ValueError("无法识别此配置文件，请选择由本工具导出的配置。")
     if payload.get("version") != CONFIG_EXPORT_VERSION:
         raise ValueError(f"暂不支持此配置文件版本：{payload.get('version')!r}")
-    runtime_config = normalize_runtime_config(payload)
+    runtime_config = normalize_runtime_config(_portable_config(payload))
     if not runtime_config["configs"]:
         raise ValueError("配置文件中没有可导入的写入配置。")
     return runtime_config

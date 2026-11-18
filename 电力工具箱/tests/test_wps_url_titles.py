@@ -32,13 +32,26 @@ class WpsTitleFormatTests(unittest.TestCase):
         self.assertEqual(url_choices([], {}, 'https://example.test/（原始）')['url'],
                          'https://example.test/（原始）')
 
-    def test_title_cache_survives_export_import_without_changing_mappings(self):
+    def test_title_cache_and_file_references_are_excluded_from_exchange(self):
         config = json.loads((ROOT / 'wps自动/wps_excel_to_kdocs_config.defaults.json').read_text())
         original = copy.deepcopy(config['configs'])
         config['document_titles'] = {FIRST: TITLE, SECOND: '另一份表格'}
-        restored = runtime_config_from_export_payload(build_config_export(config))
-        self.assertEqual(restored['document_titles'], config['document_titles'])
-        self.assertEqual(restored['configs'], original)
+        config['recent_urls'] = [FIRST, SECOND]
+        config['configs'][0].update(source_url=FIRST, kdocs_url=SECOND, local_file='/tmp/source.xlsx')
+        exported = build_config_export(config)
+        self.assertNotIn('document_titles', exported)
+        self.assertNotIn('recent_urls', exported)
+        for row in exported['configs']:
+            self.assertTrue({'source_url', 'kdocs_url', 'local_file'}.isdisjoint(row))
+        self.assertEqual(config['configs'][0]['source_url'], FIRST)
+
+        legacy = {**exported, **config}
+        for payload in (exported, legacy):
+            with self.subTest(payload=payload is legacy):
+                restored = runtime_config_from_export_payload(payload)
+                self.assertNotIn('document_titles', restored)
+                self.assertEqual(restored['recent_urls'], [])
+                self.assertEqual(restored['configs'], original)
 
 
 class WpsTitleDialogTests(unittest.TestCase):

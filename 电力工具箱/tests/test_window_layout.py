@@ -123,7 +123,7 @@ class MinimumWindowLayoutTests(unittest.TestCase):
                         app.update()
                         self._settle(app, app.pages[name])
                         if name == "WPS写入工具":
-                            # 该页的内容在后台就绪后才铺开，34 个写入区域的配置表
+                            # 该页的内容在后台就绪后才铺开，写入区域的配置表
                             # 天然高于常见窗口，保留自己的内部滚动；这里不要求整页
                             # 放得下，可达性由最小窗口用例覆盖。
                             continue

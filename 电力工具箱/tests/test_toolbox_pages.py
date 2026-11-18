@@ -343,6 +343,9 @@ class PageAdapterTests(unittest.TestCase):
         self.assertEqual(runtime_config["cdp_url"], "http://127.0.0.1:9222")
         self.assertEqual(runtime_config["configs"][0]["name"], "上网电量写入")
         self.assertEqual(runtime_config["configs"][0]["regions"][0]["target_sheet"], "汕头")
+        self.assertEqual(runtime_config["configs"][0]["kdocs_url"], "")
+        self.assertEqual(runtime_config["configs"][0]["local_file"], "")
+        self.assertEqual(runtime_config["recent_urls"], [])
 
     def test_wps_writer_exports_runtime_config_with_schema(self) -> None:
         from toolbox.runtime import load_module
@@ -380,7 +383,10 @@ class PageAdapterTests(unittest.TestCase):
         self.assertEqual(exported["version"], 1)
         self.assertEqual(exported["exported_at"], "2026-06-29T16:45:11")
         self.assertEqual(exported["configs"][0]["source_type"], "kdocs")
-        self.assertEqual(module.runtime_config_from_export_payload(exported), runtime_config)
+        restored = module.runtime_config_from_export_payload(exported)
+        self.assertEqual(restored["configs"][0]["regions"], runtime_config["configs"][0]["regions"])
+        self.assertEqual(restored["configs"][0]["source_url"], "")
+        self.assertEqual(restored["configs"][0]["kdocs_url"], "")
         # 旧配置文件没有 overwrite 字段时按默认的「覆盖非空单元格」导入。
         legacy = {key: value for key, value in exported.items() if key != "overwrite"}
         self.assertTrue(module.runtime_config_from_export_payload(legacy)["overwrite"])

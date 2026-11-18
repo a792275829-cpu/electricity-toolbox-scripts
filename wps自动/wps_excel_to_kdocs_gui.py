@@ -1719,13 +1719,15 @@ class WpsWriterFrame(ttk.Frame):
             return
         try:
             runtime_config = load_config_export(Path(path_text))
+            runtime_config["recent_urls"] = self.recent_urls
+            runtime_config["document_titles"] = self.document_titles
             self.apply_runtime_config(runtime_config)
         except Exception as exc:
             messagebox.showerror("导入配置失败", str(exc), parent=self)
             self.log(f"导入配置失败：{exc}")
             return
         self.log(f"已导入配置：{Path(path_text).name}")
-        messagebox.showinfo("导入配置", "配置已导入并保存。", parent=self)
+        messagebox.showinfo("导入配置", "配置已导入并保存。写入前请在各配置中设置来源文件和目标链接。", parent=self)
 
     def export_config(self) -> None:
         default_name = f"写入配置_{datetime.now().strftime('%Y%m%d')}.json"
