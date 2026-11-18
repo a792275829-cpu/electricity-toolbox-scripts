@@ -3,6 +3,7 @@ import importlib
 
 import importlib.util
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -82,17 +83,25 @@ class WpsPackagedConfigurationTests(unittest.TestCase):
         self.assertFalse(any((self.root / 'user').rglob('wps-browser-profile')))
 
     def test_source_mode_uses_defaults_without_writing_over_user_settings(self):
+        from toolbox.service import ToolboxService
+        from toolbox_shared.wps_config import normalize_runtime_config
+
         module = importlib.import_module('toolbox_shared.wps_service')
-        runtime = self.root / 'local/wps_excel_to_kdocs_config.json'
-        with mock.patch.object(module, 'CONFIG_PATH', runtime):
-            self.assertEqual(module.load_config(), self.seed)
-            self.assertFalse(runtime.exists())
-            runtime.parent.mkdir()
-            runtime.write_text('{"configs":[]}')
-            self.assertEqual(module.load_config(), {'configs': []})
-            runtime.write_text('invalid json')
-            self.assertEqual(module.load_config(), {})
-            self.assertEqual(runtime.read_text(), 'invalid json')
+        data = self.root / 'local'
+        runtime = data / RUNTIME_CONFIG
+        with mock.patch.dict(os.environ, TOOLBOX_DATA_ROOT=str(data), TOOLBOX_CODE_ROOT=str(ROOT)):
+            service = ToolboxService(ROOT)
+            with mock.patch.object(module, 'CONFIG_PATH', runtime):
+                self.assertEqual(module.load_config(), self.seed)
+                self.assertEqual(service.call('wps.get', {}), normalize_runtime_config(self.seed))
+                self.assertFalse(runtime.exists())
+                runtime.parent.mkdir(parents=True)
+                for content, expected in (('{"configs":[]}', {'configs': []}), ('invalid json', {}), ('[]', {})):
+                    with self.subTest(content=content):
+                        runtime.write_text(content, encoding='utf-8')
+                        self.assertEqual(module.load_config(), expected)
+                        self.assertEqual(service.call('wps.get', {}), normalize_runtime_config(expected))
+                        self.assertEqual(runtime.read_text(encoding='utf-8'), content)
 
     def test_missing_default_resource_fails_packaging(self):
         (self.app / SEED).unlink()

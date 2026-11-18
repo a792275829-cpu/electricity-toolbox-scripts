@@ -9,6 +9,15 @@ CONFIG_EXPORT_VERSION = 1
 BROWSER_MODES = ("managed_cdp", "cdp")
 DEFAULT_BROWSER_MODE = "managed_cdp"
 
+def load_runtime_config(local_path: Path, default_path: Path) -> dict[str, Any]:
+    """Use the bundled defaults only when the local configuration is absent."""
+    path = local_path if local_path.exists() else default_path
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
 def normalize_browser_mode(value: Any) -> str:
     """Keep supported connection modes; retired ones fall back to the default."""
     mode = str(value or "").strip()

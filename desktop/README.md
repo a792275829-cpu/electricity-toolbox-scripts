@@ -58,7 +58,7 @@
 
 这是独立的开发试用模式：显示 React“导出上网电量”页面，不启动 Tk，使用独立应用标识 `com.electricity.toolbox.webview-pilot`；业务解释器固定使用根 `.venv`。需要现有 Node、npm、Rust 和 Xcode Command Line Tools。普通开发入口、源码启动及正式版仍使用原 Tk 界面。
 
-试用默认离线：开始、结束日期由原业务目录提供默认值，通过原 `prepare_task` 校验；开始导出走现有 Tauri → Python JSON 通信、任务引擎、独立工作进程、取消和日志。只将网站采集替换为已知样例，调用原导出器生成真实 Excel，重新打开核对“汇总”表的标题、机组、数据与数字格式。每次最多导出 3 天，反向日期立即拒绝；开始导出在任务运行时禁用，取消完成后恢复。不会读取实际账号、登录网站或修改已有业务工作簿。
+试用默认离线：开始、结束日期由原业务目录提供默认值，通过原 `prepare_task` 校验；开始导出走现有 Tauri → Python JSON 通信、任务引擎、独立工作进程、取消和日志。用模拟接口数据走原导出器的校验、换算和 Excel 写入，重新打开核对“汇总”表中的汕头原值、清远实际和 D+2 计划电量。每次最多导出 3 天，反向日期立即拒绝；开始导出在任务运行时禁用，取消完成后恢复。不会读取实际账号、登录网站或修改已有业务工作簿。
 
 数据位于 `~/Library/Application Support/com.electricity.toolbox/development/data/webview-pilot/data/`。样例结果位于其中的 `上网电量抓取/输出/<本次任务标识>/上网电量汇总_YYYY-MM-DD.xlsx`，每次使用新目录；页面可直接打开输出目录和生成文件。配置、数据、浏览器与正式版隔离；试用入口仅在 Rust debug 构建中生效，不属于正式发布功能。
 
@@ -120,7 +120,7 @@ Mac 当前采用 ad-hoc 签名，尚未使用 Apple Developer ID 或公证；首
 
 用户目录为 `~/Library/Application Support/com.electricity.toolbox`。开发版直接执行仓库源码，使用根目录下 `development/data/`，与已安装版本分开。业务模块的中文名称、相对路径、输出文件名及原版源码启动方式保留。
 
-WPS 的 3 项写入配置及 34 个写入区域作为功能默认配置随软件打包，首次安装写入 `data/wps自动/wps_excel_to_kdocs_config.json`。升级保留已有本机配置；新电脑需要重新选择本地来源文件并登录 WPS。默认业务配置维护在源码的 `wps自动/wps_excel_to_kdocs_config.defaults.json`，不包含账号、Cookie、浏览器 profile 或旧电脑的文件路径。
+WPS 的 3 项写入配置及 39 个写入区域作为功能默认配置随软件打包，首次安装写入 `data/wps自动/wps_excel_to_kdocs_config.json`。升级保留已有本机配置；新电脑需要重新选择本地来源文件并登录 WPS。默认业务配置维护在源码的 `wps自动/wps_excel_to_kdocs_config.defaults.json`，不包含账号、Cookie、浏览器 profile 或旧电脑的文件路径。
 
 首次新版启动会按旧安装清单迁移原 `workspace/`，备份并修正内部绝对路径，失败回滚。更新仅替换 `app/` 的清单文件，保留 `data/` 和 `samples/`；本地源码修改仍阻止覆盖。完整目录职责及迁移说明见 [目录约定](docs/directory-layout.md)。
 

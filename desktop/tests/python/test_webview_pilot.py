@@ -92,6 +92,13 @@ class WebViewPilotTests(unittest.TestCase):
                 self.assertEqual([sheet["A1"].value, sheet["A2"].value, sheet["A3"].value],
                                  ["汕头 实际上网电量（万千瓦时）", "1号机", 12.5 + index])
                 self.assertEqual(sheet["A3"].number_format, "General")
+                self.assertIsNone(sheet["A4"].value)
+                self.assertEqual(sheet["A28"].value, "清远 实际上网电量（万千瓦时）")
+                self.assertEqual(sheet["B28"].value, f"清远 2026-11-{12 + index} 计划电量（万千瓦时）")
+                self.assertEqual([sheet["A29"].value, sheet["B29"].value], ["1号机", "1号机"])
+                self.assertEqual([sheet["A30"].value, sheet["B30"].value], [125 + 10 * index, 25])
+                self.assertEqual([sheet["A30"].number_format, sheet["B30"].number_format], ["General", "General"])
+                self.assertEqual([sheet["A31"].value, sheet["B31"].value], [None, None])
             finally:
                 book.close()
 

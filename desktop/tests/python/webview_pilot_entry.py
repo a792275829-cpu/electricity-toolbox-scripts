@@ -1,6 +1,6 @@
 """Offline pilot: real JSON transport, task engine, subprocess and XLSX writer.
 
-Only the worker's online collection boundary is replaced with known sample rows.
+Only website calls are replaced with sample responses.
 This file is selected exclusively by the debug-only WebView pilot host.
 """
 from __future__ import annotations
@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import sys
 import time
+from unittest.mock import patch
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -58,6 +59,26 @@ class FixtureService(DesktopService):
         return super().call(method, params)
 
 
+def sample_rows(module, day, value):
+    companies = [
+        dict(tenantId="shantou", name="汕头电厂"),
+        dict(tenantId="qingyuan", name="清远电厂"),
+    ]
+
+    def fetch(_context, run_date, _tenant_id, *, metric="onlineEle"):
+        first_hour = value if metric == "onlineEle" else 2.5
+        return [dict(unitId="sample-unit", runDate=run_date, onlineEle=[first_hour] + [None] * 23)]
+
+    with patch.multiple(
+        module,
+        switch_company=lambda *_: None,
+        get_units=lambda _: [dict(id="sample-unit", unitName="#1")],
+        fetch_fire_rows=fetch,
+        fetch_qingyuan_rows=fetch,
+    ):
+        return module.collect_date_rows(day, None, companies, module.Config(request_delay_seconds=0))
+
+
 def worker(request_path):
     request = json.loads(request_path.read_text())
     if request["tool_id"] != "online-energy" or request["action"] != "run":
@@ -74,7 +95,7 @@ def worker(request_path):
     outputs = []
     for index, day in enumerate(days):
         value = 12.5 + index
-        path = module.save_excel(day, [dict(company="汕头电厂", unit="#1", time="00:00", onlineEle=value)], output)
+        path = module.save_excel(day, sample_rows(module, day, value), output)
         book = openpyxl.load_workbook(path)
         try:
             sheet = book["汇总"]
@@ -82,6 +103,10 @@ def worker(request_path):
                 "汕头 实际上网电量（万千瓦时）", "1号机", value, "General"
             ]:
                 raise RuntimeError("样例工作簿回读不一致。")
+            if [sheet["A30"].value, sheet["B30"].value, sheet["A31"].value, sheet["B31"].value] != [
+                value * 10, 25, None, None
+            ]:
+                raise RuntimeError("清远样例电量回读不一致。")
         finally:
             book.close()
         print(f"已保存并回读：{path}", flush=True)

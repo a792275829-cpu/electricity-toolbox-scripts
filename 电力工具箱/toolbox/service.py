@@ -219,13 +219,10 @@ class ToolboxService:
             store.save(params.get("username", ""), params.get("password") or store.load().get("password", ""))
             return True
         if method == "wps.get":
-            path = data_path(self.paths.wps_writer_dir) / "wps_excel_to_kdocs_config.json"
-            if not path.is_file():
-                path = self.paths.wps_writer_dir / "wps_excel_to_kdocs_config.defaults.json"
-            from toolbox_shared.wps_config import normalize_runtime_config
-            raw = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-            raw.setdefault("browser_mode", "managed_cdp")
-            return normalize_runtime_config(raw)
+            from toolbox_shared.wps_config import load_runtime_config, normalize_runtime_config
+            local_path = data_path(self.paths.wps_writer_dir) / "wps_excel_to_kdocs_config.json"
+            default_path = self.paths.wps_writer_dir / "wps_excel_to_kdocs_config.defaults.json"
+            return normalize_runtime_config(load_runtime_config(local_path, default_path))
         if method == "wps.save":
             config = params.get("config")
             if not isinstance(config, dict) or not isinstance(config.get("configs"), list):

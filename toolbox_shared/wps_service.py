@@ -51,6 +51,7 @@ from .wps_paths import (
     LOGIN_STATUS_POLL_MS,
 )
 from .wps_config import (CONFIG_EXPORT_SCHEMA, CONFIG_EXPORT_VERSION, _document_config_from_dict, _region_config_from_dict, _string_list, build_config_export, load_config_export, normalize_runtime_config, runtime_config_from_export_payload, save_config_export)
+from .wps_config import load_runtime_config
 from .wps_values import (
     normalize_cell_value,
     normalize_for_compare,
@@ -205,13 +206,7 @@ def check_wps_login_status(browser_mode: str, cdp_url: str, log) -> WpsLoginStat
 
 
 def load_config() -> dict[str, Any]:
-    path = CONFIG_PATH if CONFIG_PATH.exists() else DEFAULT_CONFIG_PATH
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return load_runtime_config(CONFIG_PATH, DEFAULT_CONFIG_PATH)
 
 
 
