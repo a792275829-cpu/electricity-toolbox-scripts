@@ -162,6 +162,20 @@ class BriefPriceTests(unittest.TestCase):
         self.assertIsNone(source["priceDifference"])
         self.assertIsNone(payload["marketAnalysisData"]["priceBoard"]["rows"][0]["difference"])
 
+    def test_fullwidth_and_qualified_deltas_use_the_same_parser(self):
+        self.write("日前简析：市场开机台数４５１台（环比略增加３台），"
+                   "全省日前均价：３８４．３３元／兆瓦时（环比小幅回落５．４５元／兆瓦时）。")
+        result = read_day_ahead_market_deltas(self.path, expected_date="2026-11-10")
+        self.assertEqual((result["startupDifference"], result["priceDifference"]), (3, -5.45))
+        self.assertEqual(read_brief_prices(self.path, day_ahead=True)["PRE"]["difference"], -5.45)
+
+    def test_a41_does_not_borrow_a_later_metric_comparison(self):
+        self.write("市场开机台数451台，备用机组环比减少3台。"
+                   "全省日前出清均价384.33元/兆瓦时，其他指标环比持平。")
+        result = read_day_ahead_market_deltas(self.path, expected_date="2026-11-10")
+        self.assertIsNone(result["startupDifference"])
+        self.assertIsNone(result["priceDifference"])
+
     def test_a41_fields_are_independent(self):
         self.write("市场开机台数451台，环比减少5台。全省日前出清均价384.33元/兆瓦时。")
         source = read_day_ahead_market_deltas(self.path, expected_date="2026-11-10")

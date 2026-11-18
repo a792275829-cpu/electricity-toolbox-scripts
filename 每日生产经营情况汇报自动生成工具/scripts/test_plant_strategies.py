@@ -49,6 +49,13 @@ class ExtractStrategyTests(unittest.TestCase):
         self.assertEqual(set(result), {"汕头厂"})
         self.assertNotIn("胪盘乙线", result["汕头厂"])
 
+    def test_numbered_strategy_without_colon_and_regional_section(self) -> None:
+        result = extract_plant_strategies(
+            "2.汕头厂：首段策略。\n3.粤东区域运行策略：共同检修。\n"
+            "海门厂各机组日前收益为：-6万元。\n4．东莞厂综合考虑市场行情。"
+        )
+        self.assertEqual(result, {"汕头厂": "首段策略。", "东莞厂": "综合考虑市场行情。"})
+
     def test_missing_plant_is_absent(self) -> None:
         text = "\n".join(["日前简析：", "1.总述。", f"汕头厂：{SHANTOU}"])
         self.assertEqual(set(extract_plant_strategies(text)), {"汕头厂"})

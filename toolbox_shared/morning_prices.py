@@ -4,13 +4,15 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from pathlib import Path
+from unicodedata import normalize
 
 from openpyxl import load_workbook
 
 
 NUMBER = r"[-+]?\d+(?:\.\d+)?"
-UP = "上涨|上升|增加|增长|升高"
-DOWN = "下降|下跌|减少|降低"
+UP = "上涨|上升|增加|增长|升高|上行"
+DOWN = "下降|下跌|减少|降低|下行|回落"
+PRE_PRICE = rf"全省日前(?:出清)?均价\s*[:：]?\s*({NUMBER})\s*"
 UNIT = r"(?:元\s*/\s*(?:兆瓦时|MWh)|厘\s*/\s*(?:千瓦时|kWh))"
 
 
@@ -36,7 +38,7 @@ def read_brief_prices(path: Path, *, day_ahead: bool, expected_date: str | None 
         sheet = _brief_sheet(book, path, day_ahead=day_ahead, expected_date=expected_date)
         prices = {}
         patterns = {
-            "PRE": rf"全省日前出清均价\s*({NUMBER})\s*{UNIT}",
+            "PRE": PRE_PRICE + UNIT,
             "RT": rf"(?:全省|全天)?实时(?:出清)?均价\s*({NUMBER})\s*{UNIT}",
         }
         for row in sheet.iter_rows(min_row=41 if a41_only else 1,
@@ -47,16 +49,11 @@ def read_brief_prices(path: Path, *, day_ahead: bool, expected_date: str | None 
             for kind, pattern in patterns.items():
                 if day_ahead and kind != "PRE":
                     continue
-                match = re.search(pattern, cell.value, re.I)
+                text = _normalize_brief(cell.value)
+                match = re.search(pattern, text, re.I)
                 if not match:
                     continue
-                tail = cell.value[match.end():]
-                change = re.match(rf"[，,\s]*环比\s*({UP}|{DOWN})\s*({NUMBER})\s*{UNIT}", tail, re.I)
-                difference = None
-                if change:
-                    difference = abs(float(change[2])) * (-1 if change[1] in DOWN.split("|") else 1)
-                elif re.match(r"[，,\s]*环比\s*持平", tail):
-                    difference = 0.0
+                difference = _narrative_difference(text[match.end():], UNIT)
                 prices[kind] = {
                     "price": float(match[1]), "difference": difference,
                     "workbook": str(path), "sheet": sheet.title, "cell": cell.coordinate,
@@ -123,11 +120,18 @@ def apply_brief_prices(payload: dict, *, day_ahead_workbook: Path | None,
     return sources
 
 
+def _normalize_brief(text: str) -> str:
+    return normalize("NFKC", text).replace("−", "-")
+
+
 def _narrative_difference(text: str, unit: str) -> float | None:
-    change = re.search(rf"环比\s*({UP}|{DOWN})\s*({NUMBER})\s*{unit}", text, re.I)
+    # Only the immediately following clause belongs to the matched metric.
+    prefix = r"[,：:\s(]*环比\s*[:：]?\s*"
+    change = re.match(rf"{prefix}(?:小幅|略有|略)?\s*({UP}|{DOWN})\s*({NUMBER})\s*{unit}", text, re.I)
     if change:
         return abs(float(change[2])) * (-1 if change[1] in DOWN.split("|") else 1)
-    return 0.0 if re.search(r"环比\s*持平", text) else None
+    flat = re.match(rf"{prefix}(?:基本持平|持平|无变化)(?=$|[\s,。.!;、)])", text)
+    return 0.0 if flat else None
 
 
 def read_day_ahead_market_deltas(path: Path, *, expected_date: str) -> dict:
@@ -138,12 +142,12 @@ def read_day_ahead_market_deltas(path: Path, *, expected_date: str) -> dict:
         text = sheet["A41"].value
         if not isinstance(text, str):
             raise ValueError(f"{path.name} {sheet.title}!A41 缺少日前市场文字")
-        startup = re.search(r"市场开机台数\s*\d+\s*台([^。；;]*)", text)
-        # Decimal points must not terminate the price sentence.
-        price = re.search(rf"全省日前出清均价\s*{NUMBER}\s*{UNIT}(.*?)(?:。|；|;|$)", text, re.I)
+        text = _normalize_brief(text)
+        startup = re.search(r"市场开机台数\s*:?\s*\d+\s*台", text)
+        price = re.search(PRE_PRICE + UNIT, text, re.I)
         return {
-            "startupDifference": _narrative_difference(startup[1], "台") if startup else None,
-            "priceDifference": _narrative_difference(price[1], UNIT) if price else None,
+            "startupDifference": _narrative_difference(text[startup.end():], "台") if startup else None,
+            "priceDifference": _narrative_difference(text[price.end():], UNIT) if price else None,
             "workbook": str(path), "sheet": sheet.title, "cell": "A41", "date": expected_date,
         }
     finally:

@@ -32,6 +32,7 @@ class ReportTextTests(unittest.TestCase):
         self.assertEqual(delta_phrase(-0.004, unit=UNIT_YUAN_PER_MWH, digits=2), "持平")
         self.assertEqual(delta_phrase(11.35, unit=UNIT_YUAN_PER_MWH, digits=2), "上升11.35元/兆瓦时")
         self.assertEqual(delta_phrase(-5.59, unit=UNIT_YUAN_PER_MWH, digits=2), "下降5.59元/兆瓦时")
+        self.assertEqual(startup_change_text(None), "待补充")
         self.assertEqual(startup_change_text(0), "持平")
         self.assertEqual(startup_change_text(0.4), "持平")
         self.assertEqual(startup_change_text(2), "增加2台")

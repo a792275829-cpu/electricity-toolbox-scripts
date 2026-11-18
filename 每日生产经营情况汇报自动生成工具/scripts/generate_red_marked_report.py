@@ -173,7 +173,7 @@ SECTION_STOP_PREFIXES = ("一、", "二、", "三、", "四、", "五、", "表1
 PLANT_STRATEGY_LABELS = ("汕头厂", "海门厂", "东莞厂")
 EAST_GUANGDONG_PREFIX = "粤东区域"
 PLANT_STRATEGY_PATTERN = re.compile(
-    r"^(?:\d+[.、]?)?\s*(?P<plant>" + "|".join(PLANT_STRATEGY_LABELS) + r")\s*[：:]\s*(?P<body>.*)$"
+    r"^(?:(?P<number>\d+)[.．、]?)?\s*(?P<plant>" + "|".join(PLANT_STRATEGY_LABELS) + r")\s*(?P<colon>[：:])?\s*(?P<body>.*)$"
 )
 NEGATIVE_TEXT_PATTERN = re.compile(r"^-\d+(?:\.\d+)?$")
 NEGATIVE_IN_TEXT_PATTERN = re.compile(r"(?<![0-9A-Za-z])-\d+(?:\.\d+)?")
@@ -213,7 +213,12 @@ def extract_plant_strategies(text: str | None) -> dict[str, str]:
         if not line:
             continue
         match = PLANT_STRATEGY_PATTERN.match(line)
-        if match:
+        if re.match(r"^(?:\d+[.．、]?\s*)?粤东区域", line):
+            if current and buffer:
+                strategies[current] = "".join(buffer).strip()
+            current, buffer = None, []
+            continue
+        if match and (match.group("number") or match.group("colon")):
             if current and buffer:
                 strategies[current] = "".join(buffer).strip()
             current = match.group("plant")
@@ -456,7 +461,9 @@ UNIT_TAI = "\u53f0"
 def delta_phrase(value: float | None, *, unit: str = "", scale: float = 1.0,
                  digits: int = 0, up: str = "\u4e0a\u5347", down: str = "\u4e0b\u964d") -> str:
     """环比措辞：变化量按展示精度取整后为 0 时统一写「持平」。"""
-    shown = round((value or 0.0) * scale, digits)
+    if value is None:
+        return "待补充"
+    shown = round(value * scale, digits)
     if abs(shown) < 0.5 * 10 ** (-digits):
         return "\u6301\u5e73"
     return f"{up if shown > 0 else down}{fmt_number(abs(shown), digits)}{unit}"
