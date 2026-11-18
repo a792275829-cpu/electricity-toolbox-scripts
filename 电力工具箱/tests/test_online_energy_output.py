@@ -194,6 +194,45 @@ class OnlineEnergyOutputTests(unittest.TestCase):
             self.assertEqual(fetched, ["2026-10-26", "2026-10-27", "2026-10-28"])
         context.close.assert_called_once()
 
+    def test_export_scales_energy_by_company_and_preserves_blanks(self):
+        import openpyxl
+
+        module = self.module
+        companies = [*module.FALLBACK_COMPANIES, {"tenantId": "qingyuan", "name": "清远电厂"}]
+        day = "2026-11-17"
+
+        def fetch(_context, run_date, _tenant_id, *args, metric="onlineEle"):
+            values = [None, 0, "-1.25", 2.5] if metric == "onlineEle" else [None, 0, 1.5, 2.5]
+            return [dict(unitId="u", runDate=run_date, onlineEle=values + [0] * 20)]
+
+        with tempfile.TemporaryDirectory() as folder, patch.multiple(
+            module, get_companies=lambda context: companies,
+            sync_playwright=lambda: nullcontext(None), launch_context=lambda *a, **k: SimpleNamespace(close=Mock()),
+            ensure_login=Mock(), switch_company=Mock(), log=Mock(),
+            get_units=Mock(side_effect=[[{"id": "u", "unitName": "#1"}]] * 3
+                           + [[{"id": "u", "unitName": "风电场"}]] * 3
+                           + [[{"id": "u", "unitName": "#1"}]]),
+            fetch_fire_rows=Mock(side_effect=fetch), fetch_energy_rows=Mock(side_effect=fetch),
+            fetch_qingyuan_rows=Mock(side_effect=fetch),
+        ), patch.object(module.time, "sleep"):
+            path = module.export_online_energy(day, module.Config(output_dir=Path(folder)))
+            book = openpyxl.load_workbook(path)
+            try:
+                sheet = book["汇总"]
+                for index, name in enumerate(("汕头", "海门", "东莞", "海风", "金平", "潮安", "清远")):
+                    title_row = index * 27 + 1
+                    with self.subTest(company=name):
+                        self.assertEqual(sheet.cell(title_row, 1).value, f"{name} 实际上网电量（万千瓦时）")
+                        values = [sheet.cell(title_row + offset, 1).value for offset in range(2, 6)]
+                        self.assertEqual(values, [None, 0, -1.25, 2.5] if index < 3 else [None, 0, -12.5, 25])
+                        self.assertEqual(sheet.cell(title_row + 4, 1).number_format, "General")
+                self.assertEqual(sheet["B163"].value, "清远 2026-11-19 计划电量（万千瓦时）")
+                self.assertEqual([sheet.cell(row, 2).value for row in range(165, 169)], [None, 0, 15, 25])
+                self.assertEqual(sheet["B167"].number_format, "General")
+                module.fetch_qingyuan_rows.assert_called_with(mock.ANY, "2026-11-19", "qingyuan", metric="planValue")
+            finally:
+                book.close()
+
     def test_range_export_stops_on_bad_day_and_keeps_finished_workbooks(self):
         def fetch(_context, run_date, _tenant_id):
             return [dict(unitId="u", runDate=run_date,

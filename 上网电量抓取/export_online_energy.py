@@ -64,6 +64,7 @@ COMPANY_DISPLAY_NAME = {
 }
 
 COMPANY_DISPLAY_ORDER = ["汕头", "海门", "东莞", "海风", "金平", "潮安", "清远"]
+UNSCALED_ENERGY_COMPANIES = {"海门", "汕头", "东莞"}
 
 
 @dataclass
@@ -362,7 +363,8 @@ def number_or_zero(value: Any) -> float:
         return 0.0
 
 
-def online_energy_hours(values, *, label: str, allow_empty: bool = False) -> tuple[float | None, ...]:
+def online_energy_hours(values, *, label: str, allow_empty: bool = False,
+                        multiplier: int = 1) -> tuple[float | None, ...]:
     if allow_empty and (values is None or values == []):
         return (None,) * 24
     if not isinstance(values, list) or len(values) != 24:
@@ -373,7 +375,7 @@ def online_energy_hours(values, *, label: str, allow_empty: bool = False) -> tup
             result.append(None)
             continue
         try:
-            value = float(raw)
+            value = float(raw) * multiplier
         except (TypeError, ValueError):
             raise ValueError(f"{label} {hour:02d}:00 电量缺失或无效，停止导出。") from None
         if isinstance(raw, bool) or not math.isfinite(value):
@@ -457,6 +459,7 @@ def collect_date_rows(run_date: str, context, companies: list[dict[str, str]],
     for index, company in enumerate(companies, start=1):
         tenant_id = company["tenantId"]
         company_name = company["name"]
+        multiplier = 1 if display_company_name(company_name) in UNSCALED_ENERGY_COMPANIES else 10
         log(f"[{index}/{len(companies)}] 切换公司：{company_name}")
         switch_company(context, tenant_id)
         time.sleep(0.3)
@@ -474,7 +477,8 @@ def collect_date_rows(run_date: str, context, companies: list[dict[str, str]],
             if {row["unitId"] for row in plan_rows} != set(unit_names):
                 raise ValueError(f"清远 {plan_date} 计划电量机组与机组列表不符，停止导出。")
             plans = {row["unitId"]: online_energy_hours(row["onlineEle"],
-                     label=f"{plan_date} 清远 / {unit_names[row['unitId']]} 计划值", allow_empty=True)
+                     label=f"{plan_date} 清远 / {unit_names[row['unitId']]} 计划值",
+                     allow_empty=True, multiplier=multiplier)
                      for row in plan_rows}
             for unit_id, values in plans.items():
                 missing_hours = sum(value is None for value in values)
@@ -512,7 +516,7 @@ def collect_date_rows(run_date: str, context, companies: list[dict[str, str]],
             unit_name = unit_names.get(unit_id, unit_id or "未知机组")
             values = online_energy_hours(item.get("onlineEle"),
                 label=f"{run_date} {company_name} / {unit_name}",
-                allow_empty=True)
+                allow_empty=True, multiplier=multiplier)
             missing_hours = sum(value is None for value in values)
             if missing_hours and unit_id not in missing:
                 log(f"  提示：{company_name} / {unit_name} 有 {missing_hours} 个时段实际上网电量未填报，导出为空白。")
