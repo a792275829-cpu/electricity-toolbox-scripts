@@ -73,6 +73,26 @@ class BriefPriceTests(unittest.TestCase):
         self.assertEqual(sources[0]["website"]["selectedDailyAvgPrice"], 352.1543)
         self.assertIsNone(row["selectedPointCount"])
 
+    def test_previous_day_a41_controls_report_day_price_delta(self):
+        self.write("日前简析：全省日前出清均价436.05元/兆瓦时，环比降低5.45元/兆瓦时。")
+        previous = self.path.rename(self.path.with_name("previous.xlsx"))
+        self.write("日前简析：全省日前出清均价396.58元/兆瓦时，环比降低39.47元/兆瓦时。")
+        self.assertEqual(read_brief_prices(self.path, day_ahead=True)["PRE"]["difference"], -39.47)
+        self.write("日前简析：全省日前出清均价396.58元/兆瓦时，环比持平。")
+        payload = self.payload()
+        payload["priceBoard"]["compareDate"] = "2026-11-10"
+        payload["priceBoard"]["selectedDate"] = "2026-11-11"
+        workbook = load_workbook(self.path)
+        workbook["基础信息"]["A2"] = datetime(2026, 11, 11)
+        workbook.save(self.path)
+        workbook.close()
+        apply_brief_prices(payload, day_ahead_workbook=self.path, daily_clearing_workbook=None,
+                           previous_day_workbook=previous, log=lambda _: None)
+        row = payload["priceBoard"]["rows"][0]
+        self.assertEqual((row["selectedDailyAvgPrice"], row["compareDailyAvgPrice"], row["difference"]),
+                         (396.58, 436.05, -39.47))
+        self.assertEqual(row["priceSource"]["compareSource"]["cell"], "A41")
+
     def test_realtime_without_delta_does_not_reuse_website_comparison(self):
         self.write("实时简析：全天实时均价471.34元/兆瓦时。", sheet="快报", row=42)
         payload = self.payload()

@@ -1693,6 +1693,8 @@ def build_strategy_text(payload: dict[str, Any]) -> str:
     load_min = metric(load, "\u6700\u5c0f\u503c(MW)")
     a_avg = metric(a_power, "\u5e73\u5747\u503c(MW)")
     local_avg = metric(local, "\u5e73\u5747\u503c(MW)")
+    price_delta = (delta_phrase(price["difference"], unit=UNIT_YUAN_PER_MWH, digits=2)
+                   if price.get("difference") is not None else "待补充")
     return (
         f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load_max['difference'])}\uff0c"
         f"\u5168\u5929\u6700\u5927{mw_to_10k_kw(load_max['selected'])}\u4e07\u5343\u74e6\uff0c"
@@ -1705,7 +1707,7 @@ def build_strategy_text(payload: dict[str, Any]) -> str:
         f"\u5e02\u573a\u5f00\u673a\u53f0\u6570{fmt_number(startup)}\u53f0\uff0c"
         f"\u73af\u6bd4{startup_change_text(startup_diff)}\uff0c"
         f"\u5168\u7701\u65e5\u524d\u51fa\u6e05\u5747\u4ef7{fmt_number(price['selectedDailyAvgPrice'], 2)}\u5143/\u5146\u74e6\u65f6\uff0c"
-        f"\u73af\u6bd4{delta_phrase(price['difference'], unit=UNIT_YUAN_PER_MWH, digits=2)}\u3002"
+        f"\u73af\u6bd4{price_delta}\u3002"
     )
 
 
@@ -1988,9 +1990,15 @@ def generate(
         compare_date=plan["loadAndPriceCompareDate"],
         subjects=parse_subjects("all") if save_data_summary else LOAD_SUBJECT_CODES,
     )
+    previous_day_workbook = online_workbook
+    if previous_day_workbook is None:
+        try:
+            previous_day_workbook = find_clearing_workbook(plan["loadAndPriceCompareDate"])
+        except FileNotFoundError:
+            pass
     market_price_sources = apply_brief_prices(
         payload, day_ahead_workbook=day_ahead_workbook,
-        daily_clearing_workbook=daily_clearing_workbook, log=log,
+        daily_clearing_workbook=daily_clearing_workbook, previous_day_workbook=previous_day_workbook, log=log,
     )
     market_delta_source = apply_day_ahead_market_deltas(payload, workbook=daily_clearing_workbook, log=log)
     if save_data_summary:
