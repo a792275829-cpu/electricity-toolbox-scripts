@@ -112,19 +112,19 @@ class BriefPriceTests(unittest.TestCase):
         self.assertEqual(payload, before)
 
 
-    def test_daily_a41_deltas_override_website_but_preserve_current_values(self):
-        self.write("日前简析：市场开机台数451台，环比增加7台，全省日前出清均价384.33元/兆瓦时，环比上涨3.25元/兆瓦时。")
+    def test_daily_a41_keeps_price_and_delta_from_the_same_cell(self):
+        self.write("日前简析：市场开机台数451台，环比增加7台，全省日前出清均价441.5元/兆瓦时，环比上涨25.64元/兆瓦时。")
         payload = self.payload()
         market = payload["marketAnalysisData"]
         market["operationPublicData"] = {"startupCount": {
             "selected": {"maxStartupCount": 451}, "difference": 23}}
-        current_price = market["priceBoard"]["rows"][0]["selectedDailyAvgPrice"]
         outer = deepcopy(payload["priceBoard"])
         realtime = deepcopy(market["priceBoard"]["rows"][1])
         source = apply_day_ahead_market_deltas(payload, workbook=self.path, log=lambda _: None)
         self.assertEqual(market["operationPublicData"]["startupCount"]["difference"], 7)
-        self.assertEqual(market["priceBoard"]["rows"][0]["difference"], 3.25)
-        self.assertEqual(market["priceBoard"]["rows"][0]["selectedDailyAvgPrice"], current_price)
+        row = market["priceBoard"]["rows"][0]
+        self.assertEqual((row["selectedDailyAvgPrice"], row["difference"], row["compareDailyAvgPrice"]),
+                         (441.5, 25.64, 415.86))
         self.assertEqual(payload["priceBoard"], outer)
         self.assertEqual(market["priceBoard"]["rows"][1], realtime)
         self.assertEqual((source["date"], source["cell"]), ("2026-11-10", "A41"))
@@ -135,7 +135,7 @@ class BriefPriceTests(unittest.TestCase):
             "minDiff": -1000, "avgDiff": 10}} for code in ("1", "2", "3")}}
         text = build_day_ahead_market_text(payload)
         self.assertIn("市场开机台数451台，环比增加7台", text)
-        self.assertIn("环比上升3.25元/兆瓦时", text)
+        self.assertIn("全省日前出清均价441.5元/兆瓦时，环比上升25.64元/兆瓦时", text)
         output = Path(self.tmp.name) / "market.docx"
         document = Document()
         document.add_paragraph(text)
@@ -194,4 +194,5 @@ class BriefPriceTests(unittest.TestCase):
             payload = self.payload()
             source = apply_day_ahead_market_deltas(payload, workbook=path, log=lambda _: None)
             self.assertIn("error", source)
+            self.assertIsNone(payload["marketAnalysisData"]["priceBoard"]["rows"][0]["selectedDailyAvgPrice"])
             self.assertIsNone(payload["marketAnalysisData"]["priceBoard"]["rows"][0]["difference"])

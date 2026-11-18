@@ -147,6 +147,7 @@ def read_day_ahead_market_deltas(path: Path, *, expected_date: str) -> dict:
         price = re.search(PRE_PRICE + UNIT, text, re.I)
         return {
             "startupDifference": _narrative_difference(text[startup.end():], "台") if startup else None,
+            "price": float(price[1]) if price else None,
             "priceDifference": _narrative_difference(text[price.end():], UNIT) if price else None,
             "workbook": str(path), "sheet": sheet.title, "cell": "A41", "date": expected_date,
         }
@@ -155,10 +156,10 @@ def read_day_ahead_market_deltas(path: Path, *, expected_date: str) -> dict:
 
 
 def apply_day_ahead_market_deltas(payload: dict, *, workbook: Path | None, log=print) -> dict:
-    """Override the two D-2 PRE deltas; unavailable A41 values stay missing."""
+    """Use D-2 A41 for the day-ahead price and both comparisons."""
     market = payload["marketAnalysisData"]
     board = market["priceBoard"]
-    source = {"startupDifference": None, "priceDifference": None,
+    source = {"startupDifference": None, "price": None, "priceDifference": None,
               "date": board["selectedDate"], "cell": "A41"}
     try:
         if workbook is None:
@@ -166,15 +167,24 @@ def apply_day_ahead_market_deltas(payload: dict, *, workbook: Path | None, log=p
         source = read_day_ahead_market_deltas(Path(workbook), expected_date=board["selectedDate"])
     except (OSError, ValueError) as exc:
         source["error"] = str(exc)
-        log(f"日前市场环比未取数，标记待补充：{exc}")
+        log(f"日前市场 A41 未取数，标记待补充：{exc}")
     startup = market.setdefault("operationPublicData", {}).setdefault("startupCount", {})
     startup["difference"] = source["startupDifference"]
     startup["differenceSource"] = dict(source)
     for row in board["rows"]:
         if row["dataType"] == "PRE":
-            row["difference"] = source["priceDifference"]
+            price = source["price"]
+            difference = source["priceDifference"]
+            row["selectedDailyAvgPrice"] = price
+            row["selectedPointCount"] = None
+            row["difference"] = difference
+            row["priceSource"] = dict(source)
             row["differenceSource"] = dict(source)
-            row["compareDailyAvgPrice"] = None  # Delta and current price have separate sources.
+            row["compareDailyAvgPrice"] = (
+                round(price - difference, 4) if price is not None and difference is not None else None
+            )
             row["comparePointCount"] = None
+    if "note" in board:
+        board["note"] += " 日清分日前均价及环比取快报（日前）A41。"
     market["dayAheadDeltaSource"] = source
     return source
