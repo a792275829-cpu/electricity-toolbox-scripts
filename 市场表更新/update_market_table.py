@@ -27,6 +27,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE = SCRIPT_DIR.parent
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
+from toolbox_shared.task_cancellation import cancellation_checkpoint
 from toolbox_shared.dates import select_dated_record
 from toolbox_shared.auth_loader import load_login_module
 from toolbox_shared.excel_read import read_cell_snapshots
@@ -247,6 +248,7 @@ class WorkbookWriteSession:
                 saved.close()
             with workbook_commit_lock((self.path,)):
                 assert_workbook_unchanged(self.path, self.source_fingerprint)
+                cancellation_checkpoint()
                 os.replace(temporary_path, self.path)
         except PermissionError as exc:
             raise workbook_permission_error(self.path) from exc
@@ -1287,6 +1289,7 @@ def copy_previous_day_unit_operation_mode(
 
 def fetch_values_or_skip(label: str, fetcher, *, attempts: int = 3):
     for attempt in range(1, attempts + 1):
+        cancellation_checkpoint()
         try:
             return fetcher()
         except PlaywrightError as exc:

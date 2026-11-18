@@ -36,6 +36,11 @@ function log(message = '') {
   console.log(message);
 }
 
+async function cancellationRequested() {
+  const request = process.env.TOOLBOX_CANCEL_REQUEST;
+  return !!request && pathExists(request);
+}
+
 function safeErrorMessage(error) {
   return String(error?.message || error || '未知错误').split('\nCall log:')[0].trim();
 }
@@ -524,8 +529,10 @@ async function executeUpload(plan, config) {
     let currentFile = 0;
     log(`本次共需上传 ${totalFiles} 个文件。`);
     for (const item of plan) {
+      if (await cancellationRequested()) return false;
       await switchTenant(page, config, item.target);
       for (const file of item.files) {
+        if (await cancellationRequested()) return false;
         currentFile += 1;
         current = `${item.target.key}：${path.basename(file)}`;
         await uploadFile(page, file, currentFile, totalFiles);
@@ -534,6 +541,7 @@ async function executeUpload(plan, config) {
       }
     }
     await saveAuthState(context, config);
+    return true;
   } catch (error) {
     throw new Error(`${safeErrorMessage(error)}；已提交文件：${completed.join("、") || "无"}；当前文件可能已提交：${current || "无"}。请核对后只重传未完成文件。`);
   } finally {
@@ -720,10 +728,10 @@ async function runBatch(config, args) {
     const page = await context.newPage();
     await switchTenantForImport(page, config, target);
 
-    progress = await submitImportBatches(batches, batch => postBatch(context, config, batch, fields), log);
+    progress = await submitImportBatches(batches, batch => postBatch(context, config, batch, fields), log, cancellationRequested);
 
     await saveAuthState(context, config);
-    if (args.verify) {
+    if (args.verify && progress.completed.length) {
       const reported = datesOf([...progress.succeeded, ...progress.failed]);
       await logImportStatus(context, config, reported.length > 0 ? reported : inferDatesFromNames(files, args.date));
     }
@@ -736,6 +744,7 @@ async function runBatch(config, args) {
     await releaseLock();
   }
 
+  if (progress.completed.length < batches.length) process.exitCode = 130;
   log(`提交完成：${progress.completed.length} 批；导入接口确认 ${progress.succeeded.length} 条成功明细；${progress.unconfirmedBatches} 批结果未确认。`);
 }
 
@@ -756,6 +765,10 @@ async function loginOnly(config) {
 }
 
 async function main() {
+  if (await cancellationRequested()) {
+    process.exitCode = 130;
+    return;
+  }
   const args = parseArgs(process.argv);
   const config = await loadConfig(args);
 
@@ -786,8 +799,11 @@ async function main() {
   if (plan.length === 0) {
     throw new Error('没有可上传文件，已停止。');
   }
-  await executeUpload(plan, config);
-  log('全部文件已提交；结果确认情况见逐文件日志。');
+  if (await executeUpload(plan, config)) {
+    log('全部文件已提交；结果确认情况见逐文件日志。');
+  } else {
+    process.exitCode = 130;
+  }
 }
 
 main().catch((error) => {

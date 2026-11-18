@@ -17,6 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR.parent) not in sys.path:
     sys.path.insert(0, str(BASE_DIR.parent))
+from toolbox_shared.task_cancellation import cancellation_checkpoint
 from toolbox_shared.log_console import LogConsole, explain_error, redact
 from toolbox_shared.choices import SegmentedGroup, SettingCheckbutton
 from toolbox_shared.file_button import FileSelectButton
@@ -411,6 +412,7 @@ class DocumentConfigDialog(tk.Toplevel):
         autosave=None,
         document_titles: dict[str, str] | None = None,
         on_document_title=None,
+        task_registry=None,
     ):
         super().__init__(parent)
         self.title(title)
@@ -424,6 +426,7 @@ class DocumentConfigDialog(tk.Toplevel):
         self.autosave = autosave
         self.document_titles = document_titles if document_titles is not None else {}
         self.on_document_title = on_document_title
+        self.task_registry = task_registry
         self._updating_target_url = False
         self._updating_source_url = False
         self.local_sheets: list[str] = list(
@@ -449,8 +452,7 @@ class DocumentConfigDialog(tk.Toplevel):
         self._request_ids = {"source": 0, "target": 0}
         self._pending_online_reads: dict[str, tuple[int, str]] = {}
         self._online_poll_after_id: str | None = None
-        self._online_workers: set[threading.Thread] = set()
-        self._online_workers_lock = threading.Lock()
+        self._online_tasks: dict[str, str] = {}
 
         default_url = initial.kdocs_url if initial else (self.recent_urls[0] if self.recent_urls else "")
         default_source_url = initial.source_url if initial else ""
@@ -548,6 +550,8 @@ class DocumentConfigDialog(tk.Toplevel):
         ttk.Label(docs, textvariable=self.read_status, style="Muted.TLabel").grid(
             row=6, column=0, columnspan=3, padx=8, pady=(0, 6), sticky="w"
         )
+        self.cancel_read_button = ttk.Button(docs, text="取消读取", command=self.cancel_online_reads, state="disabled")
+        self.cancel_read_button.grid(row=7, column=2, padx=8, sticky="e")
         docs.columnconfigure(1, weight=1)
 
         regions_frame = ttk.LabelFrame(root, text="写入区域")
@@ -727,42 +731,67 @@ class DocumentConfigDialog(tk.Toplevel):
         browser_read_lock = self._browser_read_lock
         browser_mode = self.browser_mode
         cdp_url = self.cdp_url
-        log = self.log
+        log = self.log if show_errors else (lambda _message: None)
         online_results = self._online_results
-        online_workers = self._online_workers
-        online_workers_lock = self._online_workers_lock
+        registry = self.task_registry
+        remote = getattr(registry, "remote_business", False) is True
 
-        def worker() -> None:
-            info: dict[str, Any] | None = None
-            error: str | None = None
+        def read(token=None):
+            # One browser profile serves one connection at a time.
+            with browser_read_lock:
+                cancellation_checkpoint()
+                if remote:
+                    return registry.wps_read("read_online_document_info",
+                        dict(url=url, browser_mode=browser_mode, cdp_url=cdp_url), log, token=token)
+                return read_online_document_info(url, browser_mode, cdp_url, log)
+
+        def publish(info=None, error=None):
+            online_results.put((kind, request_id, url, show_errors, info, error))
+
+        def probe():
             try:
-                # One browser profile serves one connection at a time.
-                with browser_read_lock:
-                    info = read_online_document_info(
-                        url, browser_mode, cdp_url, log
-                    )
+                publish(info=read())
             except Exception as exc:
-                error = str(exc)
-            finally:
-                online_results.put(
-                    (kind, request_id, url, show_errors, info, error)
-                )
-                with online_workers_lock:
-                    online_workers.discard(threading.current_thread())
+                publish(error=str(exc))
 
-        thread = threading.Thread(target=worker, daemon=True)
-        with self._online_workers_lock:
-            self._online_workers.add(thread)
-        try:
-            thread.start()
-        except Exception:
-            with self._online_workers_lock:
-                self._online_workers.discard(thread)
-            raise
+        def complete(snapshot):
+            if snapshot.state.value == "failed":
+                publish(error=str(snapshot.error))
+            else:
+                publish(info=snapshot.result)
+
+        previous_task = self._online_tasks.pop(kind, None)
+        if previous_task:
+            registry.cancel(previous_task)
+        if registry is not None and show_errors:
+            self._online_tasks[kind] = registry.start_callable(
+                "WPS 工作表读取", lambda token, _emit: read(token), on_done=complete, cooperative=True
+            )
+            self.cancel_read_button.configure(state="normal")
+        else:
+            threading.Thread(target=probe, name="wps-sheet-probe", daemon=True).start()
         if self._online_poll_after_id is None:
             self._online_poll_after_id = self.after(50, self._drain_online_results)
 
+    def cancel_online_reads(self) -> None:
+        for kind, task_id in self._online_tasks.items():
+            self.task_registry.cancel(task_id)
+            self._request_ids[kind] += 1
+            self._pending_online_reads.pop(kind, None)
+            if kind == "source":
+                self.refresh_source_button.configure(state="normal")
+                self.source_doc_title.set(self.document_titles.get(self.source_url.get().strip(), ""))
+            else:
+                self.refresh_target_button.configure(state="normal")
+                self.target_doc_title.set(self.document_titles.get(self.kdocs_url.get().strip(), ""))
+        self._online_tasks.clear()
+        self.cancel_read_button.configure(state="disabled")
+        self.read_status.set("已取消读取，保留原有工作表配置。")
+
     def destroy(self) -> None:
+        for task_id in self._online_tasks.values():
+            self.task_registry.cancel(task_id)
+        self._online_tasks.clear()
         if self._online_poll_after_id is not None:
             try:
                 self.after_cancel(self._online_poll_after_id)
@@ -783,11 +812,17 @@ class DocumentConfigDialog(tk.Toplevel):
                 continue
 
             self._pending_online_reads.pop(kind, None)
+            task_id = self._online_tasks.pop(kind, None)
+            if not self._online_tasks:
+                self.cancel_read_button.configure(state="disabled")
             button = self.refresh_source_button if kind == "source" else self.refresh_target_button
             button.configure(state="normal")
             if kind == "target" and url != self.kdocs_url.get().strip():
                 continue
             if kind == "source" and (self.source_type.get() != "kdocs" or url != self.source_url.get().strip()):
+                continue
+            if task_id and info is None and error is None:
+                self.read_status.set("已取消读取，保留原有工作表配置。")
                 continue
             if error is not None:
                 if kind == "source":
@@ -966,6 +1001,12 @@ class DocumentConfigDialog(tk.Toplevel):
 class WpsWriterFrame(ttk.Frame):
     def __init__(self, parent: tk.Misc, task_registry: Any | None = None) -> None:
         super().__init__(parent)
+        if task_registry is None:
+            toolbox_dir = str(BASE_DIR.parent / "电力工具箱")
+            if toolbox_dir not in sys.path:
+                sys.path.insert(0, toolbox_dir)
+            from toolbox.runtime import TaskRegistry
+            task_registry = TaskRegistry()
         self.task_registry = task_registry
         global _REMOTE_BUSINESS
         _REMOTE_BUSINESS = task_registry if getattr(task_registry, "remote_business", False) is True else None
@@ -973,8 +1014,9 @@ class WpsWriterFrame(ttk.Frame):
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.browser_event_queue: queue.Queue[tuple[bool, str, bool]] = queue.Queue()
         self.login_event_queue: queue.Queue[tuple[str, str, WpsLoginStatus]] = queue.Queue()
-        self.worker: threading.Thread | None = None
-        self.browser_worker: threading.Thread | None = None
+        self._task_id: str | None = None
+        self._task_done = queue.Queue()
+        self._login_probe: threading.Thread | None = None
         self.configs: list[DocumentConfig] = []
         self._drain_after_id: str | None = None
         self._login_poll_after_id: str | None = None
@@ -1180,6 +1222,11 @@ class WpsWriterFrame(ttk.Frame):
             self.execution_toolbar, text="预览", command=self.preview
         ).pack(side="right", padx=(0, 6))
 
+        self.cancel_button = ttk.Button(
+            self.execution_toolbar, text="取消任务", command=self.cancel_current_task, state="disabled"
+        )
+        self.cancel_button.pack(side="right", padx=(0, 6))
+
         self.log_console = LogConsole(root, module="WPS写入工具", directory=LOG_DIR / "runs")
         self.module_log_frame = self.log_console
         self.module_log_frame.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
@@ -1195,6 +1242,7 @@ class WpsWriterFrame(ttk.Frame):
             log=self.log,
             document_titles=self.document_titles,
             on_document_title=self.remember_document_title,
+            task_registry=self.task_registry,
         )
         if dialog.result:
             self.configs.append(dialog.result)
@@ -1224,6 +1272,7 @@ class WpsWriterFrame(ttk.Frame):
             autosave=autosave,
             document_titles=self.document_titles,
             on_document_title=self.remember_document_title,
+            task_registry=self.task_registry,
         )
         if dialog.result:
             self.configs[index] = dialog.result
@@ -1386,8 +1435,7 @@ class WpsWriterFrame(ttk.Frame):
             self._login_poll_after_id = self.after(750, self._poll_login_status)
 
     def _has_pending_work(self) -> bool:
-        return any(thread is not None and thread.is_alive()
-                   for thread in (self.worker, self.browser_worker)) or any(
+        return self._task_id is not None or (self._login_probe is not None and self._login_probe.is_alive()) or any(
             not pending.empty() for pending in (
                 self.log_queue, self.login_event_queue,
                 self.browser_event_queue, self._remote_messages,
@@ -1408,87 +1456,86 @@ class WpsWriterFrame(ttk.Frame):
         self._login_poll_after_id = None
         if not self.winfo_ismapped():
             return
-        if not (self.worker and self.worker.is_alive()):
-            self.check_wps_browser(quiet=True)
+        self.check_wps_browser(quiet=True)
         self._login_poll_after_id = self.after(LOGIN_STATUS_POLL_MS, self._poll_login_status)
 
     def _run_browser_action(
         self, *, start: bool, initial_url: str | None = None, quiet: bool = False
     ) -> None:
-        if self.browser_worker and self.browser_worker.is_alive():
+        if self._task_id is not None or (quiet and self._login_probe and self._login_probe.is_alive()):
             return
-        self.start_browser_button.configure(state="disabled")
-        self.check_browser_button.configure(state="disabled")
         if not quiet:
+            self.start_browser_button.configure(state="disabled")
+            self.check_browser_button.configure(state="disabled")
             self.browser_status.set("正在启动…" if start else "正在检查…")
         if not quiet or self.login_status.get() == "尚未检查":
             self.login_status.set("正在检查…")
         cdp_url = self.cdp_url.get().strip()
         browser_mode = self.browser_mode.get()
-        remote_config = self.current_runtime_config() if getattr(getattr(self, "task_registry", None), "remote_business", False) is True else None
+        registry = self.task_registry
+        remote_config = self.current_runtime_config() if getattr(registry, "remote_business", False) is True else None
+        # The automatic probe only publishes status. Its worker does not retain Tk
+        # widgets and may finish after the window closes.
+        log = (lambda _message: None) if quiet else self.log
+        login_events = self.login_event_queue
+        browser_events = self.browser_event_queue
 
-        def worker() -> None:
+        def worker(token=None) -> None:
+            from toolbox.tasks import TaskCancelled
             try:
                 if remote_config is not None:
-                    result = self.task_registry.wps_action("login" if start else "status", remote_config, [],
-                        (lambda _message: None) if quiet else self.log, operation={"initial_url": initial_url})
-                    self.login_event_queue.put((browser_mode, cdp_url, WpsLoginStatus(result["state"], result["message"])))
-                    self.browser_event_queue.put((True, "专用浏览器已启动" if start else "登录状态检查完成", quiet))
-                    return
-                if start:
-                    result = ensure_wps_dedicated_chrome(
-                        cdp_url,
-                        self.log,
-                        initial_url=initial_url or "https://www.kdocs.cn/latest",
-                        preload_url=True,
-                    )
-                    action = "已启动" if result.get("started") else "已连接"
-                    message = f"专用浏览器{action}"
+                    result = registry.wps_action("login" if start else "status", remote_config, [], log,
+                                                 operation={"initial_url": initial_url}, token=token)
+                    login = WpsLoginStatus(result["state"], result["message"])
+                    message = "专用浏览器已启动" if start else "登录状态检查完成"
                 else:
                     message = "登录状态检查完成"
-                login = check_wps_login_status(
-                    browser_mode, cdp_url, (lambda _message: None) if quiet else self.log
-                )
-                self.login_event_queue.put((browser_mode, cdp_url, login))
-                self.browser_event_queue.put((True, message, quiet))
+                    if start:
+                        result = ensure_wps_dedicated_chrome(
+                            cdp_url, log, initial_url=initial_url or "https://www.kdocs.cn/latest", preload_url=True
+                        )
+                        action = "已启动" if result.get("started") else "已连接"
+                        message = f"专用浏览器{action}"
+                    cancellation_checkpoint()
+                    login = check_wps_login_status(browser_mode, cdp_url, log)
+                login_events.put((browser_mode, cdp_url, login))
+                browser_events.put((True, message, quiet))
+            except TaskCancelled:
+                raise
             except Exception as exc:
-                self.login_event_queue.put((browser_mode, cdp_url, WpsLoginStatus(
+                login_events.put((browser_mode, cdp_url, WpsLoginStatus(
                     "unknown", "暂时无法确认，请检查网络或浏览器后刷新登录状态。"
                 )))
-                self.browser_event_queue.put((False, getattr(exc, "log_details", str(exc)), quiet))
+                browser_events.put((False, getattr(exc, "log_details", str(exc)), quiet))
+                if not quiet:
+                    raise
 
-        self.browser_worker = self._start_tracked_thread(
-            worker,
-            name="wps-browser-start" if start else "wps-browser-check",
-        )
+        if quiet:
+            self._login_probe = threading.Thread(target=worker, name="wps-login-probe", daemon=True)
+            self._login_probe.start()
+            self.schedule_drain_logs()
+        else:
+            self._start_task(worker, name="WPS 登录" if start else "WPS 登录状态检查")
 
-    def _start_tracked_thread(
-        self,
-        target,
-        *,
-        args: tuple[Any, ...] = (),
-        name: str,
-    ) -> threading.Thread:
-        thread: threading.Thread
+    def _start_task(self, worker, *, name: str) -> None:
+        completed = self._task_done
+        probe = self._login_probe
 
-        def tracked_target() -> None:
-            try:
-                target(*args)
-            finally:
-                if self.task_registry is not None:
-                    self.task_registry.unregister_thread(thread)
+        def run(token, _emit):
+            while probe is not None and probe.is_alive():
+                token.raise_if_cancelled()
+                probe.join(timeout=0.1)
+            token.raise_if_cancelled()
+            return worker(token)
 
-        thread = threading.Thread(target=tracked_target, name=name, daemon=True)
-        if self.task_registry is not None:
-            self.task_registry.register_thread(thread)
-        try:
-            thread.start()
-        except BaseException:
-            if self.task_registry is not None:
-                self.task_registry.unregister_thread(thread)
-            raise
+        self._task_id = self.task_registry.start_callable(name, run, on_done=completed.put, cooperative=True)
+        self.cancel_button.configure(state="normal")
         self.schedule_drain_logs()
-        return thread
+
+    def cancel_current_task(self) -> None:
+        if self._task_id is not None and self.task_registry.cancel(self._task_id):
+            self.cancel_button.configure(state="disabled")
+            self.log_console.status.set("正在取消…")
 
     def detail_log(self, message: str, *, show_traceback: bool = True) -> None:
         if show_traceback and "Traceback (most recent call last)" in message:
@@ -1543,9 +1590,8 @@ class WpsWriterFrame(ttk.Frame):
                 success, status, quiet = self.browser_event_queue.get_nowait()
             except queue.Empty:
                 break
-            self.start_browser_button.configure(state="normal")
-            self.check_browser_button.configure(state="normal")
-            self.browser_status.set(status if success else "检查失败，请重试")
+            if not quiet or self._task_id is None:
+                self.browser_status.set(status if success else "检查失败，请重试")
             if not quiet:
                 self.log(status if success else "检查失败：" + status)
         chunks = []
@@ -1577,6 +1623,20 @@ class WpsWriterFrame(ttk.Frame):
                 break
         if chunks:
             self.log_console.append("".join(chunks))
+        try:
+            snapshot = self._task_done.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            self._task_id = None
+            self.cancel_button.configure(state="disabled")
+            self.start_browser_button.configure(state="normal")
+            self.check_browser_button.configure(state="normal")
+            if snapshot.state.value == "cancelled":
+                self.browser_status.set("登录状态可手动刷新")
+                if self.login_status.get() == "正在检查…":
+                    self.login_status.set("尚未检查")
+                self.log_console.finish("已取消")
         if self.winfo_ismapped() or self._has_pending_work():
             self.schedule_drain_logs()
 
@@ -1756,85 +1816,51 @@ class WpsWriterFrame(ttk.Frame):
     def flatten_configs(self, configs: list[DocumentConfig] | None = None) -> list[MappingRow]:
         return config_model.flatten_configs(self.configs if configs is None else configs)
 
-    def prepare_selected(self) -> list[PreparedMapping]:
-        indexes = self.selected_config_indexes()
-        if not indexes:
-            raise ValueError("请先选择至少一项配置，再预览或写入。")
-        configs = [self.configs[index] for index in indexes]
-        return prepare_mappings(
-            self.flatten_configs(configs),
-            browser_mode=self.browser_mode.get(),
-            cdp_url=self.cdp_url.get().strip(),
-            log=lambda _message: None,
-        )
-
     def preview(self) -> None:
-        if getattr(getattr(self, "task_registry", None), "remote_business", False) is True:
-            self._remote_write(preview=True)
-            return
-        if self.worker and self.worker.is_alive():
-            messagebox.showinfo("正在写入", "写入任务正在进行，请等待完成。", parent=self)
-            return
-        self.clear_log()
-        self.log_console.status.set("正在预览…")
-        try:
-            prepared = self.prepare_selected()
-        except Exception as exc:
-            diagnosis = explain_error(type(exc).__name__ + ": " + str(exc))
-            messagebox.showerror("预览失败", "\n\n".join(diagnosis) if diagnosis else str(exc), parent=self)
-            self.log(f"预览失败：{exc}")
-            self.detail_log(f"PREVIEW ERROR: {exc}")
-            self.detail_log(traceback.format_exc())
-            return
-        urls = len({item.kdocs_url for item in prepared})
-        self.detail_log_prepared("PREVIEW OK", prepared)
-        self.log(f"预览通过：共 {len(prepared)} 个写入区域，涉及 {urls} 份目标表格。")
+        self._start_write(preview=True)
 
     def write(self) -> None:
-        if getattr(getattr(self, "task_registry", None), "remote_business", False) is True:
-            self._remote_write(preview=False)
-            return
-        if self.worker and self.worker.is_alive():
-            messagebox.showinfo("正在写入", "写入任务正在进行，请等待完成。", parent=self)
-            return
-        self.clear_log()
-        self.log_console.status.set("正在检查写入配置…")
-        try:
-            prepared = self.prepare_selected()
-        except Exception as exc:
-            diagnosis = explain_error(type(exc).__name__ + ": " + str(exc))
-            messagebox.showerror("暂时无法写入", "\n\n".join(diagnosis) if diagnosis else str(exc), parent=self)
-            self.log(f"暂时无法写入：{exc}")
-            self.detail_log(f"WRITE BLOCKED: {exc}")
-            self.detail_log(traceback.format_exc())
-            return
+        self._start_write(preview=False)
 
-        self.log_console.status.set("正在写入…")
-        self.save_current_config()
-        self.detail_log_prepared("WRITE PREPARED", prepared)
-        self.worker = self._start_tracked_thread(
-            self.write_worker,
-            args=(prepared, self.browser_mode.get(), self.cdp_url.get().strip(), self.overwrite.get()),
-            name="wps-write",
-        )
-
-    def _remote_write(self, *, preview: bool) -> None:
-        if self.worker and self.worker.is_alive():
-            messagebox.showinfo("正在写入", "写入任务正在进行，请等待完成。", parent=self)
+    def _start_write(self, *, preview: bool) -> None:
+        if self._task_id is not None:
+            messagebox.showinfo("任务进行中", "请等待当前 WPS 任务结束。", parent=self)
             return
         indexes = self.selected_config_indexes()
+        title = "预览失败" if preview else "暂时无法写入"
         if not indexes:
-            messagebox.showerror("预览失败" if preview else "暂时无法写入", "请先选择至少一项配置，再预览或写入。", parent=self)
+            messagebox.showerror(title, "请先选择至少一项配置，再预览或写入。", parent=self)
             return
-        config = self.current_runtime_config()
+        registry = self.task_registry
+        remote = getattr(registry, "remote_business", False) is True
+        config = self.current_runtime_config() if remote else None
+        mappings = [] if remote else self.flatten_configs([self.configs[index] for index in indexes])
+        browser_mode = self.browser_mode.get()
+        cdp_url = self.cdp_url.get().strip()
+        overwrite = self.overwrite.get()
         self.clear_log()
         self.log_console.status.set("正在预览…" if preview else "正在检查写入配置…")
         if not preview:
             self.save_current_config()
-        def worker():
+
+        def worker(token):
+            from toolbox.tasks import TaskCancelled
             try:
-                result = self.task_registry.wps_action("preview" if preview else "run", config, indexes, self.log)
-                self.log(("预览通过：" if preview else "写入完成：") + result.get("message", "已完成"))
+                if remote:
+                    result = registry.wps_action("preview" if preview else "run", config, indexes, self.log, token=token)
+                    self.log(("预览通过：" if preview else "写入完成：") + result.get("message", "已完成"))
+                    return
+                prepared = prepare_mappings(mappings, browser_mode=browser_mode, cdp_url=cdp_url, log=self.log)
+                cancellation_checkpoint()
+                if preview:
+                    urls = len({item.kdocs_url for item in prepared})
+                    self.detail_log_prepared("PREVIEW OK", prepared)
+                    self.log(f"预览通过：共 {len(prepared)} 个写入区域，涉及 {urls} 份目标表格。")
+                else:
+                    self.detail_log_prepared("WRITE PREPARED", prepared)
+                    self.write_worker(prepared, browser_mode, cdp_url, overwrite)
+            except TaskCancelled:
+                raise
             except Exception as exc:
                 failure = getattr(exc, "log_details", str(exc))
                 diagnosis = explain_error(str(exc))
@@ -1842,55 +1868,50 @@ class WpsWriterFrame(ttk.Frame):
                     failure = diagnosis[0] + "\n" + failure
                 self.log(("预览失败：" if preview else "操作失败：") + failure)
                 if hasattr(exc, "log_details"):
-                    # The business traceback already arrived through self.log.
-                    # Keep it in the daily diagnostic file without replaying it.
                     self.detail_log(str(exc), show_traceback=False)
                 else:
                     self.detail_log(traceback.format_exc())
                 if preview:
-                    self._remote_messages.put(("预览失败", str(exc)))
-        self.worker = self._start_tracked_thread(worker, name="wps-preview" if preview else "wps-write")
+                    self._remote_messages.put((title, str(exc)))
+                raise
+        self._start_task(worker, name="WPS 预览" if preview else "WPS 写入")
 
     def write_worker(self, prepared: list[PreparedMapping], browser_mode: str, cdp_url: str, overwrite: bool = True) -> None:
-        try:
-            self.log(f"开始写入，共 {len(prepared)} 个区域。")
-            self.detail_log(f"WRITE STARTED: browser_mode={browser_mode}; cdp_url={cdp_url}; regions={len(prepared)}")
-            by_index = {item.index: item for item in prepared}
-            all_ok = True
+        self.log(f"开始写入，共 {len(prepared)} 个区域。")
+        self.detail_log(f"WRITE STARTED: browser_mode={browser_mode}; cdp_url={cdp_url}; regions={len(prepared)}")
+        by_index = {item.index: item for item in prepared}
+        all_ok = True
 
-            groups: dict[str, list[PreparedMapping]] = {}
-            for item in prepared:
-                groups.setdefault(item.kdocs_url, []).append(item)
+        groups: dict[str, list[PreparedMapping]] = {}
+        for item in prepared:
+            groups.setdefault(item.kdocs_url, []).append(item)
 
-            for url, group in groups.items():
-                self.detail_log(f"WRITE TARGET: url={url}; regions={len(group)}")
-                result = write_to_wps(url, group, self.log, browser_mode=browser_mode, cdp_url=cdp_url, overwrite=overwrite)
-                self.detail_log(f"WRITE TARGET RESULT: url={url}; saved={result.get('saved')}; returned={len(result.get('results', []))}")
-                for entry in result.get("results", []):
-                    item = by_index[entry["index"]]
-                    mismatches = compare_matrix(entry.get("expectedValues", item.values), entry.get("value"), item.rows, item.cols)
-                    if mismatches:
-                        all_ok = False
-                        self.detail_log(
-                            f"VERIFY MISMATCH: index={item.index}; target={item.target_sheet}!{item.target_range}; "
-                            f"mismatches={mismatches!r}; read_value={entry.get('value')!r}"
-                        )
-                        self.log(f"第 {item.index} 个区域回读不一致：{item.target_sheet}!{item.target_range}")
-                        for mismatch in mismatches:
-                            self.log(f"  {mismatch}")
-                    else:
-                        self.detail_log(f"VERIFY OK: index={item.index}; target={item.target_sheet}!{item.target_range}")
-            if all_ok:
-                self.detail_log(f"WRITE OK: regions={len(prepared)}")
-                self.log(f"写入完成：{len(prepared)} 个区域已保存，回读核对一致。")
-            else:
-                self.detail_log("WRITE WARNING: verification mismatches detected")
-                self.log("写入已结束，但回读数据与来源不一致，请查看上方差异。")
-        except Exception as exc:
-            self.log(f"操作失败：{exc}")
-            self.log("详细错误信息已保存到日志目录。")
-            self.detail_log(f"WRITE ERROR: {exc}")
-            self.detail_log(traceback.format_exc())
+        for number, (url, group) in enumerate(groups.items(), start=1):
+            cancellation_checkpoint()
+            self.detail_log(f"WRITE TARGET: url={url}; regions={len(group)}")
+            result = write_to_wps(url, group, self.log, browser_mode=browser_mode, cdp_url=cdp_url, overwrite=overwrite)
+            self.detail_log(f"WRITE TARGET RESULT: url={url}; saved={result.get('saved')}; returned={len(result.get('results', []))}")
+            for entry in result.get("results", []):
+                item = by_index[entry["index"]]
+                mismatches = compare_matrix(entry.get("expectedValues", item.values), entry.get("value"), item.rows, item.cols)
+                if mismatches:
+                    all_ok = False
+                    self.detail_log(
+                        f"VERIFY MISMATCH: index={item.index}; target={item.target_sheet}!{item.target_range}; "
+                        f"mismatches={mismatches!r}; read_value={entry.get('value')!r}"
+                    )
+                    self.log(f"第 {item.index} 个区域回读不一致：{item.target_sheet}!{item.target_range}")
+                    for mismatch in mismatches:
+                        self.log(f"  {mismatch}")
+                else:
+                    self.detail_log(f"VERIFY OK: index={item.index}; target={item.target_sheet}!{item.target_range}")
+            self.log(f"第 {number}/{len(groups)} 份目标表格已处理，请核对回读日志。")
+        if all_ok:
+            self.detail_log(f"WRITE OK: regions={len(prepared)}")
+            self.log(f"写入完成：{len(prepared)} 个区域已保存，回读核对一致。")
+        else:
+            self.detail_log("WRITE WARNING: verification mismatches detected")
+            self.log("写入已结束，但回读数据与来源不一致，请查看上方差异。")
 
 
 class App(tk.Tk):
@@ -1902,6 +1923,13 @@ class App(tk.Tk):
         self.writer_frame = WpsWriterFrame(self)
         self.writer_frame.pack(fill="both", expand=True)
         center_window(self, 1120, 760)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self) -> None:
+        if self.writer_frame.task_registry.terminate_all():
+            messagebox.showwarning("任务仍在收尾", "请等待当前 WPS 操作结束后再关闭。", parent=self)
+            return
+        self.destroy()
 
 
 if __name__ == "__main__":

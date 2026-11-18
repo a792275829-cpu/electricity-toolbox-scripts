@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from toolbox_shared.task_cancellation import CancellationRequested, cancellation_scope
+
 from .events import EventBuffer
 from .models import CancellationToken, TaskCancelled, TaskEvent, TaskEventKind, TaskSnapshot, TaskState
 from .process import ProcessRunner
@@ -29,7 +31,7 @@ class TaskEngine:
     def events(self) -> EventBuffer:
         return self._events
 
-    def start_callable(self, name: str, worker: Worker, *, on_done: DoneCallback | None = None, cancellable: bool = True, _task_id: str | None = None) -> str:
+    def start_callable(self, name: str, worker: Worker, *, on_done: DoneCallback | None = None, cancellable: bool = True, cooperative: bool = False, _task_id: str | None = None) -> str:
         task_id = _task_id or uuid4().hex
         token = CancellationToken()
         created = TaskSnapshot(task_id=task_id, name=name, cancellable=cancellable)
@@ -42,7 +44,11 @@ class TaskEngine:
                 current = self._snapshots[task_id]
                 if current.state in {TaskState.SUCCEEDED, TaskState.FAILED, TaskState.CANCELLED}:
                     return current
-                if current.state is TaskState.CANCELLING and state in {TaskState.RUNNING, TaskState.SUCCEEDED}:
+                if current.state is TaskState.CANCELLING and state is TaskState.RUNNING:
+                    return current
+                # A cooperative worker can finish its final commit before
+                # reaching another cancellation checkpoint.
+                if current.state is TaskState.CANCELLING and state is TaskState.SUCCEEDED and not cooperative:
                     state = TaskState.CANCELLED
                     changes = {"message": "任务已取消", "error": TaskCancelled("任务已取消")}
                 updated = current.transition(state, **changes)
@@ -54,9 +60,15 @@ class TaskEngine:
             try:
                 token.raise_if_cancelled()
                 transition(TaskState.RUNNING)
-                result = worker(token, emit)
-                token.raise_if_cancelled()
+                with cancellation_scope(lambda: token.cancelled):
+                    token.raise_if_cancelled()
+                    result = worker(token, emit)
+                if not cooperative:
+                    token.raise_if_cancelled()
             except TaskCancelled as exc:
+                final = transition(TaskState.CANCELLED, message=str(exc), error=exc)
+            except CancellationRequested:
+                exc = TaskCancelled("任务已取消")
                 final = transition(TaskState.CANCELLED, message=str(exc), error=exc)
             except BaseException as exc:
                 emit(TaskEvent(task_id, TaskEventKind.ERROR, message=str(exc), payload=exc))
@@ -79,7 +91,7 @@ class TaskEngine:
         thread.start()
         return task_id
 
-    def start_process(self, name: str, command: Sequence[str], *, cwd: Path, env: Mapping[str, str] | None, on_done: DoneCallback | None = None, on_output: Callable[[str], None] | None = None, cancellable: bool = True) -> str:
+    def start_process(self, name: str, command: Sequence[str], *, cwd: Path, env: Mapping[str, str] | None, on_done: DoneCallback | None = None, on_output: Callable[[str], None] | None = None, cancellable: bool = True, cooperative: bool = False) -> str:
         task_id = uuid4().hex
 
         def worker(token: CancellationToken, emit: Callable[[TaskEvent], None]) -> int:
@@ -87,9 +99,9 @@ class TaskEngine:
                 emit(TaskEvent(task_id, TaskEventKind.LOG, message=line))
                 if on_output is not None:
                     on_output(line)
-            return ProcessRunner().run(list(command), cwd=cwd, env=env, token=token, on_output=output).returncode
+            return ProcessRunner().run(list(command), cwd=cwd, env=env, token=token, on_output=output, cooperative=cooperative).returncode
 
-        return self.start_callable(name, worker, on_done=on_done, cancellable=cancellable, _task_id=task_id)
+        return self.start_callable(name, worker, on_done=on_done, cancellable=cancellable, cooperative=cooperative, _task_id=task_id)
 
     def cancel(self, task_id: str) -> bool:
         with self._lock:

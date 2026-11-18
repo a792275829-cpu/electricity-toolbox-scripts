@@ -300,6 +300,7 @@ class TradeAnalysisPage(ToolPage):
         self.run_in_thread(
             worker,
             action='run', status="正在生成分析报告...",
+            cooperative=True,
             on_success=lambda outputs: messagebox.showinfo(
                 "完成", f"已生成 {len(outputs)} 个报告。", parent=self
             ),
@@ -700,7 +701,7 @@ class GroupUploadPage(ToolPage):
         self.run_in_thread(
             upload,
             action='run', status="正在上传集团每日数据...",
-            cancellable=False,
+            cooperative=True,
         )
 
     def start_login(self) -> None:
@@ -849,7 +850,7 @@ class MarketTableUpdatePage(ToolPage):
             self.build_update_command(run_date, workbook),
             action='run', cwd=self.paths.market_table_update_dir,
             status="正在更新市场表...",
-            cancellable=False,
+            cooperative=True,
             on_success=lambda _code: messagebox.showinfo(
                 "完成", "市场表更新完成。", parent=self
             ),
@@ -1059,8 +1060,8 @@ class GuangdongPricePage(ToolPage):
         self.run_in_thread(
             worker,
             action='update', status="正在抓取并合并广东现货数据...",
+            cooperative=True,
             on_success=finished,
-            cancellable=False,
         )
 
     def start_prediction(self) -> None:

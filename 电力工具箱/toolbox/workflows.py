@@ -7,6 +7,7 @@ import math
 import subprocess
 from pathlib import Path
 
+from toolbox_shared.task_cancellation import EXIT_CANCELLED, cancellation_checkpoint
 from toolbox_shared.dates import normalize_date_input, parse_date_input
 from toolbox_shared.storage import data_path
 from toolbox_shared.cli_login import script_command
@@ -223,11 +224,19 @@ def plan(paths, tool_id, action, p):
     return []
 
 
+def run_command(command, cwd):
+    cancellation_checkpoint()
+    result = subprocess.run(script_command(command), cwd=cwd)
+    if result.returncode == EXIT_CANCELLED:
+        cancellation_checkpoint()
+    result.check_returncode()
+
+
 def execute(paths, tool_id, action, p):
     """Run in an owned worker process; its children share its process group."""
     command_list = plan(paths, tool_id, action, p)
     for command, cwd in command_list:
-        subprocess.run(script_command(command), cwd=cwd, check=True)
+        run_command(command, cwd)
     if command_list:
         if action == "login":
             return dict(message="登录流程已结束，请查看日志并继续运行任务", outputs=[])
@@ -282,6 +291,7 @@ def execute(paths, tool_id, action, p):
         output = Path(p["output_file"]).expanduser()
         from .tasks import CancellationToken
         prepared = prepare_review_folder(source, logger=log, token=CancellationToken(), excluded=(output,))
+        cancellation_checkpoint()
         missing = missing_review_stations(prepared)
         outputs = []
         if action != "preview" and p["mode"] != "upload":
@@ -289,8 +299,8 @@ def execute(paths, tool_id, action, p):
             result = module.run_summary(input_dir=prepared, output_path=output, logger=log)
             outputs.append(str(result))
         if action == "preview" or p["mode"] != "summary":
-            subprocess.run([node_executable(), str(paths.private_uploader), "--plan" if action == "preview" else "--execute",
-                            "--source", str(prepared)], cwd=paths.private_uploader_dir, check=True)
+            run_command([node_executable(), str(paths.private_uploader), "--plan" if action == "preview" else "--execute",
+                         "--source", str(prepared)], paths.private_uploader_dir)
         return dict(outputs=outputs, missing=list(missing))
     elif tool_id == "wps-writer":
         return execute_wps(paths, action, p, log)
@@ -337,7 +347,8 @@ def execute_wps(paths, action, p, log):
     groups = {}
     for item in prepared:
         groups.setdefault(item.kdocs_url, []).append(item)
-    for url, group in groups.items():
+    for index, (url, group) in enumerate(groups.items(), start=1):
+        cancellation_checkpoint()
         result = module.write_to_wps(url, group, log, browser_mode=mode, cdp_url=cdp, overwrite=config["overwrite"])
         rows = {entry["index"]: entry for entry in result.get("results", [])}
         if not result.get("saved"):
@@ -345,4 +356,5 @@ def execute_wps(paths, action, p, log):
         for item in group:
             if item.index not in rows or module.compare_matrix(rows[item.index].get("expectedValues", item.values), rows[item.index].get("value"), item.rows, item.cols):
                 raise RuntimeError(f"回读不一致：{item.target_sheet}!{item.target_range}")
+        log(f"第 {index}/{len(groups)} 份目标表格已保存，{len(group)} 个区域回读一致。")
     return dict(message=f"{len(prepared)} 个区域已保存，回读核对一致")

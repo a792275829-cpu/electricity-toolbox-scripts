@@ -481,28 +481,83 @@ class WpsDialogAsyncTests(unittest.TestCase):
             ["WPS 专用浏览器（推荐）", "连接已打开的浏览器"],
         )
 
-    def test_writer_registers_and_releases_background_thread(self) -> None:
+    def test_wps_automatic_probe_allows_source_close_and_restart(self) -> None:
+        from toolbox.app import PAGE_NAMES, ToolboxApp
         from toolbox.runtime import ToolPaths, load_module
 
         paths = ToolPaths(Path(__file__).resolve().parents[2])
         module = load_module("wps_tracked_worker_test", paths.wps_writer)
-        registry = mock.Mock()
-        frame = module.WpsWriterFrame(self.root, task_registry=registry)
-        fake_thread = mock.Mock()
-        with mock.patch.object(
-            module.threading, "Thread", return_value=fake_thread
-        ) as thread_class:
-            thread = frame._start_tracked_thread(
-                lambda: None,
-                name="wps-test-worker",
-            )
+        for restart in (False, True):
+            with self.subTest(restart=restart):
+                app = ToolboxApp(page_factories={name: lambda parent, *_: tk.Frame(parent) for name in PAGE_NAMES})
+                app.withdraw()
+                frame = module.WpsWriterFrame(app, task_registry=app.registry)
+                started, release = threading.Event(), threading.Event()
 
-        self.assertIs(thread, fake_thread)
-        registry.register_thread.assert_called_once_with(fake_thread)
-        fake_thread.start.assert_called_once_with()
-        tracked_target = thread_class.call_args.kwargs["target"]
-        tracked_target()
-        registry.unregister_thread.assert_called_once_with(fake_thread)
+                def check(*_args):
+                    started.set()
+                    release.wait(3)
+                    return module.WpsLoginStatus("logged_in", "已登录")
+
+                try:
+                    with (
+                        mock.patch.object(module, "check_wps_login_status", side_effect=check),
+                        mock.patch("toolbox.app.messagebox.askyesno") as ask,
+                        mock.patch("toolbox.app.messagebox.showwarning") as warn,
+                    ):
+                        frame.check_wps_browser(quiet=True)
+                        self.assertTrue(started.wait(1))
+                        self.assertFalse(app.registry.has_running_tasks())
+                        if restart:
+                            app._restart()
+                            self.assertTrue(app._restart_requested)
+                        else:
+                            self.assertTrue(app._on_close())
+                        ask.assert_not_called()
+                        warn.assert_not_called()
+                finally:
+                    release.set()
+                    if frame._login_probe:
+                        frame._login_probe.join(2)
+                    try:
+                        app.destroy()
+                    except tk.TclError:
+                        pass
+
+    def test_wps_cancel_finishes_current_document_and_skips_next(self) -> None:
+        from types import SimpleNamespace
+        from toolbox.runtime import ToolPaths, load_module
+
+        paths = ToolPaths(Path(__file__).resolve().parents[2])
+        module = load_module("wps_cancel_write_test", paths.wps_writer)
+        frame = module.WpsWriterFrame(self.root)
+        documents = [SimpleNamespace(index=i, kdocs_url=f"document-{i}", values=[[i]],
+                                     rows=1, cols=1, target_sheet="Sheet1", target_range="A1")
+                     for i in (1, 2)]
+        started, release = threading.Event(), threading.Event()
+
+        def write(_url, group, *_args, **_kwargs):
+            started.set()
+            release.wait(2)
+            return {"saved": True, "results": [{"index": group[0].index, "value": group[0].values}]}
+
+        with mock.patch.object(module, "write_to_wps", side_effect=write) as submit, mock.patch.object(frame, "detail_log") as detail:
+            frame._start_task(lambda _token: frame.write_worker(documents, "cdp", "local"), name="WPS 写入")
+            try:
+                self.assertTrue(started.wait(1))
+                self.assertTrue(frame.task_registry.has_running_tasks())
+                frame.cancel_button.invoke()
+                self.assertEqual("cancelling", frame.task_registry.snapshot(frame._task_id).state.value)
+            finally:
+                release.set()
+            snapshot = frame._task_done.get(timeout=2)
+            self.assertEqual("cancelled", snapshot.state.value)
+            submit.assert_called_once()
+            detail.assert_any_call("VERIFY OK: index=1; target=Sheet1!A1")
+            frame._task_done.put(snapshot)
+            frame.drain_logs()
+            self.assertIsNone(frame._task_id)
+            self.assertIn("已取消", frame.log_console.status.get())
 
     def test_edit_config_opens_dialog_without_starting_chrome(self) -> None:
         from toolbox.runtime import ToolPaths, load_module

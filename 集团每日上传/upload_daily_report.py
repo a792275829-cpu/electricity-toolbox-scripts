@@ -27,6 +27,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = SCRIPT_DIR.parent
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
+from toolbox_shared.task_cancellation import cancellation_checkpoint
 from toolbox_shared.auth_lock import AuthFileLock
 from toolbox_shared.credentials import mark_browser_session, prepare_browser_session, read_login_config, write_private_json
 from toolbox_shared import qingneng_login
@@ -424,6 +425,7 @@ def run_api_upload(
     province_id: str = DEFAULT_PROVINCE_ID,
     create_report: bool = True,
 ) -> None:
+    cancellation_checkpoint()
     target_date, uploads = prepare_upload_files(paths)
     log(f"本次上传日期：{target_date}")
     log(f"目标省份：{DEFAULT_PROVINCE_NAME}（provinceId={province_id}）")
@@ -456,6 +458,7 @@ def run_api_upload(
                     log(f"- {UPLOAD_TYPES[item.kind]['name']}：{item.path}")
 
                 for upload in uploads:
+                    cancellation_checkpoint()
                     spec = UPLOAD_TYPES[upload.kind]
                     data_type = str(spec["data_type"])
                     try:
@@ -478,6 +481,7 @@ def run_api_upload(
                     else:
                         log(f"{spec['name']} 未上传，开始导入。")
 
+                    cancellation_checkpoint()
                     payload = import_daily_file(context, upload, target_date, province_id)
                     errors = payload.get("data") or []
                     if errors:
@@ -487,6 +491,7 @@ def run_api_upload(
                         raise RuntimeError(f"{spec['name']} 已提交，但未确认上传状态；请先核对网站，勿直接重传。")
                     log(f"{spec['name']} 导入成功，日期、类型、省份和上传状态已核对。")
                 if create_report:
+                    cancellation_checkpoint()
                     create_daily_report(context, target_date, headless=config.headless)
                 log("数据上传和日报步骤已完成，正在收尾...")
                 save_auth_state(context)

@@ -33,11 +33,13 @@ if __name__ == "__main__":
     # Running a file rather than -m also works for tools launched from their own cwd.
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from toolbox_shared.cli_login import emit_login_error
+    from toolbox_shared.task_cancellation import cancellation_checkpoint
     script = Path(sys.argv[1]).resolve()
     os.environ["TOOLBOX_CLI_PROTOCOL"] = "1"
     sys.argv = [str(script), *sys.argv[2:]]
     sys.path.insert(0, str(script.parent))
     try:
+        cancellation_checkpoint()
         runpy.run_path(str(script), run_name="__main__")
     except Exception as exc:
         emit_login_error(exc)

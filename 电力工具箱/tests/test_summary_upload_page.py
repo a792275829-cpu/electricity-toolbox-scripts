@@ -192,7 +192,7 @@ class SummaryUploadPageTests(unittest.TestCase):
             self.page.start_selected()
             output = run.call_args.args[0](CancellationToken())
         confirm.assert_not_called()
-        self.assertTrue(run.call_args.kwargs["cancellable"])
+        self.assertTrue(run.call_args.kwargs.get("cancellable", True))
         self.assertEqual(output, self.folder / "10-10_汇总.xlsx")
         workbook = load_workbook(output, data_only=True)
         try:
@@ -224,7 +224,8 @@ class SummaryUploadPageTests(unittest.TestCase):
             self.assertIsNone(worker(CancellationToken()))
         command = runner.return_value.run.call_args.args[0]
         self.assertEqual(command[-3:], ["--execute", "--source", str(self.folder.resolve())])
-        self.assertFalse(options["cancellable"])
+        self.assertTrue(options.get("cancellable", True))
+        self.assertTrue(runner.return_value.run.call_args.kwargs["cooperative"])
 
     def test_both_completes_summary_before_uploading_original_directory(self) -> None:
         self.prepare_summary_inputs()
@@ -239,7 +240,8 @@ class SummaryUploadPageTests(unittest.TestCase):
             output = worker(CancellationToken())
         runner.return_value.run.assert_called_once()
         self.assertEqual(output, self.folder / "10-10_汇总.xlsx")
-        self.assertFalse(options["cancellable"])
+        self.assertTrue(options.get("cancellable", True))
+        self.assertTrue(runner.return_value.run.call_args.kwargs["cooperative"])
 
     def test_failed_summary_prevents_upload(self) -> None:
         worker, _ = self.start_worker("both")

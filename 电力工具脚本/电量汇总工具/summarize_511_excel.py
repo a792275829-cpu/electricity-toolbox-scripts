@@ -30,6 +30,7 @@ from openpyxl.utils import get_column_letter
 WORKSPACE = Path(__file__).resolve().parents[2]
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
+from toolbox_shared.task_cancellation import cancellation_checkpoint
 from toolbox_shared.native_excel import load_value_workbook, prefetch_workbooks
 from toolbox_shared.native_write import save_workbook as save_native_workbook
 from toolbox_shared.node_prices import NODE_MARKETS, NodePrices, collect_node_prices
@@ -153,6 +154,7 @@ def _collect_station_units(station_dirs, logger):
     units: dict[tuple[str, str], UnitData] = {}
     sources = {}
     for station_dir in station_dirs:
+        cancellation_checkpoint()
         station_key = station_dir.name
         station_name = STATION_DISPLAY_NAMES.get(station_key, station_key)
         logger(f"处理场站：{station_name}")
@@ -386,6 +388,7 @@ def write_workbook(
             logger(f"已生成工作表：{label}汇总（96点，00:00～23:45）")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    cancellation_checkpoint()
     final_path = save_workbook_with_fallback(workbook, output_path)
     logger(f"输出文件：{final_path}")
     return final_path

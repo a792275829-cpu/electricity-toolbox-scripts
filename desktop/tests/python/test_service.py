@@ -95,6 +95,59 @@ class ServiceTaskTests(unittest.TestCase):
         self.assertIn('first-business-failure', str(snapshot.error))
         text = ''.join(e['message'] for e in self.service.call('events', {})['events'])
         self.assertIn('first-business-failure', text)
+    def test_market_write_cancellation_waits_for_commit_and_cleans_lock(self):
+        from openpyxl import Workbook, load_workbook
+
+        workbook = self.root / "market.xlsx"
+        book = Workbook()
+        book.active["A1"] = 0
+        book.active["A1"].number_format = "0.00%"
+        book.save(workbook)
+        book.close()
+
+        script = self.service.paths.market_table_update
+        script.parent.mkdir()
+        lock = self.root / "fixture.lock"
+        next_unit = self.root / "next-unit"
+        script.write_text(
+            "import time\n"
+            "from pathlib import Path\n"
+            "from openpyxl import load_workbook\n"
+            "from toolbox_shared.task_cancellation import cancellation_checkpoint, process_cancellation_requested\n"
+            f"workbook, lock = Path({str(workbook)!r}), Path({str(lock)!r})\n"
+            "lock.touch()\n"
+            "try:\n"
+            "    print('fixture-write-started', flush=True)\n"
+            "    deadline = time.monotonic() + 5\n"
+            "    while not process_cancellation_requested() and time.monotonic() < deadline:\n"
+            "        time.sleep(.01)\n"
+            "    book = load_workbook(workbook)\n"
+            "    book.active['A1'] = 0.125\n"
+            "    book.save(workbook)\n"
+            "    book.close()\n"
+            "    cancellation_checkpoint()\n"
+            f"    Path({str(next_unit)!r}).touch()\n"
+            "finally:\n"
+            "    lock.unlink()\n"
+        )
+        task_id = self.service.call('start', dict(tool_id='market-table', request_id='market', values=dict(
+            workbook=str(workbook), run_date='2026-10-20')))
+        deadline = time.monotonic() + 5
+        while not lock.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertTrue(lock.exists())
+        self.assertTrue(self.service.call('cancel', dict(task_id=task_id)))
+        snapshot = self.finish(task_id)
+        self.assertEqual(snapshot.state.value, 'cancelled', snapshot.error)
+        self.assertFalse(next_unit.exists())
+        self.assertFalse(lock.exists())
+        book = load_workbook(workbook)
+        try:
+            self.assertEqual(book.active['A1'].value, 0.125)
+            self.assertEqual(book.active['A1'].number_format, '0.00%')
+        finally:
+            book.close()
+
     def test_noninterruptible_write_blocks_close(self):
         release = threading.Event()
         self.service.registry.start_callable('write', lambda token, emit: release.wait(5), cancellable=False)

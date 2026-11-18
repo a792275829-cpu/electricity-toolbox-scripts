@@ -334,6 +334,7 @@ class ToolPage(ttk.Frame):
         *,
         status: str,
         on_success: Callable[[T], None] | None = None,
+        cooperative: bool = False,
         cancellable: bool = True,
         action: str = "run",
     ) -> None:
@@ -341,8 +342,10 @@ class ToolPage(ttk.Frame):
             return
         if not self._save_login_draft(action):
             return
-        if getattr(self.registry, "remote_business", False) is True and not getattr(worker, "_remote_business", False):
-            worker = self.registry.prepare_page_worker(self, status, action=action)
+        if getattr(self.registry, "remote_business", False) is True:
+            if not getattr(worker, "_remote_business", False):
+                worker = self.registry.prepare_page_worker(self, status, action=action)
+            cooperative = True  # The backend owns the outcome of a remote cancellation.
         if not self.log_console._initialized or self.log_console.finished:
             self.log_console.begin(status)
         self._current_cancellable = cancellable
@@ -350,15 +353,13 @@ class ToolPage(ttk.Frame):
         self.set_busy(True, status)
 
         def task_worker(token, _emit):
-            token.raise_if_cancelled()
-            result = worker(token) if len(inspect.signature(worker).parameters) else worker()
-            token.raise_if_cancelled()
-            return result
+            return worker(token) if len(inspect.signature(worker).parameters) else worker()
 
         self.current_task_id = self.registry.start_callable(
             status,
             task_worker,
             on_done=lambda snapshot: self._completion_queue.put((snapshot, on_success)),
+            cooperative=cooperative,
             cancellable=cancellable,
         )
 
@@ -421,6 +422,7 @@ class ToolPage(ttk.Frame):
         cwd: Path,
         status: str,
         on_success: Callable[[int], None] | None = None,
+        cooperative: bool = False,
         cancellable: bool = True,
         action: str = "run",
     ) -> None:
@@ -446,6 +448,7 @@ class ToolPage(ttk.Frame):
             env=utf8_environment(),
             on_output=self.append_log,
             on_done=lambda snapshot: self._completion_queue.put((snapshot, on_success)),
+            cooperative=cooperative,
             cancellable=cancellable,
         )
 

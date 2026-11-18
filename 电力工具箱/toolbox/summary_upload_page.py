@@ -179,7 +179,7 @@ class SummaryUploadPage(ToolPage):
             self.append_log(f"> {shlex.join(preview_command)}")
             ProcessRunner().run(
                 preview_command, cwd=self.paths.private_uploader_dir, env=utf8_environment(),
-                token=token, on_output=self.append_log,
+                token=token, on_output=self.append_log, cooperative=True,
             )
 
         self.run_in_thread(
@@ -241,7 +241,7 @@ class SummaryUploadPage(ToolPage):
                 self.append_log(f"> {shlex.join(upload_command)}")
                 ProcessRunner().run(
                     upload_command, cwd=self.paths.private_uploader_dir, env=utf8_environment(),
-                    token=token, on_output=self.append_log,
+                    token=token, on_output=self.append_log, cooperative=True,
                 )
                 self.append_log("出清结果上传已完成。")
             return result
@@ -258,5 +258,5 @@ class SummaryUploadPage(ToolPage):
         self.run_in_thread(
             worker, action='run', status={"summary": "正在汇总...", "upload": "正在上传...", "both": "正在汇总并上传..."}[mode],
             on_success=finished,
-            cancellable=mode == "summary",
+            cooperative=True,
         )

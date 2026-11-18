@@ -189,7 +189,7 @@ class PrivateBatchUploadPage(ToolPage):
         self.clear_log()
         self.run_process(
             self.build_upload_command(), cwd=self.paths.private_uploader_dir,
-            status="正在上传私有数据...", cancellable=False, action="run",
+            status="正在上传私有数据...", cooperative=True, action="run",
         )
 
     def start_login(self) -> None:

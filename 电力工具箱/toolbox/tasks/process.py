@@ -9,10 +9,14 @@ import io
 import select
 import time
 import json
+from contextlib import nullcontext
+from tempfile import TemporaryDirectory
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Callable, Mapping, Sequence
+
+from toolbox_shared.task_cancellation import EXIT_CANCELLED, REQUEST_ENV
 
 from .models import CancellationToken, TaskCancelled
 
@@ -47,13 +51,22 @@ class ProcessRunner:
         env: Mapping[str, str] | None,
         token: CancellationToken,
         on_output: Callable[[str], None],
+        cooperative: bool = False,
     ) -> ProcessResult:
+        with TemporaryDirectory(prefix="toolbox-cancel-") if cooperative else nullcontext() as directory:
+            request = Path(directory) / "requested" if directory else None
+            return self._run(command, cwd=cwd, env=env, token=token, on_output=on_output, request=request)
+
+    def _run(self, command, *, cwd, env, token, on_output, request: Path | None) -> ProcessResult:
         from toolbox_shared.cli_login import script_command, ERROR_PREFIX
         command = script_command(command)
         login_detail = None
         token.raise_if_cancelled()
         process_env = dict(env) if env is not None else dict(os.environ)
         process_env["TOOLBOX_CLI_PROTOCOL"] = "1"
+        if request is not None:
+            process_env[REQUEST_ENV] = str(request)
+        requested = False
         lines: Queue[str | None] = Queue()
         process = subprocess.Popen(
             list(command), cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -104,9 +117,12 @@ class ProcessRunner:
         stream_closed = False
         try:
             while process.poll() is None or not stream_closed:
-                if token.cancelled:
-                    self.terminate(process)
-                    raise TaskCancelled("任务已取消")
+                if token.cancelled and not requested:
+                    if request is None:
+                        self.terminate(process)
+                        raise TaskCancelled("任务已取消")
+                    request.touch()
+                    requested = True
                 try:
                     line = lines.get(timeout=0.05)
                 except Empty:
@@ -127,7 +143,7 @@ class ProcessRunner:
                     else:
                         on_output(line)
             returncode = process.wait()
-            if token.cancelled:
+            if token.cancelled and (request is None or returncode == EXIT_CANCELLED):
                 raise TaskCancelled("任务已取消")
             if returncode != 0:
                 exc = ProcessExecutionError(returncode)

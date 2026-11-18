@@ -28,6 +28,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE = SCRIPT_DIR.parent
 if str(WORKSPACE) not in sys.path:
     sys.path.insert(0, str(WORKSPACE))
+from toolbox_shared.task_cancellation import cancellation_checkpoint
 from toolbox_shared.auth_loader import load_login_module
 from toolbox_shared.credentials import read_login_config
 from toolbox_shared.dates import parse_date_input
@@ -362,6 +363,7 @@ def collect_data(plans: tuple[WorkbookPlan, ...], *, headed: bool = False,
                 auth.ensure_login(context, config)
                 companies = auth.get_companies(context)
                 for plan in plans:
+                    cancellation_checkpoint()
                     if not plan.cells:
                         continue
                     spot = shared_spot()
@@ -386,6 +388,7 @@ def collect_data(plans: tuple[WorkbookPlan, ...], *, headed: bool = False,
                                                                expected_dates=days, data_type=data_type).items():
                             series[day].update(values)
                     for day, needed in sorted(needs.items()):
+                        cancellation_checkpoint()
                         log(f"{plan.station} {day}：读取 {'、'.join(FIELDS[f] for f in FIELDS if f in needed)}")
                         if needed & {"C", "J"}:
                             params = {"date": day.isoformat(), "orgId": tenant["tenantId"], "unitIds": unit_id}
@@ -594,6 +597,7 @@ def run_update(paths: tuple[Path, ...], *, end_date: date, start_date: date | No
     prepared: list[PreparedWorkbook] = []
     try:
         for plan in plans:
+            cancellation_checkpoint()
             item = prepare_workbook(plan, data.get(plan.station, {}))
             if item.expectations:
                 prepared.append(item)

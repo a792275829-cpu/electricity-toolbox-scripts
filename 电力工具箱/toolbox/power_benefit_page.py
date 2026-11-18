@@ -122,5 +122,5 @@ class PowerBenefitUpdatePage(ToolPage):
         self.run_process(self.build_update_command(
             workbooks, end, start_date=start, create_backup=self.create_backup.get()),
             action='run', cwd=self.paths.power_benefit_update_dir, status="正在补齐功率调整收益统计表...",
-            cancellable=False,
+            cooperative=True,
             on_success=lambda _: messagebox.showinfo("完成", "任务已完成，请查看日志中的写入及待发布数据。", parent=self))

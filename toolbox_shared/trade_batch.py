@@ -3,6 +3,7 @@ from pathlib import Path
 import unicodedata
 
 from .native_excel import excel_session
+from .task_cancellation import cancellation_checkpoint
 
 
 def plan_batch_outputs(xlsx_paths, output_dir, *, suffix="_分析报告.html"):
@@ -32,6 +33,7 @@ def iter_batch_reports(xlsx_paths, output_dir, render, *, continue_on_error=Fals
     repeated = len({source.resolve() for source, _ in planned}) < len(planned)
     with excel_session(cache=repeated, enabled=repeated):
         for source, output in planned:
+            cancellation_checkpoint()
             try:
                 result = render(source, out_path=output)
             except Exception as exc:

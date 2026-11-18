@@ -24,6 +24,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = SCRIPT_DIR.parent
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
+from toolbox_shared.task_cancellation import cancellation_checkpoint
 from toolbox_shared.auth_loader import load_login_module, standalone_login
 from toolbox_shared.dates import parse_date_input
 from toolbox_shared.credentials import apply_credentials
@@ -363,6 +364,7 @@ def collect_target_prices(
                 auth.ensure_login(context, config)
                 companies = auth.get_companies(context)
                 for target in targets:
+                    cancellation_checkpoint()
                     tenant = resolve_tenant(companies, target)
                     tenant_name = str(tenant["name"])
                     log(f"{target.key}：切换公司 {tenant_name}")
@@ -380,6 +382,7 @@ def collect_target_prices(
                         data_type=1,
                         label=f"{target.key} 日前出清电价",
                     )
+                    cancellation_checkpoint()
                     real_time = fetch_price_series(
                         context,
                         auth,
@@ -936,10 +939,11 @@ def update_spot_price_workbooks(
             if not prices.day_ahead and not prices.real_time:
                 log(f"{prices.target.key}：日前和实时均无完整数据，不改动工作簿。")
                 continue
+            cancellation_checkpoint()
             item = prepare_workbook(prices, overwrite=overwrite)
             prepared.append(item)
         backups = commit_prepared_workbooks(tuple(prepared), create_backup=create_backup)
-    except Exception:
+    except BaseException:
         for item in prepared:
             item.temporary.unlink(missing_ok=True)
         raise

@@ -482,7 +482,8 @@ class ToolboxApp(tk.Tk):
                 return False
         remaining = self.registry.terminate_all()
         if remaining:
-            messagebox.showwarning("无法立即关闭", "仍有不可安全中断的写入任务。请等待任务结束后再关闭。", parent=self)
+            names = "、".join(getattr(task, "name", "后台任务") for task in remaining)
+            messagebox.showwarning("任务仍在收尾", f"{names}尚未退出。请等待当前操作结束后再关闭或重启。", parent=self)
             return False
         if not self.credentials_panel.flush_autosave():
             messagebox.showwarning("账号未保存", "账号自动保存失败，请检查账号区提示后重试。", parent=self)

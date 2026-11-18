@@ -229,11 +229,12 @@ export function isDirectoryUploadFile(name) {
 }
 
 /** Submit serially; errors retain exactly which batches reached a response. */
-export async function submitImportBatches(batches, submit, log = () => {}) {
+export async function submitImportBatches(batches, submit, log = () => {}, shouldStop = () => false) {
   const completed = [], succeeded = [], failed = [];
   let current;
   try {
     for (let index = 0; index < batches.length; index++) {
+      if (await shouldStop()) break;
       const batch = batches[index];
       current = batch;
       log(`[${index + 1}/${batches.length}] 上传 ${batch.files.length} 个文件（${(batch.bytes / 1048576).toFixed(2)}MB）`);

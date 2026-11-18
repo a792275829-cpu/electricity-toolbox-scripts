@@ -12,6 +12,8 @@ if str(SCRIPT_DIR) not in sys.path:
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
 
+from toolbox_shared.task_cancellation import cancellation_checkpoint
+
 from gd_pdf_tool import parse_pdf, write_quote_excel
 from gd_pdf_tool.uploader import build_upload_plan, upload_report_files, verify_quote_workbook
 
@@ -36,6 +38,7 @@ def convert_pdf_to_excel(
         if output_path
         else default_output_path(source, result.report_date)
     )
+    cancellation_checkpoint()
     written = write_quote_excel(result.rows, output)
     verify_quote_workbook(written, result.rows)
     logger(f"报告日期：{result.report_date}")

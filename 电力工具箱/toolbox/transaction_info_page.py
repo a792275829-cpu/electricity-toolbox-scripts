@@ -164,7 +164,7 @@ class TransactionInfoUpdatePage(ToolPage):
             ),
             action='run', cwd=self.paths.transaction_info_update_dir,
             status="正在抓取并更新交易系统信息收集表...",
-            cancellable=False,
+            cooperative=True,
             on_success=lambda _code: messagebox.showinfo(
                 "完成", "任务已完成，请查看日志确认写入结果或无需更新。", parent=self
             ),

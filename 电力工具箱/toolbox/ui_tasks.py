@@ -74,7 +74,7 @@ class RemoteTaskRegistry(TaskRegistry):
         task_id = self.client.call("start", dict(tool_id=tool_id, action=action, values=values,
                                    request_id=request_id, confirmed=True))
         cursor = 0
-        cancelled = False
+        cancel_sent = False
         first_trace = []
         trace_size = 0
         def consume_events():
@@ -90,8 +90,9 @@ class RemoteTaskRegistry(TaskRegistry):
                         trace_size += len(first_trace[-1])
             return batch.get("pending", 0)
         while True:
-            if token.cancelled and not cancelled:
-                cancelled = bool(self.client.call("cancel", dict(task_id=task_id)))
+            if token.cancelled and not cancel_sent:
+                self.client.call("cancel", dict(task_id=task_id))
+                cancel_sent = True
             consume_events()
             snapshot = next(t for t in self.client.call("tasks") if t["id"] == task_id)
             if snapshot["state"] in {"succeeded", "cancelled", "failed"}:
@@ -158,11 +159,11 @@ class RemoteTaskRegistry(TaskRegistry):
         worker._remote_business = True
         return worker
 
-    def wps_action(self, action, config, indexes, log, *, operation=None):
+    def wps_action(self, action, config, indexes, log, *, operation=None, token=None):
         from .tasks import CancellationToken
         values = dict(config=json.dumps(config, ensure_ascii=False),
                       selected_indexes=",".join(str(i + 1) for i in indexes) or "1", operation=json.dumps(operation or {}))
-        return self.execute_remote("wps-writer", action, values, CancellationToken(), log)
+        return self.execute_remote("wps-writer", action, values, token if token is not None else CancellationToken(), log)
 
-    def wps_read(self, method, arguments, log):
-        return self.wps_action("inspect", {}, [], log, operation=dict(method=method, arguments=arguments))
+    def wps_read(self, method, arguments, log, *, token=None):
+        return self.wps_action("inspect", {}, [], log, operation=dict(method=method, arguments=arguments), token=token)

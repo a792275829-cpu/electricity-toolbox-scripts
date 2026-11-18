@@ -144,12 +144,15 @@ class WpsLoginStatusUiTests(unittest.TestCase):
             self.root.destroy()
         gc.collect()
 
+    def drain_completed_task(self):
+        snapshot = self.frame._task_done.get(timeout=2)
+        self.frame._task_done.put(snapshot)
+        self.frame.drain_logs()
+
     def check_status(self, **kwargs):
         with mock.patch.object(self.module, "check_wps_login_status", **kwargs):
             self.frame.check_wps_browser()
-            self.frame.browser_worker.join(2)
-            self.assertFalse(self.frame.browser_worker.is_alive())
-            self.frame.drain_logs()
+            self.drain_completed_task()
 
     def test_login_status_changes_after_login(self):
         self.check_status(return_value=self.module.WpsLoginStatus("logged_out", "请登录"))
@@ -180,8 +183,7 @@ class WpsLoginStatusUiTests(unittest.TestCase):
             mock.patch.object(self.module, "check_wps_login_status", return_value=self.module.WpsLoginStatus("logged_out", "请登录")),
         ):
             self.frame.start_wps_browser()
-            self.frame.browser_worker.join(2)
-            self.frame.drain_logs()
+            self.drain_completed_task()
         self.assertEqual(self.frame.browser_mode.get(), "managed_cdp")
         self.assertEqual(launch.call_args.kwargs["initial_url"], "https://www.kdocs.cn/latest")
         self.assertTrue(launch.call_args.kwargs["preload_url"])
@@ -220,19 +222,15 @@ class WpsLoginStatusUiTests(unittest.TestCase):
     def test_hidden_background_task_drains_result_then_stops(self):
         import threading
         release = threading.Event()
-        thread = self.frame._start_tracked_thread(
-            lambda: release.wait(2), name="test-hidden-wps"
-        )
-        self.frame.worker = thread
+        self.frame._start_task(lambda _token: release.wait(2), name="test-hidden-wps")
         try:
             self.frame._pause_hidden_page(SimpleNamespace(widget=self.frame))
             self.frame.drain_logs()
             self.assertIsNotNone(self.frame._drain_after_id)
         finally:
             release.set()
-            thread.join(2)
         self.frame.log_queue.put("写入完成：后台任务")
-        self.frame.drain_logs()
+        self.drain_completed_task()
         self.assertTrue(self.frame.log_console.finished)
         self.assertIn("写入完成：后台任务", self.frame.log_console.contents())
         self.assertIsNone(self.frame._drain_after_id)

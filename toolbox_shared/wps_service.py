@@ -1,5 +1,7 @@
 """WPS mappings, workbook reads and verified online writes; no Tk dependency."""
 from __future__ import annotations
+
+from .task_cancellation import cancellation_checkpoint
 import json
 import os
 import signal
@@ -432,6 +434,7 @@ def prepare_mappings(
 
     excel_values: dict[int, tuple[list[list[Any]], int, int]] = {}
     for workbook_path, requests in excel_groups.items():
+        cancellation_checkpoint()
         results = read_excel_ranges(
             workbook_path, [(sheet_name, source_range) for _, sheet_name, source_range in requests]
         )
@@ -520,6 +523,7 @@ def wait_for_wps_ready(page, log, timeout_seconds: int) -> dict[str, Any]:
     }
     """
     while time_module.monotonic() < deadline:
+        cancellation_checkpoint()
         try:
             state = page.evaluate(readiness_script)
             last_state = state
@@ -566,6 +570,7 @@ def evaluate_wps_operation(page, script: str, payload: Any, log, timeout_seconds
                 ]);
               } finally { clearTimeout(timer); }
             }""" if not writing else script
+            cancellation_checkpoint()
             return page.evaluate(bounded_script, payload)
         except Exception as exc:
             # The guard runs before any cell assignment. Do not retry arbitrary
@@ -914,6 +919,7 @@ def read_online_ranges(
             """
             results = []
             for url, sheet_name, range_text, rows, cols in requests:
+                cancellation_checkpoint()
                 page = find_or_open_page(context, url)
                 raw = evaluate_wps_operation(
                     page, script, {"sheetName": sheet_name, "rangeText": range_text}, log, 120

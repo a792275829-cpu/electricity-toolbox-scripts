@@ -19,9 +19,13 @@ def main():
     from toolbox.workflows import execute
     from toolbox.service import RESULT_PREFIX, ERROR_PREFIX
     from toolbox.tasks.errors import error_detail
+    from toolbox.tasks import TaskCancelled
+    from toolbox_shared.task_cancellation import CancellationRequested
     request = json.loads(args.request.read_text(encoding="utf-8"))
     try:
         result = execute(ToolPaths(args.workspace), request["tool_id"], request["action"], request["values"])
+    except TaskCancelled:
+        raise CancellationRequested() from None
     except Exception as exc:
         detail = error_detail(exc, tool_id=request["tool_id"], action=request["action"])
         print(ERROR_PREFIX + json.dumps(detail, ensure_ascii=False), flush=True)

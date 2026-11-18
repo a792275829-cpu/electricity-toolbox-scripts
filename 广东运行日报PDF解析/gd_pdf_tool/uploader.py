@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 from openpyxl import load_workbook
 
+from toolbox_shared.task_cancellation import cancellation_checkpoint
+
 from .excel_writer import HEADERS
 from .parser import QuoteRow, extract_report_date, price_intervals
 
@@ -266,6 +268,7 @@ def upload_one(page, context, auth, plan: UploadPlan, path: Path, *, label: str,
         expect(row).to_contain_text(path.name, timeout=30000)
     except AssertionError as exc:
         raise RuntimeError(f"{label}文件未通过网站校验，未执行全部上传。") from exc
+    cancellation_checkpoint()
     logger(f"{label}：执行全部上传")
     uploading = wait_upload_response(
         page, button.click, endpoint=prefix + "/create/multi",
@@ -299,6 +302,7 @@ def upload_report_files(plan: UploadPlan, *, logger: Callable[[str], None] = pri
                     (plan.pdf_path, "现货交易日报", "SPOT_RUN_REPORT_DATA"),
                     (plan.excel_path, "报价容量数据", "SPOT_RUN_REPORT_QUOTE_CAPACITY"),
                 ):
+                    cancellation_checkpoint()
                     upload_one(page, context, auth, plan, path, label=label, data_type=data_type, logger=logger)
                     completed.append(label)
                 auth.save_auth_state(context)

@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Protocol, TypeVar
 
+from toolbox_shared.task_cancellation import cancellation_checkpoint
+
 
 FileFingerprint = tuple[int, int, int, int, int, str]
 
@@ -68,6 +70,7 @@ def commit_workbooks(
 ) -> dict[Path, Path | None]:
     try:
         with workbook_commit_lock(item.original for item in prepared):
+            cancellation_checkpoint()
             return _commit_locked(prepared, verify, create_backup=create_backup)
     finally:
         for item in prepared:

@@ -377,22 +377,23 @@ class LogConsoleTests(unittest.TestCase):
 
     def test_wps_remote_failure_does_not_replay_streamed_trace(self):
         from unittest.mock import Mock
-        from toolbox.runtime import load_module
+        from toolbox.runtime import TaskRegistry, load_module
         from toolbox.tasks.errors import RemoteTaskError
 
         module = load_module("wps_remote_log_test", Path(__file__).resolve().parents[2] / "wps自动/wps_excel_to_kdocs_gui.py")
         trace = "Traceback (most recent call last):\nTimeoutError: original remote timeout\n"
-        def fail(_action, _config, _indexes, log):
+        def fail(_action, _config, _indexes, log, *, token):
             log(trace)
             raise RemoteTaskError("命令退出码 1\n" + trace, trace)
-        registry = Mock(remote_business=True)
-        registry.wps_action.side_effect = fail
+        registry = Mock(wraps=TaskRegistry(), remote_business=True, wps_action=Mock(side_effect=fail))
         with patch.object(module.WpsWriterFrame, "load_initial_config"), patch.object(module, "LOG_DIR", Path(self.temp.name)):
             frame = module.WpsWriterFrame(self.root)
             frame.task_registry = registry
             try:
-                with patch.object(frame, "selected_config_indexes", return_value=[0]), patch.object(frame, "current_runtime_config", return_value={}), patch.object(frame, "save_current_config"), patch.object(frame, "_start_tracked_thread", side_effect=lambda worker, **_kw: worker()):
-                    frame._remote_write(preview=False)
+                with patch.object(frame, "selected_config_indexes", return_value=[0]), patch.object(frame, "current_runtime_config", return_value={}), patch.object(frame, "save_current_config"):
+                    frame.write()
+                snapshot = frame._task_done.get(timeout=2)
+                frame._task_done.put(snapshot)
                 frame.drain_logs()
                 contents = frame.log_console.contents()
                 self.assertEqual(1, contents.count("Traceback (most recent call last):"))

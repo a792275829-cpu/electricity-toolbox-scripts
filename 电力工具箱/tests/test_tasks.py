@@ -446,6 +446,28 @@ class TaskEngineTests(unittest.TestCase):
         self.assertEqual((task_id,), tuple(item.task_id for item in remaining))
         release.set()
 
+    def test_cooperative_task_reports_success_when_final_commit_has_completed(self) -> None:
+        from toolbox.tasks import TaskEngine, TaskState
+
+        engine = TaskEngine()
+        entered, release, done = threading.Event(), threading.Event(), threading.Event()
+
+        def commit(_token, _emit):
+            entered.set()
+            release.wait(2)
+            return "commit confirmed"
+
+        task_id = engine.start_callable("提交", commit, cooperative=True, on_done=lambda _: done.set())
+        try:
+            self.assertTrue(entered.wait(1))
+            self.assertTrue(engine.cancel(task_id))
+            self.assertEqual(TaskState.CANCELLING, engine.snapshot(task_id).state)
+        finally:
+            release.set()
+        self.assertTrue(done.wait(2))
+        self.assertEqual(TaskState.SUCCEEDED, engine.snapshot(task_id).state)
+        self.assertEqual("commit confirmed", engine.snapshot(task_id).result)
+
     def test_success_cannot_overwrite_accepted_cancellation(self) -> None:
         from toolbox.tasks import TaskEngine, TaskState
 

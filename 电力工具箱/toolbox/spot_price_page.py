@@ -211,7 +211,7 @@ class SpotPriceUpdatePage(ToolPage):
             ),
             action='run', cwd=self.paths.spot_price_update_dir,
             status="正在抓取并更新现货价格工作簿...",
-            cancellable=False,
+            cooperative=True,
             on_success=lambda _code: messagebox.showinfo(
                 "完成",
                 f"{'、'.join(workbooks)}处理完成，已写入数据通过回读验证。\n"

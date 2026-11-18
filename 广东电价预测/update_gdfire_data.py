@@ -25,6 +25,7 @@ PROVINCE_AREA_ID = "044"
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR.parent) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR.parent))
+from toolbox_shared.task_cancellation import cancellation_checkpoint
 from toolbox_shared.credentials import read_login_config
 from toolbox_shared.dates import normalize_date_input
 from toolbox_shared.excel_read import read_cell_snapshots
@@ -372,6 +373,7 @@ def write_large_xlsx(frame, path, sheet_name, *, format_source=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.stem}.{uuid4().hex}.tmp.xlsx")
     try:
+        cancellation_checkpoint()
         _write_large_xlsx(frame, temporary, sheet_name, format_source=format_source)
         book = load_workbook(temporary, read_only=True, data_only=False)
         try:
@@ -414,6 +416,7 @@ def write_large_xlsx(frame, path, sheet_name, *, format_source=None):
                         raise RuntimeError(f"总表保存后数值或格式回读不一致：{name}，第{index + 2}行")
         finally:
             book.close()
+        cancellation_checkpoint()
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -495,6 +498,7 @@ def fetch_increment(client: GDFireClient, start: str, end: str) -> pd.DataFrame:
     """Bound API response size while sharing one tool-local authenticated session."""
     frames = []
     for batch_start in pd.date_range(start, end, freq="31D"):
+        cancellation_checkpoint()
         batch_end = min(batch_start + pd.Timedelta(days=30), pd.Timestamp(end))
         first, last = str(batch_start.date()), str(batch_end.date())
         print(f"补抓总表数据：{first} 至 {last}", flush=True)

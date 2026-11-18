@@ -24,6 +24,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = SCRIPT_DIR.parent
 if str(WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_DIR))
+from toolbox_shared.task_cancellation import cancellation_checkpoint
 from toolbox_shared.auth_loader import load_login_module, standalone_login
 from toolbox_shared.dates import parse_date_input, select_dated_record
 from toolbox_shared.credentials import apply_credentials
@@ -279,6 +280,7 @@ def collect_pairs(
             try:
                 auth.ensure_login(context, config)
                 for day_ahead_date in selected_dates:
+                    cancellation_checkpoint()
                     actual_date = day_ahead_date - timedelta(days=DATE_OFFSET_DAYS)
                     log(
                         f"正在读取：日前 {day_ahead_date.isoformat()} / "
@@ -860,6 +862,7 @@ def update_workbook(
         log("所选日期均已有完整数据，无需抓取或写入。")
         return None
     pairs = collect_pairs(start, end_date, config=config, dates=needed)
+    cancellation_checkpoint()
     prepared = prepare_workbook(workbook_path, pairs, overwrite=overwrite)
     backup = commit_prepared_workbook(prepared, create_backup=create_backup)
     log(

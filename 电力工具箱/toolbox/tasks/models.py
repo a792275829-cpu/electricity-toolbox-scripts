@@ -6,6 +6,8 @@ from enum import Enum
 from threading import Event
 from typing import Any
 
+from toolbox_shared.task_cancellation import process_cancellation_requested
+
 
 class TaskState(str, Enum):
     CREATED = "created"
@@ -59,7 +61,7 @@ class CancellationToken:
 
     @property
     def cancelled(self) -> bool:
-        return self._event.is_set()
+        return self._event.is_set() or process_cancellation_requested()
 
     def cancel(self) -> None:
         self._event.set()

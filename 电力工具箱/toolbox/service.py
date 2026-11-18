@@ -79,11 +79,11 @@ class ToolboxService:
                 raise ValueError("该工具已有任务运行，请等待完成")
             if self.confirmation(tool_id, action, p) and params.get("confirmed") is not True:
                 raise ValueError("请先确认上传、覆盖或文件归类操作")
-            writable = tool_id in {"market-table", "transaction-info", "power-benefit", "spot-price",
-                                   "group-upload", "private-batch-upload"}
-            cancellable = action not in {"run", "update"} or not (writable or tool_id in {"wps-writer", "guangdong-price"} or
-                          tool_id == "summary-upload" and p["mode"] != "summary" or
-                          tool_id == "daily-pdf-parser" and p["mode"] != "parse")
+            cooperative = action in {"run", "update", "preview"} and tool_id in {
+                "market-table", "transaction-info", "power-benefit", "spot-price",
+                "group-upload", "private-batch-upload", "summary-upload", "daily-pdf-parser",
+                "guangdong-price", "trade-analysis",
+            } or (tool_id == "wps-writer" and action == "run")
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix="toolbox-task-", suffix=".json", delete=False) as stream:
                 request_path = Path(stream.name)
                 json.dump(dict(tool_id=tool_id, action=action, values=p), stream, ensure_ascii=False)
@@ -114,7 +114,7 @@ class ToolboxService:
                     ProcessRunner().run([python_executable(), "-u", "-B",
                         str(Path(__file__).resolve().parents[2] / "desktop/python/task_worker.py"), "--workspace", str(self.paths.workspace),
                         "--request", str(request_path)], cwd=self.paths.workspace,
-                        env=utf8_environment(), token=token, on_output=output)
+                        env=utf8_environment(), token=token, on_output=output, cooperative=cooperative)
                     if result is None:
                         raise RuntimeError("业务进程未返回完成结果，请核对日志")
                     if no_data:
@@ -132,7 +132,7 @@ class ToolboxService:
                 finally:
                     request_path.unlink(missing_ok=True)
             try:
-                task_id = self.registry.start_callable(self._tools[tool_id]["name"], worker, cancellable=cancellable,
+                task_id = self.registry.start_callable(self._tools[tool_id]["name"], worker, cooperative=cooperative,
                     on_done=lambda _snapshot: request_path.unlink(missing_ok=True))
             except BaseException:
                 request_path.unlink(missing_ok=True)
@@ -261,8 +261,10 @@ class ToolboxService:
                     raise ValueError("仍有任务运行，请先结束任务或确认取消")
                 if any(not s.cancellable for s in active):
                     raise ValueError("仍有不可安全中断的写入任务，请等待完成")
-                if self.registry.terminate_all():
-                    raise ValueError("后台任务尚未退出，请稍后重试")
+                remaining = self.registry.terminate_all()
+                if remaining:
+                    names = "、".join(getattr(task, "name", "后台任务") for task in remaining)
+                    raise ValueError(f"{names}尚未退出，请等待当前操作收尾后重试")
                 if hasattr(self, "_web_ui"):
                     self._web_ui.close()
                 self.closed.set()
