@@ -433,7 +433,11 @@ def trend_word(value: float) -> str:
     return "\u4e0a\u5347" if value >= 0 else "\u4e0b\u964d"
 
 
-def change_word(value: float) -> str:
+def change_word(value: float | None) -> str:
+    if value is None:
+        return "待补充"
+    if value == 0:
+        return "持平"
     return "\u589e\u52a0" if value >= 0 else "\u51cf\u5c11"
 
 
@@ -474,12 +478,14 @@ def startup_change_text(diff: float | None) -> str:
     return delta_phrase(diff, unit=UNIT_TAI, up="\u589e\u52a0", down="\u51cf\u5c11")
 
 
-def load_trend_word(diff_mw: float) -> str:
+def load_trend_word(diff_mw: float | None) -> str:
     """负荷方向词：只输出「上升／下降／持平」，不带数值，供句首使用。"""
+    if diff_mw is None:
+        return "待补充"
     return "\u6301\u5e73" if mw_to_10k_kw(diff_mw) == 0 else trend_word(diff_mw)
 
 
-def load_change_text(diff_mw: float, unit: str = "\u4e07\u5343\u74e6") -> str:
+def load_change_text(diff_mw: float | None, unit: str = "\u4e07\u5343\u74e6") -> str:
     """负荷环比：变化量四舍五入为 0 时写「持平」，与人工报告一致。"""
     return delta_phrase(diff_mw, unit=unit, scale=0.1)
 
@@ -1765,13 +1771,13 @@ def build_day_ahead_market_text(payload: dict[str, Any]) -> str:
                    if price.get("difference") is not None else "待补充")
     selected = load["selected"]
     return (
-        f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load.get('maxDiff') or 0)}\uff0c"
+        f"\u8fd0\u884c\u65e5\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load.get('maxDiff'))}\uff0c"
         f"\u5168\u5929\u6700\u5927\u503c{fmt_mw_as_10k_kw(selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
-        f"\u73af\u6bd4{load_change_text(load.get('maxDiff') or 0)}\uff0c"
+        f"\u73af\u6bd4{load_change_text(load.get('maxDiff'))}\uff0c"
         f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
-        f"\u73af\u6bd4{load_change_text(load.get('minDiff') or 0)}\uff1b"
-        f"A\u7c7b\u7535\u51fa\u529b{change_word(a_power.get('avgDiff') or 0)}\u3001"
-        f"\u5730\u65b9\u7535\u51fa\u529b{change_word(local.get('avgDiff') or 0)}\uff0c"
+        f"\u73af\u6bd4{load_change_text(load.get('minDiff'))}\uff1b"
+        f"A\u7c7b\u7535\u51fa\u529b{change_word(a_power.get('avgDiff'))}\u3001"
+        f"\u5730\u65b9\u7535\u51fa\u529b{change_word(local.get('avgDiff'))}\uff0c"
         f"\u68c0\u4fee\u5bb9\u91cf{fmt_number(capacity)}\u4e07\u5343\u74e6\u3002"
         f"\u5e02\u573a\u5f00\u673a\u53f0\u6570{fmt_number(startup)}\u53f0\uff0c"
         f"\u73af\u6bd4{startup_delta}\uff0c"
@@ -1787,12 +1793,12 @@ def build_actual_market_text(payload: dict[str, Any]) -> str:
     local = market_data["loadInfo"]["byType"]["3"].get("actualVsDayAhead", {})
     b_space = load_info_item(market_data, "6", "actual")
     price = market_price_item(market_data, "RT")
-    a_change = change_word(a_power["avgDiff"]) if a_power.get("avgDiff") is not None else "待补充"
-    local_change = change_word(local["avgDiff"]) if local.get("avgDiff") is not None else "待补充"
+    a_change = change_word(a_power.get("avgDiff"))
+    local_change = change_word(local.get("avgDiff"))
     selected = load["selected"]
     b_selected = b_space["selected"]
     return (
-        f"\u5b9e\u65f6\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load.get('maxDiff') or 0)}\uff0c"
+        f"\u5b9e\u65f6\u7edf\u8c03\u8d1f\u8377\u9700\u6c42{load_trend_word(load.get('maxDiff'))}\uff0c"
         f"\u5168\u5929\u6700\u5927\u503c{fmt_mw_as_10k_kw(selected.get('max'))}\u4e07\u5343\u74e6\uff0c"
         f"\u6700\u5c0f\u503c{fmt_mw_as_10k_kw(selected.get('min'))}\u4e07\u5343\u74e6\uff0c"
         f"A\u7c7b\u7535\u51fa\u529b{a_change}\u3001"

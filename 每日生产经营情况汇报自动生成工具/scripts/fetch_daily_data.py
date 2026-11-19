@@ -270,7 +270,7 @@ def fetch_startup_count_summary(context, *, date_text: str, province_area_id: st
             if date_only(item.get("date")) == date_text
             and str(item.get("dataType") or "") == str(DEFAULT_DATA_TYPE)
         ),
-        rows[0] if rows else {},
+        {},
     )
     startup_count = number_or_none(row.get("onlineUnit"))
     return {

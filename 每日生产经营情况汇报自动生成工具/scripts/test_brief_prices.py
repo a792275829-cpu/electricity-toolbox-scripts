@@ -40,6 +40,24 @@ class BriefPriceTests(unittest.TestCase):
         self.write("实时简析：实时出清均价471.34厘/kWh，环比上涨2.50厘/kWh。", sheet="快报")
         self.assertEqual(read_brief_prices(self.path, day_ahead=False)["RT"]["difference"], 2.5)
 
+    def test_realtime_reads_province_wording_without_using_plant_average(self):
+        self.write("实时简析：汕头实时均价100元/兆瓦时。全省全天实时出清均价为471.34元/兆瓦时。",
+                   sheet="快报", row=42)
+        self.assertEqual(read_brief_prices(self.path, day_ahead=False)["RT"]["price"], 471.34)
+        self.write("实时简析：汕头实时均价100元/兆瓦时。", sheet="快报", row=42)
+        with self.assertRaises(ValueError):
+            read_brief_prices(self.path, day_ahead=False)
+
+    def test_strategy_startup_count_and_delta_use_one_brief(self):
+        self.write("日前简析：市场开机台数为422台，环比减少20台。全省日前出清均价396.58元/兆瓦时。")
+        payload = self.payload()
+        payload["operationPublicData"] = {"startupCount": {
+            "selected": {"maxStartupCount": 442}, "difference": 0}}
+        apply_brief_prices(payload, day_ahead_workbook=self.path, daily_clearing_workbook=None)
+        startup = payload["operationPublicData"]["startupCount"]
+        self.assertEqual((startup["selected"]["maxStartupCount"], startup["difference"]), (422, -20))
+        self.assertEqual(startup["differenceSource"]["cell"], "A41")
+
     def test_zero_and_flat_are_values(self):
         self.write("日前简析：全省日前出清均价0元/兆瓦时，环比持平。", sheet="快报（日前）")
         self.assertEqual(read_brief_prices(self.path, day_ahead=True)["PRE"]["difference"], 0)
@@ -117,7 +135,7 @@ class BriefPriceTests(unittest.TestCase):
         payload = self.payload()
         market = payload["marketAnalysisData"]
         market["operationPublicData"] = {"startupCount": {
-            "selected": {"maxStartupCount": 451}, "difference": 23}}
+            "selected": {"maxStartupCount": 467}, "difference": 23}}
         outer = deepcopy(payload["priceBoard"])
         realtime = deepcopy(market["priceBoard"]["rows"][1])
         source = apply_day_ahead_market_deltas(payload, workbook=self.path, log=lambda _: None)

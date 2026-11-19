@@ -12,6 +12,7 @@ from generate_red_marked_report import (
 class ReportTextTests(unittest.TestCase):
     def test_load_change_text_uses_flat_when_delta_rounds_to_zero(self) -> None:
         # 人工报告写「环比持平」，不写「环比上升0万千瓦」。
+        self.assertEqual(load_change_text(None), "待补充")
         self.assertEqual(load_change_text(0), "持平")
         self.assertEqual(load_change_text(4.9), "持平")
         self.assertEqual(load_change_text(-4.9), "持平")
@@ -20,6 +21,7 @@ class ReportTextTests(unittest.TestCase):
 
     def test_load_trend_word_has_no_number(self) -> None:
         # 句首「统调负荷需求上升，全天最大…」只带方向，不带数值。
+        self.assertEqual(load_trend_word(None), "待补充")
         self.assertEqual(load_trend_word(0), "持平")
         self.assertEqual(load_trend_word(4), "持平")
         self.assertEqual(load_trend_word(1000), "上升")

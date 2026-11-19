@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 NUMBER = r"[-+]?\d+(?:\.\d+)?"
 UP = "上涨|上升|增加|增长|升高|上行"
 DOWN = "下降|下跌|减少|降低|下行|回落"
-PRE_PRICE = rf"全省日前(?:出清)?均价\s*[:：]?\s*({NUMBER})\s*"
+PRE_PRICE = rf"全省日前(?:出清)?均价\s*(?:为|[:：])?\s*({NUMBER})\s*"
 UNIT = r"(?:元\s*/\s*(?:兆瓦时|MWh)|厘\s*/\s*(?:千瓦时|kWh))"
 
 
@@ -39,7 +39,7 @@ def read_brief_prices(path: Path, *, day_ahead: bool, expected_date: str | None 
         prices = {}
         patterns = {
             "PRE": PRE_PRICE + UNIT,
-            "RT": rf"(?:全省|全天)?实时(?:出清)?均价\s*({NUMBER})\s*{UNIT}",
+            "RT": rf"(?:全省(?:全天)?|全天|(?<![\w]))实时(?:出清)?均价\s*(?:为|:)?\s*({NUMBER})\s*{UNIT}",
         }
         for row in sheet.iter_rows(min_row=41 if a41_only else 1,
                                    max_row=41 if a41_only else 80, min_col=1, max_col=1):
@@ -58,6 +58,8 @@ def read_brief_prices(path: Path, *, day_ahead: bool, expected_date: str | None 
                     "price": float(match[1]), "difference": difference,
                     "workbook": str(path), "sheet": sheet.title, "cell": cell.coordinate,
                 }
+                if day_ahead:
+                    prices[kind].update(_startup_metrics(text))
         if not prices:
             location = "A41" if a41_only else "A1:A80"
             raise ValueError(f"{path.name} {sheet.title} {location} 简析中缺少全省出清均价")
@@ -101,6 +103,8 @@ def apply_brief_prices(payload: dict, *, day_ahead_workbook: Path | None,
             if baseline is not None:
                 source = dict(source, difference=round(source["price"] - baseline["price"], 4),
                               compareSource=baseline)
+            if ahead and source["startupCount"] is not None and "operationPublicData" in payload:
+                _apply_startup_metrics(payload, dict(source, date=row["selectedDate"]))
             previous = dict(row)
             row["selectedDailyAvgPrice"] = source["price"]
             row["selectedPointCount"] = None  # Narrative is not a 96-point curve.
@@ -134,6 +138,27 @@ def _narrative_difference(text: str, unit: str) -> float | None:
     return 0.0 if flat else None
 
 
+def _startup_metrics(text: str) -> dict:
+    match = re.search(r"市场开机台数\s*(?:为|:)?\s*(\d+)\s*台", text)
+    return {
+        "startupCount": int(match[1]) if match else None,
+        "startupDifference": _narrative_difference(text[match.end():], "台") if match else None,
+    }
+
+
+def _apply_startup_metrics(section: dict, source: dict) -> None:
+    startup = section.setdefault("operationPublicData", {}).setdefault("startupCount", {})
+    count = source["startupCount"]
+    difference = source["startupDifference"]
+    startup["selected"] = {"date": source["date"], "maxStartupCount": count,
+                           "unit": "台", "unitCount": [] if count is None else [count]}
+    startup["compare"] = {
+        "maxStartupCount": count - difference if count is not None and difference is not None else None,
+    }
+    startup["difference"] = difference
+    startup["differenceSource"] = dict(source)
+
+
 def read_day_ahead_market_deltas(path: Path, *, expected_date: str) -> dict:
     """Read only D-2 快报(日前)!A41, never a shifted paragraph or another day."""
     book = load_workbook(path, read_only=True, data_only=True)
@@ -143,10 +168,9 @@ def read_day_ahead_market_deltas(path: Path, *, expected_date: str) -> dict:
         if not isinstance(text, str):
             raise ValueError(f"{path.name} {sheet.title}!A41 缺少日前市场文字")
         text = _normalize_brief(text)
-        startup = re.search(r"市场开机台数\s*:?\s*\d+\s*台", text)
         price = re.search(PRE_PRICE + UNIT, text, re.I)
         return {
-            "startupDifference": _narrative_difference(text[startup.end():], "台") if startup else None,
+            **_startup_metrics(text),
             "price": float(price[1]) if price else None,
             "priceDifference": _narrative_difference(text[price.end():], UNIT) if price else None,
             "workbook": str(path), "sheet": sheet.title, "cell": "A41", "date": expected_date,
@@ -159,7 +183,7 @@ def apply_day_ahead_market_deltas(payload: dict, *, workbook: Path | None, log=p
     """Use D-2 A41 for the day-ahead price and both comparisons."""
     market = payload["marketAnalysisData"]
     board = market["priceBoard"]
-    source = {"startupDifference": None, "price": None, "priceDifference": None,
+    source = {"startupCount": None, "startupDifference": None, "price": None, "priceDifference": None,
               "date": board["selectedDate"], "cell": "A41"}
     try:
         if workbook is None:
@@ -168,9 +192,7 @@ def apply_day_ahead_market_deltas(payload: dict, *, workbook: Path | None, log=p
     except (OSError, ValueError) as exc:
         source["error"] = str(exc)
         log(f"日前市场 A41 未取数，标记待补充：{exc}")
-    startup = market.setdefault("operationPublicData", {}).setdefault("startupCount", {})
-    startup["difference"] = source["startupDifference"]
-    startup["differenceSource"] = dict(source)
+    _apply_startup_metrics(market, source)
     for row in board["rows"]:
         if row["dataType"] == "PRE":
             price = source["price"]
