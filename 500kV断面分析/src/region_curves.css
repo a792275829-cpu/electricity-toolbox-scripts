@@ -8,24 +8,33 @@
 .time-slider-ticks { position:absolute; top:var(--time-row-top,28px); left:14px; right:14px; height:16px; color:var(--muted); font-family:inherit; font-size:var(--time-label-size,11px); font-weight:400; line-height:16px; font-variant-numeric:tabular-nums; }
 .time-slider-ticks span { position:absolute; left:calc(9px + (100% - 18px) * var(--tick-progress,0)); transform:translateX(-50%); white-space:nowrap; }
 [hidden] { display:none !important; }
-.analysis-views { flex-shrink:0; display:flex; align-items:center; height:42px; padding:3px 8px; }
-.analysis-switch { position:relative; display:grid; grid-template-columns:repeat(2,1fr); width:286px; height:34px; padding:3px; border:1px solid var(--line); border-radius:999px; background:var(--soft); }
-.analysis-switch::before { content:''; position:absolute; left:3px; top:3px; width:calc(50% - 3px); height:calc(100% - 6px); border-radius:999px; background:var(--navy); transition:transform .18s ease; }
-.analysis-switch[data-view=curves]::before { transform:translateX(100%); }
-.analysis-views button { position:relative; z-index:1; border:0; background:transparent; color:var(--muted); border-radius:999px; padding:0 10px; font:inherit; font-size:13px; cursor:pointer; }
-.analysis-views button[aria-pressed=true] { color:var(--panel); }
+.analysis-views {
+  flex-shrink:0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
+  gap:0 1.25rem; padding:0 1rem; background:#142b3a; color:#fff;
+}
+.analysis-title {
+  margin:0; padding-block:.6rem; font-size:clamp(1rem, .95rem + .55vw, 1.3125rem);
+  line-height:1.25; font-weight:650;
+}
+.analysis-switch { display:flex; flex-wrap:wrap; gap:.25rem; min-width:0; }
+.analysis-views button {
+  border:0; border-block-end:3px solid transparent; background:transparent; color:#d1e1e9;
+  min-height:44px; padding:.4rem .75rem; font:inherit; cursor:pointer;
+}
+.analysis-views button:hover { background:#244456; }
+.analysis-views button[aria-pressed=true] { color:#fff; border-block-end-color:#8ad0df; }
 .region-price button:not(.view-button),.region-price select,.region-price input[type=search] {
   font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:9px 12px;
 }
 .region-price button { cursor:pointer; }
-.region-price { padding:0 2px 2px; width:100%; height:100dvh; }
+.region-price { width:100%; height:100dvh; }
 .region-price p { line-height:1.6; }
 .curve-popup-toggle { display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap; min-height:34px; cursor:pointer; }
 .curve-layout { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:0; height:100%; min-height:0; }
-.curve-picker,.curve-main { padding:12px; border:1px solid var(--line); border-radius:6px; background:var(--panel); min-width:0; }
+.curve-picker,.curve-main { padding:12px; background:var(--panel); min-width:0; }
 .curve-picker,.curve-main { height:100%; min-height:0; overflow:auto; }
-.curve-picker { position:fixed; top:0; right:0; width:380px; height:100dvh; max-height:100dvh; border:0; border-left:1px solid var(--line); border-radius:0; box-shadow:-18px 0 48px rgba(0,0,0,.16); }
-.curve-main { display:flex; flex-direction:column; padding:0; overflow:hidden; box-shadow:var(--shadow); }
+.curve-picker { position:fixed; top:0; right:0; width:380px; height:100dvh; max-height:100dvh; border-inline-start:1px solid var(--line); }
+.curve-main { display:flex; flex-direction:column; padding:0; overflow:hidden; }
 .curve-content { flex:1; min-height:0; overflow:auto; padding:12px; }
 #curveTree { margin-top:12px; }
  .curve-search-box { position:relative; }
@@ -76,12 +85,13 @@
 .curve-rank-bar { position:absolute; height:6px; border-radius:4px; background:var(--blue); }
 .curve-rank-bar.is-negative { background:#bd4934; }
 .curve-swatch { width:18px; display:inline-block; border-top:3px solid; margin-right:6px; vertical-align:middle; }
-.region-price :focus-visible,.analysis-views :focus-visible { outline:3px solid var(--blue); outline-offset:3px; }
+.region-price :focus-visible { outline:3px solid var(--blue); outline-offset:3px; }
+.analysis-views button:focus-visible { outline:2px solid #aee4ee; outline-offset:-4px; }
 @media(max-width:920px) {
-  .region-price { padding:0 2px 2px; height:auto; min-height:100dvh; }
+  .region-price { height:auto; min-height:100dvh; }
   .curve-heading { gap:10px; }
   .curve-layout { grid-template-columns:1fr; height:auto; }
-  .curve-picker { position:static; width:auto; height:auto; min-height:280px; max-height:380px; border:1px solid var(--line); border-radius:12px; box-shadow:none; }
+  .curve-picker { position:static; width:auto; height:auto; min-height:280px; max-height:380px; border:0; border-block-start:1px solid var(--line); }
   .curve-main { height:auto; overflow:visible; padding:0; }
   .curve-content { overflow:visible; padding:10px; }
   .curve-picker { padding:12px; }

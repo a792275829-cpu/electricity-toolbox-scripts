@@ -47,39 +47,32 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       --shadow: 0 22px 55px rgba(0, 8, 22, .42);
     }}
     body[data-theme="light"] {{
-      color-scheme: light; --ink:#172033; --muted:#68758a; --line:#dce3ec;
-      --panel:#fff; --soft:#f5f7fb; --accent:#c92235; --blue:#1f63d3;
-      --navy:#0e2747; --cyan:#1f63d3; --shadow:0 16px 40px rgba(20,35,55,.09);
+      color-scheme: light; --ink:#142b3a; --muted:#445e6e; --line:#cfdae0;
+      --panel:#fff; --soft:#f2f6f7; --accent:#b82038; --blue:#14566a;
+      --navy:#142b3a; --cyan:#14566a; --shadow:none;
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
       color: var(--ink);
       background: #07111f;
       background-image: linear-gradient(rgba(39,142,204,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(39,142,204,.035) 1px, transparent 1px);
       background-size: 32px 32px;
     }}
-    body[data-theme="light"] {{ background: #f2f5f9; }}
+    body[data-theme="light"] {{ background:var(--soft); }}
     .app {{
       min-height:100dvh;
       display: grid;
       grid-template-columns: minmax(0, 1fr) var(--side-width, 380px);
     }}
     .map-pane {{
-      padding:0 2px 2px;
+      padding:0;
       min-width: 0;
       height:100dvh;
       display:flex;
       flex-direction:column;
       gap:0;
-    }}
-    h1 {{
-      margin: 0;
-      font-size: clamp(20px, 1.6vw, 26px);
-      line-height: 1.2;
-      letter-spacing: -.03em;
-      color: var(--navy);
     }}
     .header-actions {{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }}
     .icon-button {{
@@ -133,8 +126,6 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     .is-hidden {{ display: none; }}
     .map-shell {{
       background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius:6px;
       overflow: hidden;
       position: relative;
       min-height: 0;
@@ -348,9 +339,11 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       fill: #7f0010;
       stroke-width: 4px;
     }}
-    body[data-theme="light"] svg {{ background:#eaf0f5; }}
-    body[data-theme="light"] .schematic-field {{ fill:#fbfdff; stroke:#b9c9d7; }}
-    body[data-theme="light"] .schematic-grid {{ stroke:#c7d4df; opacity:.58; }}
+    body[data-theme="light"] svg {{ background:#edf3f5; }}
+    body[data-theme="light"] .province {{ fill:#e1ebee; stroke:#9db2bc; }}
+    body[data-theme="light"] .coast {{ stroke:#839ca8; }}
+    body[data-theme="light"] .schematic-field {{ fill:#fbfdff; stroke:#9db2bc; }}
+    body[data-theme="light"] .schematic-grid {{ stroke:#bfced4; opacity:.58; }}
     body[data-theme="light"] .schematic-grid-field {{ opacity:.72; }}
     body[data-theme="light"] .edge {{ stroke:#526b7f; opacity:.58; }}
     body[data-theme="light"] .edge.connected {{ stroke:#006f9f!important; opacity:1; filter:drop-shadow(0 0 3px rgba(0,111,159,.28)); }}
@@ -369,7 +362,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     .side {{
       background: var(--panel);
       border-left: 1px solid var(--line);
-      padding:12px;
+      padding:16px;
       overflow:auto;
       width:var(--side-width, 380px);
       height:100dvh;
@@ -379,14 +372,13 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       position:fixed;
       top:0;
       right:0;
-      box-shadow: -18px 0 48px rgba(0,0,0,.16);
     }}
     .side > * {{ flex-shrink:0; }}
     .side-header {{
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
       margin-bottom: 12px;
     }}
-    .side-label {{ font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: .08em; }}
+    .side-label {{ margin:0; color:var(--ink); }}
     .search {{
       width: 100%; height: 42px; border: 1px solid var(--line); border-radius: 10px;
       padding: 0 12px; color: var(--ink); background: var(--soft); outline: none;
@@ -395,13 +387,13 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     .section-controls {{ display:flex; align-items:center; gap:8px; }}
     #sectionSearch {{ margin-bottom:10px; }}
     .sort-select {{ border: 0; color: var(--blue); background: transparent; font-size: 12px; }}
-    .section-list {{ display:grid; align-content:start; gap:7px; flex:1; min-height:100px; max-height:none; overflow:auto; padding-right:3px; }}
+    .section-list {{ display:grid; align-content:start; flex:1; min-height:100px; max-height:none; overflow:auto; border-block-start:1px solid var(--line); }}
     .section-item {{
-      width: 100%; text-align: left; border: 1px solid var(--line); background: var(--panel);
-      border-radius: 10px; padding: 10px 11px; cursor: pointer; color: var(--ink);
+      width: 100%; text-align: left; border:0; border-block-end:1px solid var(--line); background:var(--panel);
+      padding: 10px 11px; cursor: pointer; color: var(--ink);
     }}
-    .section-item:hover {{ border-color: var(--blue); background: color-mix(in srgb, var(--blue) 8%, var(--panel)); transform:translateX(-2px); }}
-    .section-item.active {{ border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); box-shadow: inset 3px 0 0 var(--accent), 0 0 18px rgba(255,77,109,.09); }}
+    .section-item:hover {{ background:var(--soft); }}
+    .section-item.active {{ background:color-mix(in srgb, var(--accent) 7%, var(--panel)); box-shadow:inset 3px 0 var(--accent); }}
     .item-top {{ display: flex; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 750; }}
     .item-gap {{ color: var(--accent); white-space: nowrap; }}
     .detail-divider {{ border: 0; border-top: 1px solid var(--line); margin: 18px 0; }}
@@ -493,7 +485,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     .empty-list {{ padding: 22px 8px; color: var(--muted); font-size: 13px; text-align: center; }}
     @media (max-width: 920px) {{
       .app {{ grid-template-columns: 1fr; }}
-      .map-pane {{ padding:0 2px 2px; height:auto; }}
+      .map-pane {{ height:auto; }}
       .side {{ border-left: 0; border-top: 1px solid var(--line); max-height:none; position:static; width:auto; height:auto; display:block; }}
       svg {{ height: 62vh; min-height: 480px; }}
       #map {{ flex:none; height:auto; aspect-ratio:1500 / 1020; min-height:0; max-height:none; }}
@@ -501,7 +493,6 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       .section-list {{ max-height: 280px; }}
     }}
     @media (max-width: 560px) {{
-      .map-pane {{ padding:0 2px 2px; }}
       .header-actions {{ display:contents; }}
       .map-toolbar {{ display:flex; gap:6px; }}
       .layer-toggles {{ display:contents; }}
@@ -522,7 +513,8 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     <main class="map-pane">
       <div class="map-shell">
   <nav class="analysis-views" aria-label="分析视图">
-    <div class="analysis-switch" data-view="topology" role="group" aria-label="分析视图切换">
+    <h1 class="analysis-title">广东电网 500kV 断面分析</h1>
+    <div class="analysis-switch" role="group" aria-label="分析视图切换">
       <button type="button" class="view-button" id="showTopology" aria-pressed="true">潮流分析</button>
       <button type="button" class="view-button" id="showRegionCurves" aria-pressed="false">区域电价分析</button>
     </div>
@@ -580,7 +572,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       <div class="source" id="sourceText"></div>
       <hr class="detail-divider">
       </section>
-      <div class="side-header"><span class="side-label">断面导航</span><div class="section-controls"><span class="pill" id="visibleCount">0 条</span>
+      <div class="side-header"><h2 class="side-label">断面导航</h2><div class="section-controls"><span class="pill" id="visibleCount">0 条</span>
         <select class="sort-select" id="sectionSort" aria-label="断面排序">
           <option value="gap">按最大价差</option>
           <option value="severity">按严重度</option>

@@ -72,6 +72,8 @@ class MapComparisonTests(unittest.TestCase):
         self.page.get_by_role('button', name='取消选择甲-乙', exact=True).click()
         self.assertEqual(self.series(), ['乙', '丙'])
         self.page.locator('#showRegionCurves').click()
+        self.assertTrue(self.page.locator('#regionPriceChart').is_hidden())
+        self.assertTrue(self.page.locator('#curveEmpty').is_visible())
         self.page.locator('#showTopology').click()
         self.assertEqual(self.series(), ['乙', '丙'])
         self.page.locator('#gapThreshold').fill('150')

@@ -19,7 +19,7 @@ VIEW_HTML = """
       <div class="curve-content">
       <div id="curveLegend" class="curve-legend" aria-label="点击图例显示或隐藏曲线"></div>
       <p id="curveEmpty" role="status" hidden></p>
-      <svg id="regionPriceChart" role="img" aria-label="所选节点分时电价曲线"></svg>
+      <svg id="regionPriceChart" role="img" aria-label="所选节点分时电价曲线" hidden></svg>
       <section class="curve-rankings" aria-label="节点日均价排序">
         <div class="curve-rank-heading"><h2 id="curveRankTitle">节点日均价前10（元/MWh）</h2><button type="button" id="curveRankReverse" aria-pressed="false">切换倒序</button></div>
         <div class="curve-rank-scroll"><ol id="curveRankList" aria-label="两排展示，第一排1至5名，第二排6至10名，每排从左到右排列"></ol></div>

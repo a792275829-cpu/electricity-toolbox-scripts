@@ -2,11 +2,11 @@
   {
     "name": "dayahead-2026-10-27.xlsx",
     "realtime": false,
-    "sha256": "e7858a8690c04ef20909b2804a319aff8c3f13036a1d4f679c46bd75b5839f79"
+    "sha256": "cac5da7291e18f32d2ce0323a2b19615dbb237e5c6ed04fe2c7d9e6d92fb6065"
   },
   {
     "name": "realtime-2026-10-27.xlsx",
     "realtime": true,
-    "sha256": "70fb4ce71eaa654e1cd3963df653de6707dfd52c577b7dfa224589e932e74cbb"
+    "sha256": "d60ffe638dec666716cbb8beb4b49ded416f62ca4c3c26e563d624d3f1087cbc"
   }
 ]

@@ -723,13 +723,15 @@ class ReportBuilder:
         first_value = f"{fmt(item.get(fields['compare_mwh']))} MWh"
         middle_label = item.get("middle_label", default_middle_label)
         middle_value = item.get("middle_value", default_middle_value)
-        cards = [
+        metrics = [
             (first_label, first_value),
             (middle_label, middle_value),
             ("偏差电量", f"{fmt(item.get(fields['dev_mwh']))} MWh"),
             ("偏差收益估算", f"{fmt(item.get(fields['profit']))} 万元"),
         ]
-        return '<div class="kpis">' + "".join(f'<div class="kpi"><span>{label}</span><b>{value}</b></div>' for label, value in cards) + "</div>"
+        return '<dl class="kpis">' + "".join(
+            f'<div class="kpi"><dt>{label}</dt><dd>{value}</dd></div>' for label, value in metrics
+        ) + "</dl>"
 
     def _display_dev(self, item):
         return item.get("rt", 0.0) - item["da"] if self.compare_mode == "realtime_vs_dayahead" else item["da"] - item["ml"]
@@ -951,26 +953,35 @@ class ReportBuilder:
 
         css = """
 * { box-sizing: border-box; }
+:root {
+  color-scheme: light;
+  --ink: #142b3a;
+  --muted: #445e6e;
+  --accent: #14566a;
+  --paper: #fff;
+  --surface: #f2f6f7;
+  --line: #cfdae0;
+}
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   margin: 0;
-  background: #f6f7fb;
-  color: #1f2937;
+  background: var(--paper);
+  color: var(--ink);
   line-height: 1.55;
 }
 .sidebar {
   position: fixed;
   inset: 0 auto 0 0;
-  width: 13.75rem;
-  background: #fff;
-  box-shadow: 4px 0 16px #0001;
-  padding: 1.5rem 1rem;
+  width: 12rem;
+  background: var(--surface);
+  border-inline-end: 1px solid var(--line);
+  padding: 2.25rem 1rem;
   overflow-y: auto;
   z-index: 10;
 }
 #report-nav-title {
   margin: 0 0 .75rem;
-  border-bottom: 2px solid #eef2ff;
+  border-bottom: 1px solid var(--line);
   padding-bottom: .5rem;
   font-weight: 700;
 }
@@ -980,10 +991,10 @@ body {
   padding: .55rem .75rem;
   color: inherit;
   text-decoration: none;
-  border-radius: .5rem;
+  border-radius: .25rem;
 }
-.sidebar a:hover, .sidebar a:focus-visible { background: #eef2ff; color: #1d4ed8; }
-:where(a, .table-scroll):focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; }
+.sidebar a:hover, .sidebar a:focus-visible { background: var(--paper); color: var(--accent); }
+:where(a, summary, .table-scroll):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .visually-hidden, .skip-link:not(:focus) {
   position: absolute;
   width: 1px;
@@ -1002,29 +1013,41 @@ body {
   background: #fff;
   color: #1d4ed8;
 }
-.wrap { margin-left: 15rem; max-width: 87.5rem; padding: clamp(1rem, 2vw, 1.75rem); }
-h1 { font-size: 1.75rem; margin: 0 0 .75rem; }
-.meta { color: #6b7280; font-size: .875rem; margin-bottom: .625rem; }
-h2 { border-left: 6px solid #2563eb; padding-left: .625rem; margin-top: 2.25rem; font-size: 1.375rem; }
+.wrap { margin-inline-start: 12rem; max-width: 87.5rem; padding: clamp(1rem, 3vw, 3rem); }
+.report-header { border-block-end: 2px solid var(--accent); padding-block: .375rem 1.125rem; }
+h1 { font-size: clamp(1.5rem, 1.15rem + 1.5vw, 2.375rem); line-height: 1.2; margin: 0 0 .65rem; }
+.meta { color: var(--muted); font-size: .875rem; font-variant-numeric: tabular-nums; }
+h2 { border-block-end: 1px solid var(--line); padding-block-end: .5rem; margin: 2.5rem 0 .875rem; font-size: 1.375rem; }
+#总览 { margin-block-start: 1.5rem; }
 h3 { margin-top: 0; font-size: 1.0625rem; }
 h4 { font-size: 1rem; margin: .75rem 0; }
-.card, .kpi { border-radius: .75rem; }
-.card { background: #fff; padding: clamp(.75rem, 2vw, 1.25rem); margin: .875rem 0; box-shadow: 0 4px 16px #0001; }
+.card { padding-block: .85rem; margin-block: .875rem; }
+.card + .card { border-block-start: 1px solid var(--line); }
 .kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
-  gap: .75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
   margin: .875rem 0;
 }
-.kpi { background: #f8fafc; border: 1px solid #e5e7eb; padding: .75rem; overflow-wrap: anywhere; }
-.kpi span { display: block; color: #6b7280; font-size: .875rem; }
-.kpi b { display: block; font-size: 1.25rem; margin-top: .25rem; }
+.kpi { background: var(--paper); padding: .75rem; overflow-wrap: anywhere; }
+.kpi dt { color: var(--muted); font-size: .875rem; }
+.kpi dd { font-size: 1.0625rem; font-weight: 650; margin: .25rem 0 0; font-variant-numeric: tabular-nums; }
+.overview { border: 1px solid var(--line); border-inline-start: 4px solid var(--accent); background: var(--surface); border-radius: 5px; }
+.overview .kpis { margin: 0; border: 0; border-block-end: 1px solid var(--line); }
+.overview .kpi { background: var(--surface); padding: clamp(.65rem, 2vw, 1.25rem); }
+.overview .kpi dd { font-size: clamp(1.0625rem, .85rem + .9vw, 1.75rem); }
+.overview p, .method p { max-inline-size: 68ic; margin: .75rem 1.25rem; color: var(--muted); font-size: .875rem; }
+.method { margin-block: .75rem; }
+.method summary { color: var(--accent); font-weight: 650; cursor: pointer; padding: .4rem .2rem; }
+.method p { margin-inline: .2rem; }
 .table-scroll {
   position: relative;
   max-inline-size: 100%;
   overflow-x: auto;
   margin-block: .75rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--line);
 }
 table {
   inline-size: 100%;
@@ -1044,29 +1067,33 @@ th, td {
 }
 tr > :last-child { border-inline-end: 0; }
 tbody tr:last-child > * { border-block-end: 0; }
-thead th { background: #eef2ff; color: #111827; }
+thead th { background: #e4eef1; color: var(--ink); }
 tr > :first-child { text-align: start; }
 .detail-table th, .detail-table td { padding: .5rem .65rem; }
 .detail-table tr > th:first-child { position: sticky; inset-inline-start: 0; }
-.detail-table tbody th { background: #f8fafc; font-weight: 500; }
+.detail-table tbody tr:nth-child(even) { background: var(--surface); }
+.detail-table tbody th { background: #eaf1f3; font-weight: 600; }
 .ok { color: #047857; font-weight: 700; }
 .bad { color: #dc2626; font-weight: 700; }
-.note, .muted { color: #6b7280; font-size: .875rem; }
-.split { margin-top: 1.5rem; border-top: 2px dashed #d1d5db; padding-top: .75rem; }
+.note, .muted { color: var(--muted); font-size: .875rem; }
+.split { margin-top: 1.5rem; border-top: 1px solid var(--line); padding-top: .75rem; }
 .pill {
   display: inline-block;
-  background: #eef2ff;
-  color: #1d4ed8;
+  background: #e4eef1;
+  color: var(--accent);
   border-radius: 999px;
   padding: 2px 8px;
   font-size: .75rem;
   margin-left: .5rem;
 }
 @media (max-width: 50rem) {
-  .sidebar { position: static; width: auto; box-shadow: none; padding: .75rem 1rem; }
+  .sidebar { position: static; width: auto; border-inline-end: 0; border-block-end: 1px solid var(--line); padding: .75rem 1rem; }
   #report-nav-title { margin-bottom: .25rem; }
   .sidebar ul { display: flex; flex-wrap: wrap; gap: .125rem .375rem; }
-  .wrap { margin-left: 0; }
+  .wrap { margin-inline-start: 0; }
+}
+@media (max-width: 36rem) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 """
 
@@ -1082,13 +1109,19 @@ tr > :first-child { text-align: start; }
 </ul>
 </nav>
 <main class="wrap" id="report-content" tabindex="-1">
+<header class="report-header">
 <h1>电力交易出清分析报告</h1>
 <div class="meta">运行日期：{run_date} <span class="pill">{compare_pill}</span></div>
-<div class="card note method"><b>方法说明：</b>
-{method_text} 报价单取自“运行补偿”页各机组出力段报价，量价匹配按出清电量 ÷ (1 - 厂用电率) 得到机端出力后逐小时判断，连续相同报价段合并判断。新能源单元海风、鮀莲、归湖仅展示电量、价格、偏差和收益，不做报价单与量价匹配。收益测算标签只作为数据块来源，不作为机组名称展示。</div>
+</header>
 <h2 id="总览">总览</h2>
+<div class="overview">
 {self._kpis(overview_kpis)}
-<div class="card note">{overview_note}</div>
+<p>{overview_note}</p>
+</div>
+<details class="method">
+<summary>方法说明</summary>
+<p>{method_text} 报价单取自“运行补偿”页各机组出力段报价，量价匹配按出清电量 ÷ (1 - 厂用电率) 得到机端出力后逐小时判断，连续相同报价段合并判断。新能源单元海风、鮀莲、归湖仅展示电量、价格、偏差和收益，不做报价单与量价匹配。收益测算标签只作为数据块来源，不作为机组名称展示。</p>
+</details>
 {''.join(sections)}
 </main></body></html>"""
 

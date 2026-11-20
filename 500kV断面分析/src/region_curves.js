@@ -125,7 +125,6 @@
   function switchView(curves) {
     const changed = panel.hidden === curves;
     hideTooltip();
-    document.querySelector('.analysis-switch').dataset.view=curves ? 'curves' : 'topology';
     (curves ? document.querySelector('.curve-main') : document.querySelector('.map-shell')).prepend(document.querySelector('.analysis-views'));
     panel.hidden = !curves; mapPanel.hidden = curves;
     if (changed) animateUI(curves ? panel : mapPanel, [{opacity:0}, {opacity:1}], 160);
@@ -292,9 +291,9 @@
     const visible=visibleSeries();
     const all=visible.flatMap(s => s.prices.filter(finite));
     $('curveEmpty').hidden=all.length>0;
-    $('curveEmpty').textContent=!selected.size ? '请从左侧勾选大区、市或节点。' : !visible.length ?
+    $('curveEmpty').textContent=!selected.size ? '在节点选择区勾选大区、市或节点。' : !visible.length ?
       '所有曲线已隐藏，可点击图例或“显示全部曲线”恢复。' : '所选节点在这份数据中暂无有效电价，请更换节点或数据文件。';
-    svg.hidden=!all.length; $('curveExport').disabled=!all.length;
+    svg.toggleAttribute('hidden', !all.length); $('curveExport').disabled=!all.length;
     if (!all.length) { showTime(currentIndex); return; }
     const width=Math.max(280,Math.round(svg.clientWidth)), height=Math.max(260,Math.min(520,Math.round(window.innerHeight*.43)));
     svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
