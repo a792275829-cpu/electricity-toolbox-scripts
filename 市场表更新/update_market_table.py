@@ -1324,264 +1324,287 @@ def run_update(
     overwrite: bool = True,
     create_backup: bool = False,
 ) -> dict[str, Any]:
+    results = run_update_range(
+        workbook_path, run_date, run_date, headless=headless,
+        overwrite=overwrite, create_backup=create_backup,
+    )
+    return results[run_date]
+
+
+def run_update_range(
+    workbook_path: Path,
+    start_date: date,
+    end_date: date,
+    *,
+    headless: bool,
+    overwrite: bool = True,
+    create_backup: bool = False,
+) -> dict[date, dict[str, Any]]:
+    if end_date < start_date:
+        raise ValueError("结束日期不能早于开始日期。")
+    cancellation_checkpoint()
     ensure_workbook_accessible(workbook_path)
     if create_backup:
         log(f"备份：{backup_workbook(workbook_path)}")
-    with workbook_write_session(workbook_path):
-        return _run_update_with_session(workbook_path, run_date, headless=headless,
-                                        overwrite=overwrite)
 
-
-def _run_update_with_session(
-    workbook_path: Path,
-    run_date: date,
-    *,
-    headless: bool,
-    overwrite: bool,
-) -> dict[str, Any]:
     config = load_config()
     config.headless = headless
+    days = (end_date - start_date).days + 1
+    results = {}
+    with workbook_write_session(workbook_path), AuthStateLock(), sync_playwright() as playwright:
+        context = launch_context(playwright, headless=config.headless)
+        try:
+            ensure_login(context, config)
+            for offset in range(days):
+                cancellation_checkpoint()
+                run_date = start_date + timedelta(days=offset)
+                log(f"[{offset + 1}/{days}] 更新基准日期 {run_date.isoformat()}。")
+                results[run_date] = _update_day(workbook_path, run_date, context, overwrite=overwrite)
+        finally:
+            context.close()
+    return results
 
-    with AuthStateLock():
-        with sync_playwright() as playwright:
-            context = launch_context(playwright, headless=config.headless)
-            try:
-                ensure_login(context, config)
-                log(
-                    "正在读取现货运行日报市场负荷信息-日前："
-                    f"{run_date.isoformat()}（基准日期 D）"
-                )
-                day_ahead_values = fetch_values_or_skip(
-                    "现货运行日报市场负荷信息-日前",
-                    lambda: fetch_day_ahead_load_values(
-                        context,
-                        run_date,
-                    ),
-                )
-                day_ahead_summary = None
-                if day_ahead_values is not None:
-                    log("已读取 20 个日前市场负荷数值。")
-                    day_ahead_summary = write_day_ahead_load_values(
-                        workbook_path,
-                        run_date,
-                        day_ahead_values,
-                        overwrite=overwrite,
-                    )
-                    log(
-                        f"已写入：{day_ahead_summary['sheet']}!{day_ahead_summary['range']} "
-                        f"（{write_count_text(day_ahead_summary)}）"
-                    )
-                market_date = day_ahead_market_source_date(run_date)
-                log(
-                    "正在读取现货运行日报日前市场："
-                    f"{market_date.isoformat()}（基准日期 {run_date.isoformat()} 的 D-1）"
-                )
-                day_ahead_market_values = fetch_values_or_skip(
-                    "现货运行日报日前市场",
-                    lambda: fetch_day_ahead_market_values(
-                        context,
-                        market_date,
-                    ),
-                )
-                day_ahead_market_summary = None
-                if day_ahead_market_values is not None:
-                    log("已读取发电侧申报均价起 12 个日前市场数值。")
-                    day_ahead_market_summary = write_day_ahead_market_values(
-                        workbook_path,
-                        market_date,
-                        day_ahead_market_values,
-                        overwrite=overwrite,
-                    )
-                    log(
-                        f"已写入：{day_ahead_market_summary['sheet']}!{day_ahead_market_summary['range']} "
-                        f"（{write_count_text(day_ahead_market_summary)}）"
-                    )
-                realtime_market_date = realtime_market_source_date(run_date)
-                log(
-                    "正在读取现货运行日报实时市场："
-                    f"{realtime_market_date.isoformat()}（基准日期 {run_date.isoformat()} 的 D-2）"
-                )
-                realtime_market_values = fetch_values_or_skip(
-                    "现货运行日报实时市场",
-                    lambda: fetch_realtime_market_values(
-                        context,
-                        realtime_market_date,
-                    ),
-                )
-                realtime_market_summary = None
-                if realtime_market_values is not None:
-                    log("已读取发电侧成交电量等 4 个实时市场数值。")
-                    realtime_market_summary = write_realtime_market_values(
-                        workbook_path,
-                        realtime_market_date,
-                        realtime_market_values,
-                        overwrite=overwrite,
-                    )
-                    log(
-                        f"已写入：{realtime_market_summary['sheet']}!{realtime_market_summary['range']} "
-                        f"（{write_count_text(realtime_market_summary)}）"
-                    )
-                generation_settlement_date = generation_settlement_source_date(run_date)
-                log(
-                    "正在读取现货运行日报发电侧结算："
-                    f"{generation_settlement_date.isoformat()}（基准日期 {run_date.isoformat()} 的 D-6）"
-                )
-                generation_settlement_values = fetch_values_or_skip(
-                    "现货运行日报发电侧结算",
-                    lambda: fetch_generation_settlement_values(
-                        context,
-                        generation_settlement_date,
-                    ),
-                )
-                generation_settlement_summary = None
-                if generation_settlement_values is not None:
-                    log("已读取 12 个发电侧结算数值。")
-                    generation_settlement_summary = write_generation_settlement_values(
-                        workbook_path,
-                        generation_settlement_date,
-                        generation_settlement_values,
-                        overwrite=overwrite,
-                    )
-                    log(
-                        f"已写入：{generation_settlement_summary['sheet']}!{generation_settlement_summary['range']} "
-                        f"（{write_count_text(generation_settlement_summary)}）"
-                    )
-                user_settlement_date = user_settlement_source_date(run_date)
-                log(
-                    "正在读取现货运行日报用电侧结算："
-                    f"{user_settlement_date.isoformat()}（基准日期 {run_date.isoformat()} 的 D-6）"
-                )
-                user_settlement_values = fetch_values_or_skip(
-                    "现货运行日报用电侧结算",
-                    lambda: fetch_user_settlement_values(
-                        context,
-                        user_settlement_date,
-                    ),
-                )
-                user_settlement_summary = None
-                if user_settlement_values is not None:
-                    log("已读取 7 个用电侧结算数值。")
-                    user_settlement_summary = write_user_settlement_values(
-                        workbook_path,
-                        user_settlement_date,
-                        user_settlement_values,
-                        overwrite=overwrite,
-                    )
-                    log(
-                        f"已写入：{user_settlement_summary['sheet']}!{user_settlement_summary['range']} "
-                        f"（{write_count_text(user_settlement_summary)}）"
-                    )
-                load_date = actual_load_source_date(run_date)
-                log(
-                    "正在读取现货运行日报市场负荷信息："
-                    f"{load_date.isoformat()}（基准日期 {run_date.isoformat()} 的 D-2）"
-                )
-                values = fetch_values_or_skip(
-                    "现货运行日报市场负荷信息-实际",
-                    lambda: fetch_actual_load_values(
-                        context,
-                        load_date,
-                    ),
-                )
-                summary = None
-                if values is not None:
-                    log("已读取 20 个市场负荷数值。")
-                    summary = write_actual_load_values(
-                        workbook_path, load_date, values, overwrite=overwrite)
-                    log(
-                        f"已写入：{summary['sheet']}!{summary['range']} "
-                        f"（{write_count_text(summary)}）"
-                    )
-                log(f"正在读取现货基础信息报送机组成本信息：{run_date.isoformat()}")
-                cost_values = fetch_values_or_skip(
-                    "现货基础信息报送机组成本信息",
-                    lambda: fetch_unit_cost_price_values(
-                        context,
-                        run_date,
-                    ),
-                )
-                cost_summary = None
-                if cost_values is not None:
-                    log("已读取 11 个单位变动成本对应电价。")
-                    cost_summary = write_unit_cost_price_values(
-                        workbook_path,
-                        run_date,
-                        cost_values,
-                        overwrite=overwrite,
-                    )
-                    log(
-                        f"已写入：{cost_summary['sheet']}!{cost_summary['range']} "
-                        f"（{write_count_text(cost_summary)}）"
-                    )
-                log(
-                    "正在读取省内现货交易市场行情看板在线机组数与检修容量："
-                    f"{run_date.isoformat()}（基准日期 D）"
-                )
-                market_board_values = fetch_values_or_skip(
-                    "省内现货交易市场行情看板在线机组数与检修容量",
-                    lambda: fetch_market_board_online_unit_values(context, run_date),
-                )
-                market_board_summary = None
-                if market_board_values is not None:
-                    log("已读取在线机组数与省内机组预测检修容量 2 个数值。")
-                    market_board_summary = write_market_board_online_unit_values(
-                        workbook_path,
-                        run_date,
-                        market_board_values,
-                        overwrite=overwrite,
-                    )
-                    log(
-                        f"已写入：{market_board_summary['sheet']}!{market_board_summary['range']} "
-                        f"（{write_count_text(market_board_summary)}）"
-                    )
-                log(
-                    "正在读取公有数据管理现货分时分类型出清电量日前燃煤和燃气："
-                    f"{run_date.isoformat()}（基准日期 D）"
-                )
-                spot_clearing_values = fetch_values_or_skip(
-                    "公有数据管理现货分时分类型出清电量日前燃煤和燃气",
-                    lambda: fetch_spot_clearing_unit_count_values(context, run_date),
-                )
-                spot_clearing_summary = None
-                if spot_clearing_values is not None:
-                    log("已读取日前燃煤 23:00 和燃气全天最大开机台数 2 个数值。")
-                    spot_clearing_summary = write_spot_clearing_unit_count_values(
-                        workbook_path,
-                        run_date,
-                        spot_clearing_values,
-                        overwrite=overwrite,
-                    )
-                    log(
-                        f"已写入：{spot_clearing_summary['sheet']}!{spot_clearing_summary['range']} "
-                        f"（{write_count_text(spot_clearing_summary)}）"
-                    )
-                log(
-                    "正在复制机组运行方式："
-                    f"{(run_date - timedelta(days=1)).isoformat()} -> {run_date.isoformat()}"
-                )
-                operation_summary = copy_previous_day_unit_operation_mode(
-                    workbook_path,
-                    run_date,
-                    overwrite=overwrite,
-                )
-                log(
-                    f"已写入：{operation_summary['sheet']}!{operation_summary['range']} "
-                    f"（{write_count_text(operation_summary)}，来自第 {operation_summary['sourceRow']} 行）"
-                )
-                return {
-                    "dayAheadLoad": day_ahead_summary,
-                    "dayAheadMarket": day_ahead_market_summary,
-                    "realtimeMarket": realtime_market_summary,
-                    "generationSettlement": generation_settlement_summary,
-                    "userSettlement": user_settlement_summary,
-                    "actualLoad": summary,
-                    "unitCostPrices": cost_summary,
-                    "marketBoardOnlineUnit": market_board_summary,
-                    "spotClearingUnitCounts": spot_clearing_summary,
-                    "unitOperationMode": operation_summary,
-                }
-            finally:
-                context.close()
+
+def _update_day(
+    workbook_path: Path,
+    run_date: date,
+    context,
+    *,
+    overwrite: bool,
+) -> dict[str, Any]:
+    log(
+        "正在读取现货运行日报市场负荷信息-日前："
+        f"{run_date.isoformat()}（基准日期 D）"
+    )
+    day_ahead_values = fetch_values_or_skip(
+        "现货运行日报市场负荷信息-日前",
+        lambda: fetch_day_ahead_load_values(
+            context,
+            run_date,
+        ),
+    )
+    day_ahead_summary = None
+    if day_ahead_values is not None:
+        log("已读取 20 个日前市场负荷数值。")
+        day_ahead_summary = write_day_ahead_load_values(
+            workbook_path,
+            run_date,
+            day_ahead_values,
+            overwrite=overwrite,
+        )
+        log(
+            f"已写入：{day_ahead_summary['sheet']}!{day_ahead_summary['range']} "
+            f"（{write_count_text(day_ahead_summary)}）"
+        )
+    market_date = day_ahead_market_source_date(run_date)
+    log(
+        "正在读取现货运行日报日前市场："
+        f"{market_date.isoformat()}（基准日期 {run_date.isoformat()} 的 D-1）"
+    )
+    day_ahead_market_values = fetch_values_or_skip(
+        "现货运行日报日前市场",
+        lambda: fetch_day_ahead_market_values(
+            context,
+            market_date,
+        ),
+    )
+    day_ahead_market_summary = None
+    if day_ahead_market_values is not None:
+        log("已读取发电侧申报均价起 12 个日前市场数值。")
+        day_ahead_market_summary = write_day_ahead_market_values(
+            workbook_path,
+            market_date,
+            day_ahead_market_values,
+            overwrite=overwrite,
+        )
+        log(
+            f"已写入：{day_ahead_market_summary['sheet']}!{day_ahead_market_summary['range']} "
+            f"（{write_count_text(day_ahead_market_summary)}）"
+        )
+    realtime_market_date = realtime_market_source_date(run_date)
+    log(
+        "正在读取现货运行日报实时市场："
+        f"{realtime_market_date.isoformat()}（基准日期 {run_date.isoformat()} 的 D-2）"
+    )
+    realtime_market_values = fetch_values_or_skip(
+        "现货运行日报实时市场",
+        lambda: fetch_realtime_market_values(
+            context,
+            realtime_market_date,
+        ),
+    )
+    realtime_market_summary = None
+    if realtime_market_values is not None:
+        log("已读取发电侧成交电量等 4 个实时市场数值。")
+        realtime_market_summary = write_realtime_market_values(
+            workbook_path,
+            realtime_market_date,
+            realtime_market_values,
+            overwrite=overwrite,
+        )
+        log(
+            f"已写入：{realtime_market_summary['sheet']}!{realtime_market_summary['range']} "
+            f"（{write_count_text(realtime_market_summary)}）"
+        )
+    generation_settlement_date = generation_settlement_source_date(run_date)
+    log(
+        "正在读取现货运行日报发电侧结算："
+        f"{generation_settlement_date.isoformat()}（基准日期 {run_date.isoformat()} 的 D-6）"
+    )
+    generation_settlement_values = fetch_values_or_skip(
+        "现货运行日报发电侧结算",
+        lambda: fetch_generation_settlement_values(
+            context,
+            generation_settlement_date,
+        ),
+    )
+    generation_settlement_summary = None
+    if generation_settlement_values is not None:
+        log("已读取 12 个发电侧结算数值。")
+        generation_settlement_summary = write_generation_settlement_values(
+            workbook_path,
+            generation_settlement_date,
+            generation_settlement_values,
+            overwrite=overwrite,
+        )
+        log(
+            f"已写入：{generation_settlement_summary['sheet']}!{generation_settlement_summary['range']} "
+            f"（{write_count_text(generation_settlement_summary)}）"
+        )
+    user_settlement_date = user_settlement_source_date(run_date)
+    log(
+        "正在读取现货运行日报用电侧结算："
+        f"{user_settlement_date.isoformat()}（基准日期 {run_date.isoformat()} 的 D-6）"
+    )
+    user_settlement_values = fetch_values_or_skip(
+        "现货运行日报用电侧结算",
+        lambda: fetch_user_settlement_values(
+            context,
+            user_settlement_date,
+        ),
+    )
+    user_settlement_summary = None
+    if user_settlement_values is not None:
+        log("已读取 7 个用电侧结算数值。")
+        user_settlement_summary = write_user_settlement_values(
+            workbook_path,
+            user_settlement_date,
+            user_settlement_values,
+            overwrite=overwrite,
+        )
+        log(
+            f"已写入：{user_settlement_summary['sheet']}!{user_settlement_summary['range']} "
+            f"（{write_count_text(user_settlement_summary)}）"
+        )
+    load_date = actual_load_source_date(run_date)
+    log(
+        "正在读取现货运行日报市场负荷信息："
+        f"{load_date.isoformat()}（基准日期 {run_date.isoformat()} 的 D-2）"
+    )
+    values = fetch_values_or_skip(
+        "现货运行日报市场负荷信息-实际",
+        lambda: fetch_actual_load_values(
+            context,
+            load_date,
+        ),
+    )
+    summary = None
+    if values is not None:
+        log("已读取 20 个市场负荷数值。")
+        summary = write_actual_load_values(
+            workbook_path, load_date, values, overwrite=overwrite)
+        log(
+            f"已写入：{summary['sheet']}!{summary['range']} "
+            f"（{write_count_text(summary)}）"
+        )
+    log(f"正在读取现货基础信息报送机组成本信息：{run_date.isoformat()}")
+    cost_values = fetch_values_or_skip(
+        "现货基础信息报送机组成本信息",
+        lambda: fetch_unit_cost_price_values(
+            context,
+            run_date,
+        ),
+    )
+    cost_summary = None
+    if cost_values is not None:
+        log("已读取 11 个单位变动成本对应电价。")
+        cost_summary = write_unit_cost_price_values(
+            workbook_path,
+            run_date,
+            cost_values,
+            overwrite=overwrite,
+        )
+        log(
+            f"已写入：{cost_summary['sheet']}!{cost_summary['range']} "
+            f"（{write_count_text(cost_summary)}）"
+        )
+    log(
+        "正在读取省内现货交易市场行情看板在线机组数与检修容量："
+        f"{run_date.isoformat()}（基准日期 D）"
+    )
+    market_board_values = fetch_values_or_skip(
+        "省内现货交易市场行情看板在线机组数与检修容量",
+        lambda: fetch_market_board_online_unit_values(context, run_date),
+    )
+    market_board_summary = None
+    if market_board_values is not None:
+        log("已读取在线机组数与省内机组预测检修容量 2 个数值。")
+        market_board_summary = write_market_board_online_unit_values(
+            workbook_path,
+            run_date,
+            market_board_values,
+            overwrite=overwrite,
+        )
+        log(
+            f"已写入：{market_board_summary['sheet']}!{market_board_summary['range']} "
+            f"（{write_count_text(market_board_summary)}）"
+        )
+    log(
+        "正在读取公有数据管理现货分时分类型出清电量日前燃煤和燃气："
+        f"{run_date.isoformat()}（基准日期 D）"
+    )
+    spot_clearing_values = fetch_values_or_skip(
+        "公有数据管理现货分时分类型出清电量日前燃煤和燃气",
+        lambda: fetch_spot_clearing_unit_count_values(context, run_date),
+    )
+    spot_clearing_summary = None
+    if spot_clearing_values is not None:
+        log("已读取日前燃煤 23:00 和燃气全天最大开机台数 2 个数值。")
+        spot_clearing_summary = write_spot_clearing_unit_count_values(
+            workbook_path,
+            run_date,
+            spot_clearing_values,
+            overwrite=overwrite,
+        )
+        log(
+            f"已写入：{spot_clearing_summary['sheet']}!{spot_clearing_summary['range']} "
+            f"（{write_count_text(spot_clearing_summary)}）"
+        )
+    log(
+        "正在复制机组运行方式："
+        f"{(run_date - timedelta(days=1)).isoformat()} -> {run_date.isoformat()}"
+    )
+    operation_summary = copy_previous_day_unit_operation_mode(
+        workbook_path,
+        run_date,
+        overwrite=overwrite,
+    )
+    log(
+        f"已写入：{operation_summary['sheet']}!{operation_summary['range']} "
+        f"（{write_count_text(operation_summary)}，来自第 {operation_summary['sourceRow']} 行）"
+    )
+    return {
+        "dayAheadLoad": day_ahead_summary,
+        "dayAheadMarket": day_ahead_market_summary,
+        "realtimeMarket": realtime_market_summary,
+        "generationSettlement": generation_settlement_summary,
+        "userSettlement": user_settlement_summary,
+        "actualLoad": summary,
+        "unitCostPrices": cost_summary,
+        "marketBoardOnlineUnit": market_board_summary,
+        "spotClearingUnitCounts": spot_clearing_summary,
+        "unitOperationMode": operation_summary,
+    }
 
 
 def login_only(*, headless: bool) -> None:
@@ -1598,13 +1621,23 @@ def login_only(*, headless: bool) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="抓取网页市场数据并更新市场 Excel。")
-    parser.add_argument("--date", required=False, help="基准运行日期，格式 YYYY-MM-DD")
+    dates = parser.add_mutually_exclusive_group()
+    dates.add_argument("--date", type=parse_date, help="单一基准运行日期，格式 YYYY-MM-DD")
+    dates.add_argument("--start-date", type=parse_date, help="日前开始日期，格式 YYYY-MM-DD")
+    parser.add_argument("--end-date", type=parse_date, help="日前结束日期，格式 YYYY-MM-DD")
     parser.add_argument("--workbook", type=Path, help="要写入的 Excel 文件")
     parser.add_argument("--login", action="store_true", help="打开登录窗口并保存登录态")
     parser.add_argument("--headed", action="store_true", help="使用可见浏览器窗口")
     parser.add_argument("--skip-existing", action="store_true", help="已有非空单元格时跳过，不覆盖")
     parser.add_argument("--no-backup", action="store_true", help="写入前不生成时间戳备份")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if (args.start_date is None) != (args.end_date is None):
+        parser.error("--start-date 与 --end-date 需要同时提供。")
+    if args.start_date and args.end_date < args.start_date:
+        parser.error("结束日期不能早于开始日期。")
+    if not args.login and (not args.workbook or not (args.date or args.start_date)):
+        parser.error("请提供日期与 --workbook，或使用 --login。")
+    return args
 
 
 def main() -> int:
@@ -1614,12 +1647,10 @@ def main() -> int:
         login_only(headless=headless)
         return 0
 
-    if not args.date or not args.workbook:
-        raise SystemExit("请同时提供 --date 和 --workbook，或使用 --login。")
-
-    run_update(
+    run_update_range(
         args.workbook,
-        parse_date(args.date),
+        args.start_date or args.date,
+        args.end_date or args.date,
         headless=headless,
         overwrite=not args.skip_existing,
         create_backup=not args.no_backup,

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from datetime import date
+from contextlib import ExitStack
+from datetime import date, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -12,6 +13,75 @@ from toolbox.runtime import load_module
 
 
 class MarketTableBatchWriteTests(unittest.TestCase):
+    def test_date_range_uses_one_login_and_commits_only_after_all_days(self):
+        module = load_module("market_date_range", Path(__file__).resolve().parents[2] / "市场表更新/update_market_table.py")
+        start, end = date(2026, 10, 8), date(2026, 10, 9)
+        earlier = date(2026, 10, 2)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "market.xlsx"
+            book = Workbook()
+            market = book.active
+            market.title = module.MARKET_SHEET_NAME
+            cost = book.create_sheet(module.COST_SHEET_NAME)
+            for row in range(2, 10):
+                market.cell(row, 1, earlier + timedelta(days=row - 2))
+                cost.cell(row, 1, market.cell(row, 1).value)
+            market["BG1"].number_format = "0.00%"
+            market["B9"] = "=1+1"
+            market["C9"] = 99
+            cost["B7"] = "运行"
+            book.save(path)
+            book.close()
+            original = path.read_bytes()
+
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(module, "load_config"))
+                stack.enter_context(mock.patch.object(module, "AuthStateLock"))
+                stack.enter_context(mock.patch.object(module, "sync_playwright"))
+                launch = stack.enter_context(mock.patch.object(module, "launch_context"))
+                login = stack.enter_context(mock.patch.object(module, "ensure_login"))
+                for name in ("realtime_market", "actual_load", "user_settlement",
+                             "unit_cost_price", "market_board_online_unit", "spot_clearing_unit_count"):
+                    stack.enter_context(mock.patch.object(module, f"fetch_{name}_values", return_value=None))
+                settlement = stack.enter_context(mock.patch.object(module, "fetch_generation_settlement_values",
+                    return_value=[0.125] * 12))
+                stack.enter_context(mock.patch.object(module, "fetch_day_ahead_market_values",
+                    side_effect=lambda _, day: list(range(day.day, day.day + 12))))
+                load = stack.enter_context(mock.patch.object(module, "fetch_day_ahead_load_values",
+                    side_effect=[list(range(20)), []]))
+                with self.assertRaisesRegex(ValueError, "20 个"):
+                    module.run_update_range(path, start, end, headless=True)
+                self.assertEqual(path.read_bytes(), original)
+
+                login.reset_mock()
+                launch.reset_mock()
+                settlement.reset_mock()
+                load.side_effect = [list(range(20)), list(range(20, 40))]
+                result = module.run_update_range(
+                    path, start, end, headless=True, overwrite=False, create_backup=True
+                )
+                self.assertEqual(list(result), [start, end])
+                login.assert_called_once()
+                launch.return_value.close.assert_called_once()
+                self.assertEqual([call.args[1] for call in settlement.call_args_list],
+                                 [earlier, earlier + timedelta(days=1)])
+            [backup] = list(path.parent.glob("market.备份-*.xlsx"))
+            self.assertEqual(backup.read_bytes(), original)
+            saved = load_workbook(path)
+            try:
+                market = saved[module.MARKET_SHEET_NAME]
+                cost = saved[module.COST_SHEET_NAME]
+                self.assertEqual([market[cell].value for cell in ("B8", "B9", "C9", "D9")],
+                                 [0, "=1+1", 99, 22])
+                self.assertEqual([market[cell].value for cell in ("V7", "AG7", "V8", "AG8")],
+                                 [7, 18, 8, 19])
+                for cell in ("BG2", "BG3"):
+                    self.assertEqual(market[cell].value, 0.125)
+                    self.assertEqual(market[cell].number_format, "0.00%")
+                self.assertEqual([cost[cell].value for cell in ("B8", "B9")], ["运行", "运行"])
+            finally:
+                saved.close()
+
     def test_array_anchor_and_spill_cells_are_protected_with_overwrite(self):
         from openpyxl.worksheet.formula import ArrayFormula
         module = load_module('market_array_protection', Path(__file__).resolve().parents[2] / '市场表更新/update_market_table.py')

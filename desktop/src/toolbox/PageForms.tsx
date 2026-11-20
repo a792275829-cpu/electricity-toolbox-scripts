@@ -337,7 +337,7 @@ export function PageForms(props: Props) {
     body = (
       <>
         <Frame title="更新设置">
-          {dates("基准运行日期", "run_date")}
+          {dates("日前日期范围")}
           {path("workbook", "市场 Excel")}
           {options}
         </Frame>

@@ -19,6 +19,20 @@ from toolbox.workflows import validate, plan
 
 
 class HeadlessProtocolTests(unittest.TestCase):
+    def test_market_range_builds_one_command_and_validates_order(self):
+        paths = ToolPaths(ROOT)
+        with tempfile.TemporaryDirectory() as directory:
+            workbook = Path(directory) / "market.xlsx"
+            workbook.touch()
+            values = dict(workbook=str(workbook), start_date="2026年10月8日", end_date="2026-10-9")
+            request = validate(paths, "market-table", "run", values)
+            [(command, cwd)] = plan(paths, "market-table", "run", request)
+            self.assertEqual(cwd, paths.market_table_update_dir)
+            self.assertEqual(command[2:6], ["--start-date", "2026-10-08", "--end-date", "2026-10-09"])
+            values["end_date"] = "2026-10-07"
+            with self.assertRaisesRegex(ValueError, "结束日期不能早于开始日期"):
+                validate(paths, "market-table", "run", values)
+
     def test_morning_summary_and_word_share_one_fetch(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.xlsx"

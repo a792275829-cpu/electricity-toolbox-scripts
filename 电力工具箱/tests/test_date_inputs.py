@@ -211,7 +211,7 @@ class CalendarInputTests(unittest.TestCase):
 
         # 单日页面一张日历；日期范围页面一个双月历控件，不再有两个独立日历框。
         for page_type, single_days, date_ranges in (
-            (OnlineEnergyPage, 0, 1), (ReportPage, 1, 0), (MarketTableUpdatePage, 1, 0),
+            (OnlineEnergyPage, 0, 1), (ReportPage, 1, 0), (MarketTableUpdatePage, 0, 1),
             (GuangdongPricePage, 1, 0), (MarketReportPage, 0, 0), (SpotPriceUpdatePage, 0, 1),
             (TransactionInfoUpdatePage, 0, 1), (PowerBenefitUpdatePage, 0, 1),
             (WindForecastPage, 1, 0),

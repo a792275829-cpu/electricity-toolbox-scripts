@@ -23,6 +23,11 @@ def validate(paths, tool_id, action, values):
         raise ValueError("未知工具或操作")
     if not isinstance(values, dict):
         raise ValueError("参数必须是对象")
+    if tool_id == "market-table" and "run_date" in values:
+        if "start_date" in values or "end_date" in values:
+            raise ValueError("请选择单日或日期范围。")
+        values = dict(values)
+        values["start_date"] = values["end_date"] = values.pop("run_date")
     fields = {f["key"]: f for f in tool["fields"]}
     if set(values) - fields.keys():
         raise ValueError("包含未知参数")
@@ -107,7 +112,8 @@ def plan(paths, tool_id, action, p):
         from toolbox_shared.trade_batch import plan_batch_outputs
         plan_batch_outputs(sources, output)
     elif tool_id == "market-table":
-        return [(commands.market_table(paths, day("run_date"), required_path(p, "workbook"),
+        return [(commands.market_table(paths, day("start_date"), required_path(p, "workbook"),
+                end_date=day("end_date"),
                 overwrite=p["overwrite"], create_backup=p["create_backup"]),
                 paths.market_table_update_dir)]
     elif tool_id == "transaction-info":

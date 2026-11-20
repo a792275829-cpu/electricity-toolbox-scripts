@@ -280,6 +280,30 @@ class PageAdapterTests(unittest.TestCase):
         ):
             self.assertIn(f"{index}. {description}", text)
 
+    def test_market_update_normalizes_range_before_starting(self) -> None:
+        from toolbox.pages import MarketTableUpdatePage
+
+        page = MarketTableUpdatePage(self.root, self.paths, self.registry, today=date(2026, 10, 8))
+        self.assertEqual((page.start_date.get(), page.end_date.get()), ("2026-10-08", "2026-10-08"))
+        with tempfile.TemporaryDirectory() as folder:
+            workbook = Path(folder) / "市场.xlsx"
+            workbook.touch()
+            page.workbook.set(str(workbook))
+            page.start_date.set("2026年10月8日")
+            with mock.patch.object(page, "run_process") as run, \
+                    mock.patch("toolbox.pages.messagebox.showerror") as showerror:
+                page.end_date.set("2026-10-7")
+                page.start_update()
+                showerror.assert_called_once()
+                run.assert_not_called()
+
+                page.end_date.set("2026-10-9")
+                page.start_update()
+                self.assertEqual(run.call_args.args[0][2:8], [
+                    "--start-date", "2026-10-08", "--end-date", "2026-10-09", "--workbook", str(workbook)
+                ])
+                self.assertTrue(run.call_args.kwargs["cooperative"])
+
     def test_wps_writer_page_embeds_writer_frame(self) -> None:
         from toolbox.pages import WpsWriterPage
 

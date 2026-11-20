@@ -742,9 +742,9 @@ class MarketTableUpdatePage(ToolPage):
         )
         self.paths = paths
         self.file_dialogs = _file_dialog_state(paths)
-        self.run_date = tk.StringVar(
-            master=self, value=(today or date.today()).isoformat()
-        )
+        default_date = (today or date.today()).isoformat()
+        self.start_date = tk.StringVar(master=self, value=default_date)
+        self.end_date = tk.StringVar(master=self, value=default_date)
         self.workbook = tk.StringVar(
             master=self,
             value=str(
@@ -760,10 +760,17 @@ class MarketTableUpdatePage(ToolPage):
         form = ttk.LabelFrame(self.content, text="更新设置", padding=12)
         form.grid(row=0, column=0, sticky="ew")
         form.columnconfigure(1, weight=1)
-        ttk.Label(form, text="基准运行日期").grid(row=0, column=0, sticky="w", pady=5)
-        DateInput(form, textvariable=self.run_date, width=18).grid(
-            row=0, column=1, sticky="w", pady=5
+        ttk.Label(form, text="日前日期范围").grid(row=0, column=0, sticky="w", pady=5)
+        self.date_range = DateRangeInput(
+            form, start_variable=self.start_date, end_variable=self.end_date
         )
+        self.date_range.grid(row=0, column=1, sticky="w", padx=(8, 14), pady=5)
+        for entry, label, variable in (
+            (self.date_range.start_entry, "日前开始日期", self.start_date),
+            (self.date_range.end_entry, "日前结束日期", self.end_date),
+        ):
+            describe(entry, name=label, role="Entry", variable=variable,
+                     help_text="格式 YYYY-MM-DD；向下键打开日历，Esc 关闭日历。")
         browse = _add_path_row(
             form,
             row=1,
@@ -810,11 +817,13 @@ class MarketTableUpdatePage(ToolPage):
         )
         self.update_button.pack(side="left")
         self.register_busy_widgets(browse, self.update_button)
-        self.append_log("请选择日期和市场 Excel 后开始更新。")
+        self.append_log("请选择日前日期范围和市场 Excel 后开始更新。")
 
-    def build_update_command(self, run_date: date, workbook: Path) -> list[str]:
+    def build_update_command(
+        self, start_date: date, workbook: Path, *, end_date: date | None = None
+    ) -> list[str]:
         return commands.market_table(
-            self.paths, run_date, workbook,
+            self.paths, start_date, workbook, end_date=end_date,
             overwrite=self.overwrite.get(), create_backup=self.create_backup.get(),
         )
 
@@ -833,10 +842,16 @@ class MarketTableUpdatePage(ToolPage):
 
     def start_update(self) -> None:
         try:
-            run_date = parse_date_input(self.run_date.get())
+            start_date = parse_date_input(self.start_date.get())
+            end_date = parse_date_input(self.end_date.get())
         except ValueError:
             messagebox.showerror(
                 "日期格式错误", DATE_INPUT_ERROR, parent=self
+            )
+            return
+        if end_date < start_date:
+            messagebox.showerror(
+                "日期范围错误", "结束日期不能早于开始日期。", parent=self
             )
             return
         workbook = Path(self.workbook.get().strip()).expanduser()
@@ -846,10 +861,11 @@ class MarketTableUpdatePage(ToolPage):
             )
             return
         self.clear_log()
+        date_label = start_date.isoformat() if start_date == end_date else f"{start_date} 至 {end_date}"
         self.run_process(
-            self.build_update_command(run_date, workbook),
+            self.build_update_command(start_date, workbook, end_date=end_date),
             action='run', cwd=self.paths.market_table_update_dir,
-            status="正在更新市场表...",
+            status=f"正在更新 {date_label} 市场表...",
             cooperative=True,
             on_success=lambda _code: messagebox.showinfo(
                 "完成", "市场表更新完成。", parent=self

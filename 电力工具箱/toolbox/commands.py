@@ -58,9 +58,12 @@ def section_analysis(paths, files, output_root, topology_path, threshold):
             *(str(p) for p in files)]
 
 
-def market_table(paths, run_date, workbook, *, overwrite=True, create_backup=False):
-    command = [python_executable(), str(paths.market_table_update), "--date",
-               run_date.isoformat(), "--workbook", str(workbook)]
+def market_table(paths, run_date, workbook, *, end_date=None, overwrite=True, create_backup=False):
+    if end_date is None or end_date == run_date:
+        command = [python_executable(), str(paths.market_table_update), "--date", run_date.isoformat()]
+    else:
+        command = dated_range_script(paths.market_table_update, run_date.isoformat(), end_date.isoformat())
+    command.extend(("--workbook", str(workbook)))
     if not overwrite:
         command.append("--skip-existing")
     if not create_backup:
