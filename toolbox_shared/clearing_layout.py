@@ -1,7 +1,10 @@
 """Label-based positions in the four- and six-unit Haimen clearing templates."""
 from __future__ import annotations
 
+import math
 import re
+from datetime import time
+from unicodedata import normalize
 
 
 def _label(value):
@@ -52,3 +55,52 @@ def qingyuan_plan_values(rows):
         elif header and label == "合计":
             return {f"AA{number}": row[26], f"AC{number}": row[28]}
     raise KeyError("基础信息中未找到清远上网电量区的计划发电量合计行")
+
+
+DAY_AHEAD_TRANSITION_PLANTS = ("汕头", "海门")
+
+
+def unit_day_ahead_transitions(rows):
+    """Find single start/stop transitions in the plant's hourly clearing summary."""
+    for index in range(1, len(rows)):
+        unit_row, header = rows[index - 1:index + 1]
+        if not header or _label(header[0]) != "时刻":
+            continue
+        columns = {}
+        duplicates = set()
+        for column, (unit, metric) in enumerate(zip(unit_row, header)):
+            label = normalize("NFKC", _label(unit))
+            match = re.fullmatch(r"(\d+)号机(?:组)?|#(\d+)(?:机组)?", label)
+            if match is None or not _label(metric).startswith(("日前电量", "日前出清电量")):
+                continue
+            key = str(int(match[1] or match[2]))
+            if key in columns:
+                duplicates.add(key)
+            columns[key] = column
+        if not columns:
+            continue
+        hours = rows[index + 1:index + 25]
+        if len(hours) != 24 or any(not _matches_hour(row[0], hour) for hour, row in enumerate(hours)):
+            return {}
+        result = {}
+        for key, column in columns.items():
+            if key in duplicates:
+                continue
+            amounts = [row[column] for row in hours]
+            if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+                   for value in amounts):
+                continue
+            running = [value > 0 for value in amounts]
+            if sum(before != after for before, after in zip(running, running[1:])) == 1:
+                result[key] = "运行转备用" if running[0] else "备用转运行"
+        return result
+    return {}
+
+
+def _matches_hour(value, hour):
+    if isinstance(value, time):
+        return value == time(hour)
+    if isinstance(value, str):
+        return value.strip() in (f"{hour}:00", f"{hour:02d}:00",
+                                 f"{hour}:00:00", f"{hour:02d}:00:00")
+    return False

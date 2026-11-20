@@ -3,10 +3,11 @@ from __future__ import annotations
 import shutil
 import tempfile
 import unittest
+from datetime import time
 from pathlib import Path
 
 from docx import Document
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from generate_red_marked_report import (
     LOCAL_TEMPLATE_PATH,
@@ -127,6 +128,13 @@ class StartupFillTests(unittest.TestCase):
         self.assertIn("东莞厂：与前一日运行方式一致。", blocks)
         self.assertIn("清远厂：与前一日运行方式一致。", blocks)
 
+    def test_transition_remains_visible_on_both_days(self) -> None:
+        statuses = {plant: build_unit_status_text(plant, units)
+                    for plant, units in _parse_unit_status(BASE_ROWS).items()}
+        statuses["汕头"] = "#1机组运行；#2机组备用转运行。"
+        blocks = self._filled_blocks(statuses, statuses)
+        self.assertEqual(blocks.count("汕头厂：#1机组运行；#2机组备用转运行。"), 2)
+
     def test_first_block_never_uses_previous_day_wording(self) -> None:
         previous = {
             "汕头": "#1、#2机组运行；#3机组备用。",
@@ -155,6 +163,31 @@ def _make_unit_workbook(path: Path, rows: list[tuple]) -> Path:
     workbook.save(path)
     workbook.close()
     return path
+
+
+class DayAheadTransitionTests(unittest.TestCase):
+    def test_verified_transition_overrides_special_status_only_for_named_plants(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = _make_unit_workbook(Path(directory) / "wb.xlsx", BASE_ROWS)
+            book = load_workbook(path)
+            for name in ("汕头", "海门", "东莞"):
+                sheet = book.create_sheet(name)
+                sheet.append([None, "1号机", "#3机组", "4号机", "2号机", "全厂合计"])
+                sheet.append(["时刻", "日前电量\n（MWh）", "日前电量（MWh）",
+                              "日前电量（MWh）", "日前电量（MWh）", "日前电量（MWh）"])
+                for hour in range(24):
+                    sheet.append([time(hour) if hour == 5 else f"{hour}:00",
+                                  200 if hour == 0 else 0,
+                                  0 if hour < 8 else 300,
+                                  None if hour == 5 else (0 if hour < 8 else 300),
+                                  200 if 3 <= hour < 7 else 0,
+                                  200 if hour == 0 else 0])
+            book.save(path)
+            book.close()
+            texts = load_unit_status_texts("2026-11-20", path)
+        self.assertEqual(texts["汕头"], "#2机组运行；#1机组运行转备用；#3机组备用转运行。")
+        self.assertEqual(texts["海门"], "#1机组运行转备用；#2、#4机组备用；#3机组备用转运行。")
+        self.assertEqual(texts["东莞"], "一套机组备用，二套机组调峰，三套机组检修，四套机组备用。")
 
 
 DONGGUAN_ROWS: list[tuple] = [

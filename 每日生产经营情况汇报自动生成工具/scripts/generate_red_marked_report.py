@@ -28,7 +28,9 @@ if str(APP_ROOT.parent) not in sys.path:
 from toolbox_shared.morning_weather import fetch_guangdong_weather, weather_code_label
 from toolbox_shared.dates import normalize_date_input
 from toolbox_shared.storage import data_path
-from toolbox_shared.clearing_layout import brief_row_index, qingyuan_plan_values
+from toolbox_shared.clearing_layout import (
+    DAY_AHEAD_TRANSITION_PLANTS, brief_row_index, qingyuan_plan_values, unit_day_ahead_transitions,
+)
 
 OUTPUT_DIR = data_path(APP_ROOT / "\u8f93\u51fa")
 CLEARING_WORKBOOK_DIR = Path.home() / "Downloads"
@@ -583,7 +585,12 @@ def _read_clearing_values(path):
         if "基础信息" in workbook.sheetnames:
             basic = list(workbook["基础信息"].iter_rows(min_col=1, max_col=30, values_only=True))
             unit_rows = [row[:7] for row in basic]
-        result = (sheet_name, values, brief_row_index(label_cells), basic, unit_rows)
+        transitions = {
+            plant: unit_day_ahead_transitions(list(workbook[plant].iter_rows(max_row=40, values_only=True)))
+            for plant in DAY_AHEAD_TRANSITION_PLANTS
+            if plant in workbook.sheetnames
+        }
+        result = (sheet_name, values, brief_row_index(label_cells), basic, unit_rows, transitions)
     finally:
         workbook.close()
     if cache is not None:
@@ -601,7 +608,7 @@ def _clearing_label_row(labels, wanted, sheet_name):
 def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None = None) -> dict[str, Any]:
     if workbook_path is None:
         workbook_path = find_clearing_workbook(date_text)
-    sheet_name, values, label_rows, basic, _unit_rows = _read_clearing_values(workbook_path)
+    sheet_name, values, label_rows, basic, _unit_rows, _transitions = _read_clearing_values(workbook_path)
     value = lambda row, column: values.get((row, column))
     qingyuan_raw_values = qingyuan_plan_values(basic) if basic is not None else {}
     if basic is not None:
@@ -679,7 +686,7 @@ def load_day_ahead_clearing_summary(date_text: str, workbook_path: Path | None =
 def load_online_price_summary(date_text: str, workbook_path: Path | None = None) -> dict[str, Any]:
     if workbook_path is None:
         workbook_path = find_clearing_workbook(date_text)
-    sheet_name, values, label_rows, basic, _unit_rows = _read_clearing_values(workbook_path)
+    sheet_name, values, label_rows, basic, _unit_rows, _transitions = _read_clearing_values(workbook_path)
     value = lambda row, column: values.get((row, column))
     renewable_rows = {
         "\u6d77\u4e0a\u98ce\u7535": _clearing_label_row(label_rows, ("\u6c55\u5934\u6d77\u98ce", "\u6d77\u4e0a\u98ce\u7535"), sheet_name),
@@ -1101,7 +1108,7 @@ def load_daily_clearing_inputs(date_text: str,
 
 
 UNIT_STATUS_PLANTS = ("汕头", "海门", "东莞", "清远")
-UNIT_STATUS_RANK = ("运行", "备用", "供热", "检修")
+UNIT_STATUS_RANK = ("运行", "运行转备用", "备用", "备用转运行", "供热", "检修")
 UNIT_STATUS_WORDS = {
     "运行": "运行",
     "备用": "备用",
@@ -1207,13 +1214,14 @@ def load_unit_status_texts(date_text: str,
                            workbook_path: Path | None = None) -> dict[str, str]:
     if workbook_path is None:
         workbook_path = find_clearing_workbook(date_text)
-    rest = _read_clearing_values(workbook_path)
-    unit_rows = rest[-1]
+    _, _, _, _, unit_rows, transitions = _read_clearing_values(workbook_path)
     parsed = _parse_unit_status(unit_rows)
     texts: dict[str, str] = {}
     for plant, units in parsed.items():
         # 各厂（含东莞）统一以基础信息 C 列的机组状态为准；
         # 东莞「约束情况」里的「运行日运行方式」常与 C 列不一致（如写「一、二、四套调峰」），不采用。
+        plant_transitions = transitions.get(plant, {})
+        units = [(key, plant_transitions.get(key, status)) for key, status in units]
         text = build_unit_status_text(plant, units)
         if text:
             texts[plant] = text
@@ -1256,7 +1264,8 @@ def fill_startup_status(document, current: dict[str, str],
             )
             if target is None:
                 continue
-            if index == 1 and previous.get(plant) == body:
+            if (index == 1 and previous.get(plant) == body
+                    and not any(transition in body for transition in ("运行转备用", "备用转运行"))):
                 body = "与前一日运行方式一致。"
             replace_paragraph(target, f"{plant}厂：{body}")
             filled += 1
