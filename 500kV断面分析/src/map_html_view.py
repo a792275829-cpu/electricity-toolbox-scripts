@@ -108,7 +108,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     }}
     .node-search:focus {{ border-color:var(--cyan); box-shadow:0 0 0 3px rgba(56,214,255,.10); }}
     .threshold-control {{
-      display:flex; align-items:center; gap:6px; flex:0 0 auto; margin-right:auto; padding:0 2px;
+      display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; margin-right:auto; padding:0 2px;
     }}
     .threshold-label {{ font-size:12px; font-weight:700; color:var(--muted); letter-spacing:.02em; white-space:nowrap; }}
     .threshold-input {{
@@ -160,6 +160,11 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
     .zoom-controls button:hover {{
       background: color-mix(in srgb, var(--blue) 18%, var(--soft));
     }}
+    :is(.map-toolbar, .side) :is(button, input, select):focus-visible {{
+      outline:2px solid var(--blue);
+      outline-offset:2px;
+    }}
+    .section-list .section-item:focus-visible {{ outline-offset:-2px; }}
     svg {{
       display: block;
       width: 100%;
@@ -500,9 +505,12 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       .header-actions {{ display:contents; }}
       .map-toolbar {{ display:flex; gap:6px; }}
       .layer-toggles {{ display:contents; }}
-      .zoom-controls {{ flex-wrap:wrap; }}
-      .map-toolbar .toggle {{ min-width:0; padding:6px 4px; }}
+      .zoom-controls {{ flex-wrap:wrap; max-width:100%; }}
+      .zoom-controls button {{ width:44px; height:44px; }}
+      .map-toolbar :is(.threshold-input, .threshold-reset, .node-search) {{ min-height:44px; }}
       .node-search {{ flex-basis:100%; width:100%; min-width:0; }}
+      .side-header {{ flex-wrap:wrap; }}
+      .sort-select {{ min-height:44px; }}
       svg {{ height:78vw; min-height:300px; max-height:390px; }}
     }}
   </style>
@@ -528,25 +536,25 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
           <button class="threshold-reset" id="gapThresholdReset" type="button" title="恢复生成时的默认阈值">重置</button>
           <span class="threshold-count" id="thresholdCount" role="status" aria-live="polite">0 条断面</span>
         </div>
-        <div class="zoom-controls" aria-label="地图操作">
+        <div class="zoom-controls" role="group" aria-label="地图操作">
           <button class="toggle" id="toggleAnalysis" type="button" aria-pressed="false" aria-controls="analysisControls">分析模式</button>
           <button class="toggle" id="toggleFlow" type="button" aria-pressed="true">潮流查看</button>
-          <button id="zoomIn" type="button" title="放大">+</button>
-          <button id="zoomOut" type="button" title="缩小">−</button>
-          <button id="zoomReset" type="button" title="重置">⌂</button>
+          <button id="zoomIn" type="button" aria-label="放大地图" title="放大地图">+</button>
+          <button id="zoomOut" type="button" aria-label="缩小地图" title="缩小地图">−</button>
+          <button id="zoomReset" type="button" aria-label="重置地图缩放" title="重置地图缩放">⌂</button>
         </div>
         <input class="node-search" id="nodeSearch" type="search" placeholder="搜索节点，回车或移开焦点定位" aria-label="搜索节点">
         </div>
-        <svg id="map" viewBox="0 0 {SVG_W} {SVG_H}" role="img" aria-label="{map_label}">
-          <g id="mapBackground">{substrate if diagram_mode else ''}</g>
+        <svg id="map" viewBox="0 0 {SVG_W} {SVG_H}" role="group" aria-label="{map_label}">
+          <g id="mapBackground" aria-hidden="true">{substrate if diagram_mode else ''}</g>
           <g id="mapViewport">
             {'' if diagram_mode else substrate}
-            <g id="regions"></g>
+            <g id="regions" aria-hidden="true"></g>
             <g id="edges"></g>
             <g id="flowArrows"></g>
-            <g id="labelLeaders"></g>
+            <g id="labelLeaders" aria-hidden="true"></g>
             <g id="nodes"></g>
-            <g id="nodeLabels"></g>
+            <g id="nodeLabels" aria-hidden="true"></g>
           </g>
         </svg>
 
@@ -1187,7 +1195,7 @@ def render_map_html(data: dict[str, object], *, outline: str, SVG_W: int, SVG_H:
       group.setAttribute('class', 'node-group');
       group.setAttribute('tabindex', '0');
       group.setAttribute('role', 'button');
-      group.setAttribute('aria-label', `${{node.name}}节点，点击查看电价数据`);
+      group.setAttribute('aria-label', `${{node.name}}节点电价`);
       group.dataset.nodeName = node.name;
       const hit = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       hit.setAttribute('cx', node.x);

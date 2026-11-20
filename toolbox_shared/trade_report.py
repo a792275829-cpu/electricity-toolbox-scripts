@@ -687,12 +687,15 @@ class ReportBuilder:
         results.sort(key=lambda item: (item["unit"], to_hour_number(item["time"])))
         return results
 
-    def _table(self, headers, rows, cls=""):
-        head = "".join(f"<th>{esc(item)}</th>" for item in headers)
+    def _table(self, headers, rows, *, caption, hourly=False):
+        head = "".join(f'<th scope="col">{esc(item)}</th>' for item in headers)
         rendered_rows = []
         for row in rows:
             rendered_cells = []
-            for cell in row:
+            for index, cell in enumerate(row):
+                if hourly and index == 0:
+                    rendered_cells.append(f'<th scope="row">{cell}</th>')
+                    continue
                 if isinstance(cell, dict):
                     text = cell.get("html", cell.get("text", ""))
                     style = cell.get("style", "")
@@ -704,7 +707,13 @@ class ReportBuilder:
                     rendered_cells.append(f"<td>{cell}</td>")
             rendered_rows.append("<tr>" + "".join(rendered_cells) + "</tr>")
         body = "".join(rendered_rows)
-        return f'<table class="{cls}"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+        table_class = "detail-table" if hourly else "compact"
+        caption_id = esc(f"表-{caption}")
+        return (
+            f'<div class="table-scroll" tabindex="0" role="region" aria-labelledby="{caption_id}">'
+            f'<table class="{table_class}"><caption id="{caption_id}" class="visually-hidden">{esc(caption)}</caption>'
+            f'<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+        )
 
     def _kpis(self, item):
         fields = self._metric_fields()
@@ -849,7 +858,7 @@ class ReportBuilder:
             f'<b>偏差收益合计：</b>{fmt(total_profit)} 万元'
             '</p>'
         )
-        return summary + self._table(headers, rows, "detail detail-table")
+        return summary + self._table(headers, rows, caption=f"{unit}逐时出清明细", hourly=True)
 
     def _bid_check(self, units):
         paragraphs = []
@@ -896,6 +905,7 @@ class ReportBuilder:
                 )
             details = "".join(f'<div class="split"><h4>{esc(unit)}（0-23点）</h4>{self._detail_table(unit)}</div>' for unit in units if unit in self.hourly)
             detail_title = "逐时出清明细（按机组分别展示）" if company_name not in RENEWABLE_UNITS else "逐时出清明细（单元0-23点）"
+            representative_title = "实时-日前偏差代表点" if self.compare_mode == "realtime_vs_dayahead" else "日前-中长期偏差代表点"
             bid_block = (
                 f'<div class="card"><h3>报价单与量价匹配校验</h3>{self._bid_check(units)}</div>'
                 if company_name not in RENEWABLE_UNITS
@@ -905,8 +915,8 @@ class ReportBuilder:
                 f"""
 <h2 id="{esc(company_name)}">{esc(company_name)}</h2>
   {self._kpis(item)}
-  <div class="card"><h3>{"实时-日前偏差代表点" if self.compare_mode == "realtime_vs_dayahead" else "日前-中长期偏差代表点"}</h3>
-  {self._table(["类型", "单元", "时点", "偏差电量(MWh)", "价差(元/MWh)", "偏差收益(万元)"], representative_rows, "compact")}
+  <div class="card"><h3>{representative_title}</h3>
+  {self._table(["类型", "单元", "时点", "偏差电量(MWh)", "价差(元/MWh)", "偏差收益(万元)"], representative_rows, caption=f"{company_name}{representative_title}")}
   </div>
   {bid_block}
   <div class="card"><h3>{detail_title}</h3>
@@ -940,20 +950,138 @@ class ReportBuilder:
         )
 
         css = """
-*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Arial,sans-serif;margin:0;background:#f6f7fb;color:#1f2937;line-height:1.55}.sidebar{position:fixed;top:0;left:0;width:220px;height:100vh;background:#fff;box-shadow:4px 0 16px #0001;padding:24px 16px;overflow-y:auto;z-index:100}.sidebar h3{margin-top:0;font-size:16px;margin-bottom:16px;border-bottom:2px solid #eef2ff;padding-bottom:8px}.sidebar ul{list-style:none;padding:0;margin:0}.sidebar li{margin-bottom:8px}.sidebar a{display:block;padding:10px 12px;color:#1f2937;text-decoration:none;border-radius:8px;transition:all .2s}.sidebar a:hover{background:#eef2ff;color:#2563eb}.wrap{margin-left:240px;max-width:1400px;padding:28px}h1{font-size:28px;margin:0 0 12px}.meta{color:#6b7280;font-size:13px;margin-bottom:10px}h2{border-left:6px solid #2563eb;padding-left:10px;margin-top:36px;font-size:22px}h3{margin-top:0;font-size:17px}h4{font-size:16px;margin:12px 0}.card{background:#fff;border-radius:14px;padding:20px;margin:14px 0;box-shadow:0 4px 16px #0001}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}.kpi{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:12px}.kpi span{display:block;color:#6b7280;font-size:13px}.kpi b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;background:white}th,td{border:1px solid #e5e7eb;padding:6px 8px;text-align:right;white-space:nowrap;vertical-align:top}th{background:#eef2ff;color:#111827}td:first-child,th:first-child{text-align:left}.ok{color:#047857;font-weight:700}.bad{color:#dc2626;font-weight:700}.note,.muted{color:#6b7280;font-size:13px}.split{margin-top:24px;border-top:2px dashed #d1d5db;padding-top:12px}.toc a{margin-right:10px;color:#2563eb}.detail{display:block;overflow-x:auto}.detail-table{min-width:1380px;font-size:15px}.detail-table th,.detail-table td{padding:9px 12px}.detail-table th{font-size:14px}.method{font-size:13px}.compact td,.compact th{font-size:13px}.pill{display:inline-block;background:#eef2ff;color:#1d4ed8;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:8px}@media(max-width:800px){.sidebar{width:100%;height:auto;position:relative;box-shadow:none;padding:16px}.wrap{margin-left:0;padding:18px}.kpis{grid-template-columns:1fr 1fr}table{font-size:12px}.detail-table{min-width:1100px;font-size:13px}.detail-table th,.detail-table td{padding:8px 10px}}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  margin: 0;
+  background: #f6f7fb;
+  color: #1f2937;
+  line-height: 1.55;
+}
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 13.75rem;
+  background: #fff;
+  box-shadow: 4px 0 16px #0001;
+  padding: 1.5rem 1rem;
+  overflow-y: auto;
+  z-index: 10;
+}
+#report-nav-title {
+  margin: 0 0 .75rem;
+  border-bottom: 2px solid #eef2ff;
+  padding-bottom: .5rem;
+  font-weight: 700;
+}
+.sidebar ul { list-style: none; padding: 0; margin: 0; }
+.sidebar a {
+  display: block;
+  padding: .55rem .75rem;
+  color: inherit;
+  text-decoration: none;
+  border-radius: .5rem;
+}
+.sidebar a:hover, .sidebar a:focus-visible { background: #eef2ff; color: #1d4ed8; }
+:where(a, .table-scroll):focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; }
+.visually-hidden, .skip-link:not(:focus) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.skip-link:focus {
+  position: fixed;
+  z-index: 11;
+  inset: .5rem auto auto .5rem;
+  padding: .5rem .75rem;
+  border-radius: .5rem;
+  background: #fff;
+  color: #1d4ed8;
+}
+.wrap { margin-left: 15rem; max-width: 87.5rem; padding: clamp(1rem, 2vw, 1.75rem); }
+h1 { font-size: 1.75rem; margin: 0 0 .75rem; }
+.meta { color: #6b7280; font-size: .875rem; margin-bottom: .625rem; }
+h2 { border-left: 6px solid #2563eb; padding-left: .625rem; margin-top: 2.25rem; font-size: 1.375rem; }
+h3 { margin-top: 0; font-size: 1.0625rem; }
+h4 { font-size: 1rem; margin: .75rem 0; }
+.card, .kpi { border-radius: .75rem; }
+.card { background: #fff; padding: clamp(.75rem, 2vw, 1.25rem); margin: .875rem 0; box-shadow: 0 4px 16px #0001; }
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
+  gap: .75rem;
+  margin: .875rem 0;
+}
+.kpi { background: #f8fafc; border: 1px solid #e5e7eb; padding: .75rem; overflow-wrap: anywhere; }
+.kpi span { display: block; color: #6b7280; font-size: .875rem; }
+.kpi b { display: block; font-size: 1.25rem; margin-top: .25rem; }
+.table-scroll {
+  position: relative;
+  max-inline-size: 100%;
+  overflow-x: auto;
+  margin-block: .75rem;
+  border: 1px solid #e5e7eb;
+}
+table {
+  inline-size: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: .875rem;
+  font-variant-numeric: tabular-nums;
+  background: #fff;
+}
+th, td {
+  border-inline-end: 1px solid #e5e7eb;
+  border-block-end: 1px solid #e5e7eb;
+  padding: .375rem .5rem;
+  text-align: end;
+  white-space: nowrap;
+  vertical-align: top;
+}
+tr > :last-child { border-inline-end: 0; }
+tbody tr:last-child > * { border-block-end: 0; }
+thead th { background: #eef2ff; color: #111827; }
+tr > :first-child { text-align: start; }
+.detail-table th, .detail-table td { padding: .5rem .65rem; }
+.detail-table tr > th:first-child { position: sticky; inset-inline-start: 0; }
+.detail-table tbody th { background: #f8fafc; font-weight: 500; }
+.ok { color: #047857; font-weight: 700; }
+.bad { color: #dc2626; font-weight: 700; }
+.note, .muted { color: #6b7280; font-size: .875rem; }
+.split { margin-top: 1.5rem; border-top: 2px dashed #d1d5db; padding-top: .75rem; }
+.pill {
+  display: inline-block;
+  background: #eef2ff;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: .75rem;
+  margin-left: .5rem;
+}
+@media (max-width: 50rem) {
+  .sidebar { position: static; width: auto; box-shadow: none; padding: .75rem 1rem; }
+  #report-nav-title { margin-bottom: .25rem; }
+  .sidebar ul { display: flex; flex-wrap: wrap; gap: .125rem .375rem; }
+  .wrap { margin-left: 0; }
+}
 """
 
         return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>电力交易出清分析报告</title><link rel="icon" href="data:,"><style>{css}</style></head>
 <body>
-<aside class="sidebar">
-<h3>目录导航</h3>
+<a class="skip-link" href="#report-content">跳到报告正文</a>
+<nav class="sidebar" aria-labelledby="report-nav-title">
+<p id="report-nav-title">目录导航</p>
 <ul>
 <li><a href="#总览">总览</a></li>
 {''.join(f'<li><a href="#{esc(name)}">{esc(name)}</a></li>' for name in self.companies)}
 </ul>
-</aside>
-<main class="wrap">
+</nav>
+<main class="wrap" id="report-content" tabindex="-1">
 <h1>电力交易出清分析报告</h1>
 <div class="meta">运行日期：{run_date} <span class="pill">{compare_pill}</span></div>
 <div class="card note method"><b>方法说明：</b>

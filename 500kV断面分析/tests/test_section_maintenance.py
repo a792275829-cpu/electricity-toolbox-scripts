@@ -262,6 +262,24 @@ class MaintenanceBrowserTests(unittest.TestCase):
         finally:
             page.close()
 
+    def test_narrow_toolbar_and_map_controls_are_keyboard_accessible(self):
+        from playwright.sync_api import expect
+
+        page = self.browser.new_page(viewport={'width': 320, 'height': 720}, offline=True)
+        try:
+            page.goto(self.url)
+            self.assertEqual(page.evaluate('document.documentElement.scrollWidth'), 320)
+            zoom = page.get_by_role('button', name='放大地图')
+            self.assertGreaterEqual(zoom.bounding_box()['height'], 44)
+            zoom.focus()
+            expect(zoom).to_have_css('outline-style', 'solid')
+            map_view = page.locator('#map')
+            expect(map_view).to_match_aria_snapshot('- group:\n  - button "盘龙站节点电价"')
+            map_view.get_by_role('button', name='盘龙站节点电价').press('Enter')
+            expect(page.locator('#detailTitle')).to_contain_text('盘龙站')
+        finally:
+            page.close()
+
 
 if __name__ == '__main__':
     unittest.main()

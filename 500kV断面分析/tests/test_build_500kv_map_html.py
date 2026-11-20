@@ -239,7 +239,7 @@ class Build500kVMapHtmlTest(unittest.TestCase):
             self.assertIn("'stroke-dasharray': '4 4'", html)
             self.assertIn("value.toFixed(2) + ' 元/MWh'", html)
             self.assertIn("series: [{ name: node.name, color: '#168ac0', prices: node.prices }]", html)
-            self.assertIn('点击查看电价数据', html)
+            self.assertIn('${node.name}节点电价', html)
             self.assertIn('id="toggleFlow"', html)
             self.assertIn('id="flowArrows"', html)
             self.assertNotIn('id="flowArrowHead"', html)

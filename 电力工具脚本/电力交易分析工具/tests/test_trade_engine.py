@@ -96,6 +96,35 @@ assert 'tkinter' not in sys.modules
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_narrow_report_keeps_horizontal_scroll_inside_tables(self):
+        from playwright.sync_api import Error, expect, sync_playwright
+        from toolbox_shared.trade_report import generate_report
+
+        with tempfile.TemporaryDirectory() as temp, sync_playwright() as playwright:
+            root = Path(temp)
+            source = root / 'trade-2026-10-27.xlsx'
+            make_workbook(source, realtime=True)
+            output = generate_report(source, root / 'report.html')
+            try:
+                browser = playwright.chromium.launch()
+            except Error as exc:
+                self.skipTest(f'Chromium unavailable: {type(exc).__name__}')
+            with browser:
+                page = browser.new_page(viewport={'width': 390, 'height': 844}, offline=True)
+                page.goto(output.as_uri())
+                self.assertEqual(page.evaluate('document.documentElement.scrollWidth'), 390)
+                page.keyboard.press('Tab')
+                expect(page.get_by_role('link', name='跳到报告正文')).to_be_focused()
+                page.keyboard.press('Enter')
+                expect(page.get_by_role('main')).to_be_focused()
+                detail = page.get_by_role('region', name='海风逐时出清明细')
+                time = detail.get_by_role('rowheader', name='0:00', exact=True)
+                left = time.bounding_box()['x']
+                detail.focus()
+                page.keyboard.press('ArrowRight')
+                expect(detail).not_to_have_js_property('scrollLeft', 0)
+                self.assertAlmostEqual(time.bounding_box()['x'], left, delta=1)
+
     def test_standalone_gui_opens_with_available_macos_theme(self):
         import tkinter as tk
         module = legacy_module()
