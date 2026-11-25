@@ -15,6 +15,10 @@ case "${1:-}" in
       export TOOLBOX_WEBVIEW_UI_SAMPLE=1
       export TOOLBOX_APP_HOME="$HOME/Library/Application Support/com.electricity.toolbox/development/data/webview-ui-sample"
     fi
+    # The Rust backend skips its data-root setup when a workspace override exists.
+    unset TOOLBOX_WORKSPACE
+    export TOOLBOX_CODE_ROOT="$root_dir"
+    export TOOLBOX_DATA_ROOT="$TOOLBOX_APP_HOME/data"
     ;;
   --webview-pilot)
     export TOOLBOX_WEBVIEW_PILOT=1
@@ -40,6 +44,8 @@ if [[ "${TOOLBOX_SMOKE:-}" == "1" ]]; then
     print -r -- "WEBVIEW_UI_SAMPLE=${TOOLBOX_WEBVIEW_UI_SAMPLE:-0}"
     print -r -- "WEBVIEW_PILOT_FIXTURE=${TOOLBOX_WEBVIEW_PILOT_FIXTURE:-0}"
     print -r -- "WEBVIEW_DATA_HOME=$TOOLBOX_APP_HOME"
+    print -r -- "WEBVIEW_DATA_ROOT=$TOOLBOX_DATA_ROOT"
+    print -r -- "WEBVIEW_WORKSPACE=${TOOLBOX_WORKSPACE:-$TOOLBOX_CODE_ROOT}"
   fi
   exit 0
 fi

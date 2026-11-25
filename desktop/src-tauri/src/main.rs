@@ -342,13 +342,17 @@ async fn webview_close(app: tauri::AppHandle, cancel: bool, restart: Option<bool
         std::fs::create_dir_all(root.join("logs")).map_err(|e| e.to_string())?;
         let log = std::fs::OpenOptions::new().create(true).append(true)
             .open(root.join("logs/webview-restart.log")).map_err(|e| e.to_string())?;
-        Command::new("/bin/zsh")
+        let mut launcher = Command::new("/bin/zsh");
+        launcher
             .arg("-c")
-            .arg("while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; sleep 1; exec \"$2\" \"$3\"")
+            .arg("while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; sleep 1; shift; exec \"$@\"")
             .arg("toolbox-restart")
             .arg(std::process::id().to_string())
-            .arg(root.join("00_启动/Tauri开发版.command"))
-            .arg(if webview_fixture() { "--webview-ui-sample" } else { "--webview-ui" })
+            .arg(root.join("00_启动/源码调试版.command"));
+        if webview_fixture() {
+            launcher.arg("--webview-ui-sample");
+        }
+        launcher
             .stdin(Stdio::null()).stdout(log.try_clone().map_err(|e|e.to_string())?).stderr(log)
             .spawn().map_err(|e| e.to_string())?;
     }
@@ -435,7 +439,7 @@ fn main() {
                         let _ = window.set_title(if webview_fixture() {
                             "电力工具箱 · WebView 离线样例"
                         } else {
-                            "电力工具箱 · WebView 真实业务测试版"
+                            "电力工具箱 · 源码调试版"
                         });
                     }
                 }

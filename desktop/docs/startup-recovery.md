@@ -10,7 +10,7 @@
 
 ## 日常维护要求
 
-- Python 界面调试使用仓库 `00_启动/源码调试版.command`；Tauri 生命周期调试使用 `00_启动/Tauri开发版.command`。
+- 日常界面调试使用仓库 `00_启动/源码调试版.command` 打开 WebView；Tauri 生命周期调试使用 `00_启动/Tauri开发版.command`。
 - 调试修改只写入当前 `main` 工作副本，禁止向 `~/Library/Application Support/com.electricity.toolbox/app/` 或 `~/Applications/电力工具箱.app` 复制开发代码。
 - 开发配置和数据使用 `~/Library/Application Support/com.electricity.toolbox/development/data/`。测试需要正式数据时使用独立副本，各工具的登录态、profile 和锁仍保持隔离。
 - 正式版源码通过构建、发行和安装流程更新；不得修改 `state/installed.json` 来绕过冲突检查。

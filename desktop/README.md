@@ -8,36 +8,32 @@
 
 ## 日常维护
 
-界面日常调试固定使用 `00_启动/源码调试版.command`：直接运行当前 `main` 工作副本及根目录 `.venv`，不复制源码、不打包；窗口标注“源码调试版”并默认打开 WPS 写入页面。Rust 核心沿用源码构建结果；修改 Rust 后先执行 `.venv/bin/python native/price-xlsx/build.py`。开发配置与登录资料继续使用 `~/Library/Application Support/com.electricity.toolbox/development/data/`，与安装版独立；界面代码修改后关闭调试窗口，再双击同一入口重启。
+日常界面调试使用 [源码调试版](#webview--react-源码调试版)，直接运行当前工作副本及根目录 `.venv`。涉及 Tauri 生命周期时，双击 `00_启动/Tauri开发版.command`，使用原 Tk 界面和 Tauri 外壳。修改共用的 Rust 价格后端后，先执行 `.venv/bin/python native/price-xlsx/build.py`。
 
 禁止把调试源码复制到正式版用户目录的 `app/` 或已安装 `.app`。正式版提示“检测到本地源码修改”时，按[启动故障恢复约定](docs/startup-recovery.md)备份并恢复发行源码；该文档同时记录后续恢复入口的改进要求。
 
-双击仓库的 `00_启动/Tauri开发版.command`。
-
-首次开发需要 Node 22、Rust stable、项目根目录 `.venv`。需要 Xcode Command Line Tools；Python 依赖由根目录 `setup_macos.command` 初始化。前端首次执行 `cd desktop && npm ci`。
-
-开发启动器运行 `npm run dev`，自动编译必要的 Rust 改动。界面仍维护原 Python 页面；任务适配在 `toolbox/ui_tasks.py`，业务服务和工作流在 `toolbox/service.py`、`toolbox/workflows.py`。修改已加载的界面或服务后重启应用；脚本任务在下一次运行时读取业务脚本源码。不带参数时 React/CSS 影响启动故障提示；`--webview-ui` 使用完整 React 界面。`00_启动/电力工具箱.command` 保留不依赖 Node/Rust 的原版源码启动方式。
+首次开发需要 Node 22、Rust stable 和 Xcode Command Line Tools。启动器会按需通过 `setup_macos.command` 初始化根目录 `.venv`，通过 `npm ci` 安装前端依赖，再运行 `npm run dev` 编译 Tauri 外壳并启动应用。修改已加载的 Python 服务后重启应用，脚本任务在下一次运行时读取业务脚本源码。Tk 源码入口 `00_启动/电力工具箱.command` 可直接打开原界面。
 
 接收电脑安装发行包即可使用，内置 Python 3.11.15、Node 22.18.0（随 Playwright 轮子）、Playwright 1.55.0 和 Chromium。浏览器登录和网站取数仍需要网络。
 
-## WebView / React 完整界面源码版
+## WebView / React 源码调试版
 
-真实业务测试请双击 `00_启动/真实业务测试版.command`。窗口标题为“WebView 真实业务测试版”，底栏显示“真实业务模式”；清能网站账号填写完整后自动保存并在后台验证，任务执行时自动建立或复用各工具会话。普通业务页只显示业务操作；账号验证或当前工具最近一次任务提示需要人工验证时，右侧账号区显示“打开登录窗口”，打开当前工具的独立会话。失败后可“重试验证”，验证期间可“停止验证”；检修登录与 WPS 登录保留在各自页面。登录态、配置和浏览器目录仍按工具隔离。启动入口会清除继承的样例模式标记，避免真实模式误用离线服务。
+双击 `00_启动/源码调试版.command` 打开完整 WebView 界面。窗口标题为“电力工具箱 · 源码调试版”，底栏显示“真实业务模式”，默认进入“WPS 写入工具”。清能网站账号填写完整后自动保存并在后台验证，任务执行时自动建立或复用各工具会话。账号验证或当前工具最近一次任务提示需要人工验证时，右侧账号区显示“打开登录窗口”，打开当前工具的独立会话。失败后可“重试验证”，验证期间可“停止验证”；检修登录与 WPS 登录保留在各自页面。登录态、配置和浏览器目录按工具隔离。
 
 若离线样例窗口仍在运行，先退出样例，再双击真实业务入口。离线窗口标题为“WebView 离线样例”，底栏明确显示“离线样例”；它用于验收，不用于真实登录、上传或写入。
 
 
 ```bash
-./00_启动/Tauri开发版.command --webview-ui
+./00_启动/源码调试版.command
 # 不联网的验收模式
-./00_启动/Tauri开发版.command --webview-ui-sample
+./00_启动/源码调试版.command --webview-ui-sample
 ```
 
-完整 React 界面按原版 16 个页面的三栏布局、字段、按钮和说明复刻，包含双月日期选择、任务中心、账号、诊断、日志、手动市场数据及 WPS 配置／区域编辑器。业务继续调用原 `ToolboxService`、任务引擎、解析器及写入逻辑。正式安装版和不带参数的启动入口仍使用 Tk，待真实业务验收后切换。
+完整 React 界面覆盖 16 个页面，包含双月日期选择、任务中心、账号、诊断、日志、手动市场数据及 WPS 配置／区域编辑器。业务继续调用原 `ToolboxService`、任务引擎、解析器及写入逻辑。
 
 两种模式均使用独立应用标识 `com.electricity.toolbox.webview-ui`，仅在 debug 构建启用。数据分别位于 `~/Library/Application Support/com.electricity.toolbox/development/data/webview-ui/data/` 和 `webview-ui-sample/data/`，不读取正式版账号与浏览器状态。真实模式需要自行填写账号和业务文件；样例模式仅允许运行上网电量导出（最多 3 天），其他页面可查看和编辑本地配置。样例模式不会登录网站或上传业务数据。
 
-需要根 `.venv`、Node/npm、Rust 和 Xcode Command Line Tools。右下角“重启源码版”会先保存完整账号、检查任务和未应用的接线图编辑，然后重新启动开发入口及业务服务。版本入口复用原更新服务；源码开发环境不用于实际安装发行包。
+右下角“重启源码版”会先保存完整账号、检查任务和未应用的接线图编辑，然后以当前模式重新启动源码调试入口及业务服务。版本入口复用原更新服务；源码开发环境不用于实际安装发行包。
 
 验收与原版对照：
 
@@ -56,7 +52,7 @@
 ./00_启动/Tauri开发版.command --webview-pilot
 ```
 
-这是独立的开发试用模式：显示 React“导出上网电量”页面，不启动 Tk，使用独立应用标识 `com.electricity.toolbox.webview-pilot`；业务解释器固定使用根 `.venv`。需要现有 Node、npm、Rust 和 Xcode Command Line Tools。普通开发入口、源码启动及正式版仍使用原 Tk 界面。
+这个试用模式用于单独验证 React“导出上网电量”页面，使用应用标识 `com.electricity.toolbox.webview-pilot`，业务解释器使用根 `.venv`。
 
 试用默认离线：开始、结束日期由原业务目录提供默认值，通过原 `prepare_task` 校验；开始导出走现有 Tauri → Python JSON 通信、任务引擎、独立工作进程、取消和日志。用模拟接口数据走原导出器的校验、换算和 Excel 写入，重新打开核对“汇总”表中的汕头原值、清远实际和 D+2 计划电量。每次最多导出 3 天，反向日期立即拒绝；开始导出在任务运行时禁用，取消完成后恢复。不会读取实际账号、登录网站或修改已有业务工作簿。
 

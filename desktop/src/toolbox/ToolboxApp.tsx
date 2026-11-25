@@ -544,7 +544,7 @@ export function ToolboxApp({
   hostError?: string;
 }) {
   const [boot, setBoot] = useState<Bootstrap | null>(null);
-  const [current, setCurrent] = useState("online-energy");
+  const [current, setCurrent] = useState(sample ? "online-energy" : "wps-writer");
   const [forms, setForms] = useState<Record<string, Values>>({});
   const formsRef = useRef(forms);
   formsRef.current = forms;

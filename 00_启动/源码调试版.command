@@ -4,32 +4,41 @@ set -euo pipefail
 launcher_dir=${0:A:h}
 root_dir=${launcher_dir:h}
 
-# Reuse the desktop development data directory and the existing source launcher.
+case "${1:-}" in
+  "")
+    exec "$launcher_dir/Tauri开发版.command" --webview-ui
+    ;;
+  --webview-ui-sample)
+    exec "$launcher_dir/Tauri开发版.command" --webview-ui-sample
+    ;;
+  --accessibility-probe)
+    debug_entry="$root_dir/tooling/accessibility_probe.py"
+    debug_args=()
+    ;;
+  --ui-reference)
+    debug_entry="$root_dir/desktop/python/source_debug.py"
+    debug_args=(--ui-reference)
+    ;;
+  *)
+    print -u2 -r -- '用法：源码调试版.command [--webview-ui-sample | --ui-reference | --accessibility-probe]'
+    exit 2
+    ;;
+esac
+
+# The Tk verification tools use the development data directory.
 export TOOLBOX_CODE_ROOT="$root_dir"
 export TOOLBOX_DATA_ROOT="$HOME/Library/Application Support/com.electricity.toolbox/development/data"
 export TOOLBOX_SOURCE_DEBUG=1
 export PYTHONPATH="$root_dir${PYTHONPATH:+:$PYTHONPATH}"
 
-if [[ "${1:-}" == "--accessibility-probe" && "${TOOLBOX_SMOKE:-}" != "1" ]]; then
-  if [[ ! -x "$root_dir/.venv/bin/python" ]]; then
-    "$root_dir/setup_macos.command"
-  fi
-  exec "$root_dir/.venv/bin/python" "$root_dir/tooling/accessibility_probe.py"
-fi
-
-if [[ "${1:-}" == "--ui-reference" && "${TOOLBOX_SMOKE:-}" != "1" ]]; then
-  exec "$root_dir/.venv/bin/python" "$root_dir/desktop/python/source_debug.py" --ui-reference
-fi
-
 if [[ "${TOOLBOX_SMOKE:-}" == "1" ]]; then
   print -r -- "DEBUG_SOURCE=$TOOLBOX_CODE_ROOT"
   print -r -- "DEBUG_DATA=$TOOLBOX_DATA_ROOT"
-else
-  mkdir -p "$TOOLBOX_DATA_ROOT"
-  if [[ ! -x "$root_dir/.venv/bin/python" ]]; then
-    "$root_dir/setup_macos.command"
-  fi
-  exec "$root_dir/.venv/bin/python" "$root_dir/desktop/python/source_debug.py"
+  print -r -- "DEBUG_PYTHON_ENTRY=$debug_entry"
+  exit 0
 fi
 
-exec "$launcher_dir/电力工具箱.command"
+if [[ ! -x "$root_dir/.venv/bin/python" ]]; then
+  "$root_dir/setup_macos.command"
+fi
+exec "$root_dir/.venv/bin/python" "$debug_entry" "${debug_args[@]}"

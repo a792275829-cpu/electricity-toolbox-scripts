@@ -25,7 +25,7 @@
 - 项目 Python 环境以根目录 `.venv` 为准；不要把个人机器上的绝对解释器路径写入代码。
 - macOS 初始化入口是 `./setup_macos.command`，GUI 启动入口是 `./00_启动/电力工具箱.command`。
 - 保持“复制整个文件夹到另一台 Mac 后可初始化并运行”的可移植目标。
-- 界面调试统一使用 `00_启动/源码调试版.command`，涉及 Tauri 生命周期时使用 `00_启动/Tauri开发版.command`；仅修改当前仓库源码，禁止向正式版用户目录的 `app/` 或已安装 `.app` 复制调试代码。开发数据由该脚本通过 `TOOLBOX_DATA_ROOT` 指向 `~/Library/Application Support/com.electricity.toolbox/development/data`，不在仓库内，也不要让它回落到正式目录。
+- 界面调试统一使用 `00_启动/源码调试版.command` 打开 WebView，涉及 Tauri 生命周期时使用 `00_启动/Tauri开发版.command`；仅修改当前仓库源码，禁止向正式版用户目录的 `app/` 或已安装 `.app` 复制调试代码。开发数据由启动器通过 `TOOLBOX_DATA_ROOT` 指向 `~/Library/Application Support/com.electricity.toolbox/development/data` 下对应的模式目录，不在仓库内，也不要让它回落到正式目录。
 - 正式版因本地源码冲突无法启动时，先保留第一条异常、冲突清单和安装记录，按 `desktop/docs/startup-recovery.md` 备份、校验并恢复发行源码；不得伪造安装清单、关闭冲突保护或清空用户数据。恢复后回读发行清单校验源码，并实际重启验证主界面。
 - 路径处理使用 `pathlib.Path` 和脚本／仓库相对定位，打开目录走平台适配逻辑，保持跨 Mac 可移植；不要为省事引入平台专用调用（如 `os.startfile`、`explorer`）。
 - Node/npm 依赖只应作用于实际需要它们的子工具，不得变成所有 Python 工具的强制前置条件。

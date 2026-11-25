@@ -4,7 +4,7 @@
 
 统一 GUI 入口，负责导航、页面、任务中心、账号区、运行诊断，并把用户操作转成各工具的命令行调用。业务实现不在本目录，见各自工具目录与 `toolbox_shared/`。
 
-启动：`00_启动/电力工具箱.command`（源码）或已安装的 `电力工具箱.app`。调试用 `00_启动/源码调试版.command`，涉及 Tauri 生命周期时用 `00_启动/Tauri开发版.command`。
+使用 `00_启动/电力工具箱.command` 或已安装的 `电力工具箱.app` 打开 Tk 界面。涉及 Tauri 生命周期时用 `00_启动/Tauri开发版.command`。日常界面调试见 [WebView 源码调试版](../desktop/README.md#webview--react-源码调试版)。
 
 ## 使用界面
 
