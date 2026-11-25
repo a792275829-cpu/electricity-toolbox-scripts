@@ -59,6 +59,10 @@ function render(tool: Tool) {
 }
 describe("all original business routes are reachable in React", () => {
   it("uses the live 16-tool catalog", () => expect(tools).toHaveLength(16));
+  it("does not show an overwrite checkbox in the WPS editor", () => {
+    const tool = tools.find((tool) => tool.id === "wps-writer")!;
+    expect(render(tool)).not.toContain("覆盖非空单元格");
+  });
   for (const tool of tools) {
     it(`${tool.id}: exposes business operations and the appropriate login entrance`, () => {
       const html = render(tool);

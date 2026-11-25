@@ -19,7 +19,7 @@ if str(BASE_DIR.parent) not in sys.path:
     sys.path.insert(0, str(BASE_DIR.parent))
 from toolbox_shared.task_cancellation import cancellation_checkpoint
 from toolbox_shared.log_console import LogConsole, explain_error, redact
-from toolbox_shared.choices import SegmentedGroup, SettingCheckbutton
+from toolbox_shared.choices import SegmentedGroup
 from toolbox_shared.file_button import FileSelectButton
 from toolbox_shared.wps_urls import url_choices
 from toolbox_shared.wps_paths import (
@@ -39,7 +39,7 @@ from toolbox_shared.wps_paths import (
     WPS_LOGIN_STATUS_URL,
     LOGIN_STATUS_POLL_MS,
 )
-from toolbox_shared.wps_config import (CONFIG_EXPORT_SCHEMA, CONFIG_EXPORT_VERSION, _document_config_from_dict, _region_config_from_dict, _string_list, build_config_export, load_config_export, normalize_browser_mode, normalize_runtime_config, runtime_config_from_export_payload, save_config_export)
+from toolbox_shared.wps_config import (CONFIG_EXPORT_SCHEMA, CONFIG_EXPORT_VERSION, WRITE_CONFIRMATION, _document_config_from_dict, _region_config_from_dict, _string_list, build_config_export, load_config_export, normalize_browser_mode, normalize_runtime_config, runtime_config_from_export_payload, save_config_export)
 from toolbox_shared.wps_values import (
     normalize_cell_value,
     normalize_for_compare,
@@ -1024,7 +1024,6 @@ class WpsWriterFrame(ttk.Frame):
         self.recent_urls: list[str] = []
         self.document_titles: dict[str, str] = {}
         self.browser_mode = tk.StringVar(master=self, value="managed_cdp")
-        self.overwrite = tk.BooleanVar(master=self, value=True)
         self.cdp_url = tk.StringVar(master=self, value="http://127.0.0.1:9222")
         self.browser_status = tk.StringVar(master=self, value="尚未检查浏览器连接")
         self.login_status = tk.StringVar(master=self, value="尚未检查")
@@ -1205,10 +1204,6 @@ class WpsWriterFrame(ttk.Frame):
 
         self.execution_toolbar = ttk.Frame(mapping_frame)
         self.execution_toolbar.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
-        SettingCheckbutton(
-            mapping_frame, text="覆盖非空单元格", variable=self.overwrite,
-            command=self.save_current_config,
-        ).grid(row=3, column=0, sticky="w", padx=8, pady=(0, 8))
         self.selection_status = tk.StringVar(value="请先选择配置，再预览或写入。")
         ttk.Label(
             self.execution_toolbar,
@@ -1691,7 +1686,6 @@ class WpsWriterFrame(ttk.Frame):
         if config.get("kdocs_url"):
             self.recent_urls = update_recent_urls(self.recent_urls, config["kdocs_url"])
         self.browser_mode.set(normalize_browser_mode(config.get("browser_mode")))
-        self.overwrite.set(normalize_runtime_config(config)["overwrite"])
         self.cdp_url.set(config.get("cdp_url", "http://127.0.0.1:9222"))
         default_url = config.get("kdocs_url", "")
         default_file = config.get("excel_path", "")
@@ -1741,7 +1735,6 @@ class WpsWriterFrame(ttk.Frame):
                 "recent_urls": self.recent_urls,
                 "document_titles": self.document_titles,
                 "browser_mode": self.browser_mode.get(),
-                "overwrite": self.overwrite.get(),
                 "cdp_url": self.cdp_url.get(),
                 "configs": [
                     {
@@ -1762,7 +1755,6 @@ class WpsWriterFrame(ttk.Frame):
         self.recent_urls = runtime_config["recent_urls"]
         self.document_titles = runtime_config.get("document_titles", {})
         self.browser_mode.set(runtime_config["browser_mode"])
-        self.overwrite.set(runtime_config["overwrite"])
         self.cdp_url.set(runtime_config["cdp_url"])
         self.configs = [self.document_config_from_config(row) for row in runtime_config["configs"]]
         self.remember_mapping_urls()
@@ -1837,7 +1829,11 @@ class WpsWriterFrame(ttk.Frame):
         mappings = [] if remote else self.flatten_configs([self.configs[index] for index in indexes])
         browser_mode = self.browser_mode.get()
         cdp_url = self.cdp_url.get().strip()
-        overwrite = self.overwrite.get()
+        if not preview and not messagebox.askyesno(
+            "确认写入", WRITE_CONFIRMATION, parent=self,
+            default=messagebox.NO, icon=messagebox.WARNING,
+        ):
+            return
         self.clear_log()
         self.log_console.status.set("正在预览…" if preview else "正在检查写入配置…")
         if not preview:
@@ -1858,7 +1854,7 @@ class WpsWriterFrame(ttk.Frame):
                     self.log(f"预览通过：共 {len(prepared)} 个写入区域，涉及 {urls} 份目标表格。")
                 else:
                     self.detail_log_prepared("WRITE PREPARED", prepared)
-                    self.write_worker(prepared, browser_mode, cdp_url, overwrite)
+                    self.write_worker(prepared, browser_mode, cdp_url)
             except TaskCancelled:
                 raise
             except Exception as exc:
@@ -1876,7 +1872,7 @@ class WpsWriterFrame(ttk.Frame):
                 raise
         self._start_task(worker, name="WPS 预览" if preview else "WPS 写入")
 
-    def write_worker(self, prepared: list[PreparedMapping], browser_mode: str, cdp_url: str, overwrite: bool = True) -> None:
+    def write_worker(self, prepared: list[PreparedMapping], browser_mode: str, cdp_url: str) -> None:
         self.log(f"开始写入，共 {len(prepared)} 个区域。")
         self.detail_log(f"WRITE STARTED: browser_mode={browser_mode}; cdp_url={cdp_url}; regions={len(prepared)}")
         by_index = {item.index: item for item in prepared}
@@ -1889,7 +1885,7 @@ class WpsWriterFrame(ttk.Frame):
         for number, (url, group) in enumerate(groups.items(), start=1):
             cancellation_checkpoint()
             self.detail_log(f"WRITE TARGET: url={url}; regions={len(group)}")
-            result = write_to_wps(url, group, self.log, browser_mode=browser_mode, cdp_url=cdp_url, overwrite=overwrite)
+            result = write_to_wps(url, group, self.log, browser_mode=browser_mode, cdp_url=cdp_url)
             self.detail_log(f"WRITE TARGET RESULT: url={url}; saved={result.get('saved')}; returned={len(result.get('results', []))}")
             for entry in result.get("results", []):
                 item = by_index[entry["index"]]

@@ -8,6 +8,7 @@ CONFIG_EXPORT_SCHEMA = "wps_excel_to_kdocs_config_export"
 CONFIG_EXPORT_VERSION = 1
 BROWSER_MODES = ("managed_cdp", "cdp")
 DEFAULT_BROWSER_MODE = "managed_cdp"
+WRITE_CONFIRMATION = "将覆盖所选配置目标区域内的单元格，包括已有数据和公式。确认写入？"
 
 def load_runtime_config(local_path: Path, default_path: Path) -> dict[str, Any]:
     """Use the bundled defaults only when the local configuration is absent."""
@@ -64,7 +65,8 @@ def normalize_runtime_config(data: dict[str, Any]) -> dict[str, Any]:
     config = {
         "recent_urls": _string_list(data.get("recent_urls", [])),
         "browser_mode": normalize_browser_mode(data.get("browser_mode")),
-        "overwrite": data.get("overwrite", True) is not False,
+        # Keep the field in version 1 exports for older readers.
+        "overwrite": True,
         "cdp_url": str(data.get("cdp_url", "http://127.0.0.1:9222") or "http://127.0.0.1:9222"),
         "configs": [
             _document_config_from_dict(row)

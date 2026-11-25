@@ -55,7 +55,7 @@ class WpsPackagedConfigurationTests(unittest.TestCase):
         self.assertEqual(len(self.seed['configs']), 3)
         self.assertEqual([len(item['regions']) for item in self.seed['configs']], [8, 15, 16])
         self.assertEqual(self.seed['recent_urls'], [])
-        self.assertFalse(self.seed['overwrite'])
+        self.assertTrue(self.seed['overwrite'])
         self.assertEqual(set(self.seed), {'recent_urls', 'browser_mode', 'overwrite', 'cdp_url', 'configs'})
         for config in self.seed['configs']:
             for field in ('local_file', 'source_url', 'kdocs_url'):

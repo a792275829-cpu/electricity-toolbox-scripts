@@ -1,7 +1,7 @@
 {
   "recent_urls": [],
   "browser_mode": "managed_cdp",
-  "overwrite": false,
+  "overwrite": true,
   "cdp_url": "http://127.0.0.1:9222",
   "configs": [
     {

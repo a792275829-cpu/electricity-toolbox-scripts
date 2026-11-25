@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import { call } from "../api";
-import { Button, Check, Frame, Modal, Segments, choosePath } from "./controls";
+import { Button, Frame, Modal, Segments, choosePath } from "./controls";
 import { TextField } from "./PageForms";
 import { wpsConnectionStatus, copyTableRow, type Values } from "./types";
 
@@ -525,14 +525,6 @@ export function WpsEditor({
       });
       return;
     }
-    if (
-      !previewOnly &&
-      !(await ask("确认将所选配置的数据写入目标表格？写入完成后会回读核对。", {
-        title: "确认写入",
-        kind: "warning",
-      }))
-    )
-      return;
     try {
       const result = await execute(previewOnly ? "preview" : "run", {
         config: JSON.stringify(config),
@@ -793,13 +785,6 @@ export function WpsEditor({
             开始写入
           </Button>
         </div>
-        <Check
-          label="覆盖非空单元格"
-          value={config.overwrite !== false}
-          onChange={(overwrite) => {
-            void persist({ overwrite });
-          }}
-        />
       </Frame>
       {editing && (
         <DocumentEditor

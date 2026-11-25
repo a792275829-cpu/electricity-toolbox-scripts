@@ -82,6 +82,22 @@ class ServiceTaskTests(unittest.TestCase):
     def tearDown(self):
         self.service.registry.shutdown(timeout=5)
         self.temp.cleanup()
+
+    def test_wps_only_requires_confirmation_for_write(self):
+        params = dict(tool_id="wps-writer", values={})
+        for action in ("preview", "status", "login", "inspect"):
+            with self.subTest(action=action):
+                self.assertFalse(self.service.call("prepare_task", dict(params, action=action))["confirmation"])
+
+        write = dict(params, action="run", request_id="wps-write")
+        prepared = self.service.call("prepare_task", write)
+        self.assertIn("已有数据和公式", prepared["confirmation"])
+        with patch.object(self.service.registry, "start_callable") as start:
+            for confirmed in (None, False, "true"):
+                with self.subTest(confirmed=confirmed), self.assertRaisesRegex(ValueError, "确认"):
+                    self.service.call("start", dict(write, values=prepared["values"], confirmed=confirmed))
+            start.assert_not_called()
+
     def finish(self, task_id):
         deadline = time.monotonic() + 10
         while self.service.registry.has_running_tasks() and time.monotonic() < deadline:

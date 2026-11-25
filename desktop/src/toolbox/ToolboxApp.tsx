@@ -755,8 +755,11 @@ export function ToolboxApp({
       if (
         prepared.confirmation &&
         !(await ask(prepared.confirmation, {
-          title: "确认操作",
+          title: toolId === "wps-writer" ? "确认写入" : "确认操作",
           kind: "warning",
+          ...(toolId === "wps-writer"
+            ? { okLabel: "确认覆盖并写入", cancelLabel: "取消" }
+            : {}),
         }))
       )
         return null;

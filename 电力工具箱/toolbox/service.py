@@ -12,6 +12,7 @@ from pathlib import Path
 from toolbox_shared.credentials import CredentialStore
 from toolbox_shared.redaction import redact
 from toolbox_shared.storage import data_path
+from toolbox_shared.wps_config import WRITE_CONFIRMATION
 from .runtime import ToolPaths, TaskRegistry, python_executable, utf8_environment
 from .service_catalog import desktop_catalog
 from .tasks import ProcessRunner, ProcessExecutionError, TaskEvent, TaskEventKind
@@ -143,6 +144,8 @@ class ToolboxService:
 
     @staticmethod
     def confirmation(tool_id, action, p):
+        if tool_id == "wps-writer" and action == "run":
+            return WRITE_CONFIRMATION
         if tool_id == "private-batch-upload" and action == "run":
             return f"确认将 {len(p.get('files') or [])} 个文件上传到「{p.get('unit', '')}」？"
         if tool_id == "group-upload" and action == "run":
