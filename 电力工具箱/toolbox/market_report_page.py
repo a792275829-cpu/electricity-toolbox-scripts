@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from .file_dialogs import FileDialogState
 from .page_support import parse_date_input
 from .page_support import add_path_row, open_directory
 from .runtime import TaskRegistry, ToolPaths, python_executable
@@ -25,10 +26,11 @@ class MarketReportPage(ToolPage):
             title="南方分公司电力市场日报",
         )
         self.paths = paths
+        self.file_dialogs = FileDialogState(paths.file_dialog_settings)
         self.report_date = tk.StringVar(master=self)
-        self.day_report = tk.StringVar(master=self)
-        self.previous_report = tk.StringVar(master=self)
-        self.d2_report = tk.StringVar(master=self)
+        self.day_report = tk.StringVar(master=self, value=self.file_dialogs.last_file("market-report.day_report"))
+        self.previous_report = tk.StringVar(master=self, value=self.file_dialogs.last_file("market-report.previous_report"))
+        self.d2_report = tk.StringVar(master=self, value=self.file_dialogs.last_file("market-report.d2_report"))
         self.manual_market = tk.StringVar(master=self, value="")
         self.market_editor = None
         self._manual_date = self.report_date.get()
@@ -51,14 +53,14 @@ class MarketReportPage(ToolPage):
         self.date_hint.pack(side="left", padx=(10, 0))
 
         buttons = []
-        for row, label, variable, hook in (
-            (1, "D 日收益表", self.day_report, self.read_report_date),
-            (2, "D-1 日收益表", self.previous_report, None),
-            (3, "D-2 日收益表", self.d2_report, None),
+        for row, label, key, hook in (
+            (1, "D 日收益表", "day_report", self.read_report_date),
+            (2, "D-1 日收益表", "previous_report", None),
+            (3, "D-2 日收益表", "d2_report", None),
         ):
             buttons.append(add_path_row(
-                form, row=row, label=label, variable=variable,
-                command=lambda value=variable, callback=hook: self.choose_file(value, callback),
+                form, row=row, label=label, variable=getattr(self, key),
+                command=lambda field=key, callback=hook: self.choose_file(field, callback),
                 button_text="选择文件",
             ))
 
@@ -70,6 +72,8 @@ class MarketReportPage(ToolPage):
         self.manual_button = ttk.Button(self.actions, text="手动填写数据", command=self.open_market_editor)
         self.manual_button.pack(side="left", padx=(8, 0))
         self.register_busy_widgets(self.run_button, self.manual_button, *buttons)
+        if self.day_report.get():
+            self.read_report_date(Path(self.day_report.get()))
 
     def _clear_manual_on_date_change(self, *_):
         if self.report_date.get() == self._manual_date:
@@ -154,13 +158,17 @@ class MarketReportPage(ToolPage):
         initial = json.loads(self.manual_market.get()) if self.manual_market.get() else {}
         self.market_editor = MarketEditor(self, selected, initial, self.save_manual_market)
 
-    def choose_file(self, variable: tk.StringVar, on_selected=None) -> None:
+    def choose_file(self, field: str, on_selected=None) -> None:
+        variable = getattr(self, field)
+        key = f"market-report.{field}"
         selected = filedialog.askopenfilename(
-            parent=self, title="选择收益表 Excel", filetypes=[("Excel 工作簿", "*.xlsx")]
+            parent=self, title="选择收益表 Excel", filetypes=[("Excel 工作簿", "*.xlsx")],
+            initialdir=str(self.file_dialogs.initial_directory(key, variable.get())),
         )
         if not selected:
             return
         variable.set(selected)
+        self.file_dialogs.remember_file(key, selected)
         if on_selected is not None:
             on_selected(Path(selected))
 

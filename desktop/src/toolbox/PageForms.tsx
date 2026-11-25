@@ -192,26 +192,34 @@ export function PageForms(props: Props) {
         directory,
         multiple,
         saveFile,
+        directory || id === "private-batch-upload",
       );
       if (selected) {
+        const paths = Array.isArray(selected) ? selected : [selected];
+        const key = `${id}.${field}`;
         if (id === "group-upload" && field === "files") {
-          update(
-            await call("ui.group.inspect", {
-              files: Array.isArray(selected) ? selected : [selected],
-            }),
-          );
+          const inspected = await call<Values>("ui.group.inspect", {
+            files: paths,
+          });
+          update(inspected);
+          if (inspected._selection)
+            await call("ui.dialog.remember", {
+              key,
+              paths: inspected.files,
+              path: paths[0],
+            });
           return;
         }
-        update({
-          [field]: multiple
-            ? [
-                ...new Set([
-                  ...(v[field] ?? []),
-                  ...(Array.isArray(selected) ? selected : [selected]),
-                ]),
-              ]
-            : selected,
-        });
+        const value = multiple
+          ? [...new Set([...(v[field] ?? []), ...paths])]
+          : paths[0];
+        update({ [field]: value });
+        if (!directory && id !== "private-batch-upload")
+          await call("ui.dialog.remember", {
+            key,
+            path: paths[0],
+            ...(multiple ? { paths: value } : {}),
+          });
         if (id === "daily-pdf-parser" && field === "pdf_path")
           update({
             output_path: await call<string>("ui.daily.output", {
@@ -283,12 +291,20 @@ export function PageForms(props: Props) {
       </select>
     </div>
   );
+  const updateFiles = (paths: string[]) => {
+    update({ files: paths });
+    if (id !== "private-batch-upload")
+      void call("ui.dialog.remember", { key: `${id}.files`, paths }).catch(
+        (error) =>
+          message(String(error), { title: "保存文件选择失败", kind: "error" }),
+      );
+  };
   const remove = () =>
-    update({
-      files: (v.files ?? []).filter(
+    updateFiles(
+      (v.files ?? []).filter(
         (file: string) => !(v._selected_files ?? []).includes(file),
       ),
-    });
+    );
   const units = (
     <div className="form-options">
       <span>更新场站：</span>
@@ -530,7 +546,7 @@ export function PageForms(props: Props) {
         {!section && action("自动匹配D和D-2", autoMatch)}
         {!section && businessAction("开始分析")}
         {section && action("移除选中", remove)}
-        {action("清空列表", () => update({ files: [] }))}
+        {action("清空列表", () => updateFiles([]))}
         {!section && action("移除选中", remove)}
         {section && (
           <>

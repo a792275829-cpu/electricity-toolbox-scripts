@@ -117,7 +117,7 @@ class PrivateBatchUploadPage(ToolPage):
         if not selected:
             return
         self.apply_files([Path(item) for item in selected])
-        self.file_dialogs.remember_file("private_batch_upload", selected[0])
+        self.file_dialogs.remember_file("private_batch_upload", selected[0], directory_only=True)
 
     def apply_files(self, paths: list[Path]) -> None:
         files: list[Path] = []

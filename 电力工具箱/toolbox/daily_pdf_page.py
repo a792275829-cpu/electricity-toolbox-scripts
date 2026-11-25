@@ -33,8 +33,12 @@ class DailyPdfParserPage(ToolPage):
         )
         self.paths = paths
         self.file_dialogs = FileDialogState(paths.file_dialog_settings)
-        self.pdf_path = tk.StringVar(master=self)
-        self.output_path = tk.StringVar(master=self)
+        source = self.file_dialogs.last_file("daily-pdf-parser.pdf_path")
+        output = self.file_dialogs.last_file(
+            "daily-pdf-parser.output_path", default_output_for_pdf(source) if source else "", save=True,
+        )
+        self.pdf_path = tk.StringVar(master=self, value=source)
+        self.output_path = tk.StringVar(master=self, value=output)
         self.mode = tk.StringVar(master=self, value="both")
 
         self.run_button = ttk.Button(self.actions, text="解析并上传", command=self.start_parse)
@@ -117,7 +121,7 @@ class DailyPdfParserPage(ToolPage):
         selected = filedialog.askopenfilename(
             title="选择广东运行日报 PDF",
             initialdir=str(
-                self.file_dialogs.initial_directory("daily_pdf_input", self.pdf_path.get())
+                self.file_dialogs.initial_directory("daily-pdf-parser.pdf_path", self.pdf_path.get())
             ),
             filetypes=[("PDF 文件", "*.pdf"), ("所有文件", "*.*")],
             parent=self,
@@ -126,13 +130,15 @@ class DailyPdfParserPage(ToolPage):
             source = Path(selected)
             self.pdf_path.set(str(source))
             self.output_path.set(str(default_output_for_pdf(source)))
-            self.file_dialogs.remember_file("daily_pdf_input", source)
+            self.file_dialogs.remember_file(
+                "daily-pdf-parser.pdf_path", source, reset_key="daily-pdf-parser.output_path",
+            )
 
     def choose_output(self) -> None:
         current = self.output_path.get().strip()
         selected = filedialog.asksaveasfilename(
             title="保存解析结果",
-            initialdir=str(self.file_dialogs.initial_directory("daily_pdf_output", current)),
+            initialdir=str(self.file_dialogs.initial_directory("daily-pdf-parser.output_path", current)),
             initialfile=Path(current).name if current else "现货运行日报报价容量区间.xlsx",
             defaultextension=".xlsx",
             filetypes=[("Excel 工作簿", "*.xlsx")],
@@ -140,7 +146,7 @@ class DailyPdfParserPage(ToolPage):
         )
         if selected:
             self.output_path.set(selected)
-            self.file_dialogs.remember_file("daily_pdf_output", selected)
+            self.file_dialogs.remember_file("daily-pdf-parser.output_path", selected)
 
     def build_command(
         self,

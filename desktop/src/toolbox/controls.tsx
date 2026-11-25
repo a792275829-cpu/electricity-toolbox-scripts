@@ -159,6 +159,7 @@ export async function choosePath(
   directory = false,
   multiple = false,
   saveFile = false,
+  rememberDirectory = true,
 ): Promise<string | string[] | null> {
   const initial = await call<string>("ui.dialog.directory", { key, current });
   const options = {
@@ -169,11 +170,12 @@ export async function choosePath(
   const selected = saveFile
     ? await save(options)
     : await open({ ...options, directory, multiple });
-  if (selected)
+  if (rememberDirectory && selected)
     await call("ui.dialog.remember", {
       key,
       path: Array.isArray(selected) ? selected[0] : selected,
       directory,
+      directory_only: true,
     });
   return selected;
 }

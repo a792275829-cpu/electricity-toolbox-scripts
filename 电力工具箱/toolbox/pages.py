@@ -190,6 +190,7 @@ class TradeAnalysisPage(ToolPage):
         )
         scroll.grid(row=0, column=1, sticky="ns")
         self.listbox.configure(yscrollcommand=scroll.set)
+        self.set_files([Path(path) for path in self.file_dialogs.last_files("trade-analysis.files")])
 
         output = ttk.Frame(self.content)
         output.grid(row=2, column=0, sticky="ew")
@@ -241,7 +242,7 @@ class TradeAnalysisPage(ToolPage):
     def add_files(self) -> None:
         selected = filedialog.askopenfilenames(
             title="选择出清 Excel 文件",
-            initialdir=str(self.file_dialogs.initial_directory("trade_analysis_input")),
+            initialdir=str(self.file_dialogs.initial_directory("trade-analysis.files")),
             filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
             parent=self,
         )
@@ -253,16 +254,18 @@ class TradeAnalysisPage(ToolPage):
                 self.listbox.insert("end", str(path))
                 existing.add(path.resolve())
         if selected:
-            self.file_dialogs.remember_file("trade_analysis_input", selected[0])
+            self.file_dialogs.remember_files("trade-analysis.files", self.files, chosen=selected[0])
 
     def remove_selected(self) -> None:
         for index in reversed(self.listbox.curselection()):
             del self.files[index]
             self.listbox.delete(index)
+        self.file_dialogs.remember_files("trade-analysis.files", self.files)
 
     def clear_files(self) -> None:
         self.files.clear()
         self.listbox.delete(0, "end")
+        self.file_dialogs.remember_files("trade-analysis.files", self.files)
 
     def choose_output_dir(self) -> None:
         selected = filedialog.askdirectory(
@@ -320,10 +323,10 @@ class ReportPage(ToolPage):
         self.paths = paths
         self.file_dialogs = _file_dialog_state(paths)
         self.report_date = tk.StringVar(master=self, value=date.today().isoformat())
-        self.online_workbook = tk.StringVar(master=self)
-        self.day_ahead_workbook = tk.StringVar(master=self)
-        self.daily_workbook = tk.StringVar(master=self)
-        self.template_report = tk.StringVar(master=self)
+        self.online_workbook = tk.StringVar(master=self, value=self.file_dialogs.last_file("report.online_workbook"))
+        self.day_ahead_workbook = tk.StringVar(master=self, value=self.file_dialogs.last_file("report.day_ahead_workbook"))
+        self.daily_workbook = tk.StringVar(master=self, value=self.file_dialogs.last_file("report.daily_workbook"))
+        self.template_report = tk.StringVar(master=self, value=self.file_dialogs.last_file("report.template_report"))
         self.fetch_data = tk.BooleanVar(master=self, value=True)
         self.generate_word = tk.BooleanVar(master=self, value=True)
 
@@ -344,21 +347,21 @@ class ReportPage(ToolPage):
                 row=1,
                 label="前一日 Excel（上网电量）",
                 variable=self.online_workbook,
-                command=lambda: self.choose_excel(self.online_workbook),
+                command=lambda: self.choose_excel("online_workbook"),
             ),
             _add_path_row(
                 form,
                 row=2,
                 label="报告日 Excel（日前电量/价格）",
                 variable=self.day_ahead_workbook,
-                command=lambda: self.choose_excel(self.day_ahead_workbook),
+                command=lambda: self.choose_excel("day_ahead_workbook"),
             ),
             _add_path_row(
                 form,
                 row=3,
                 label="前两日 Excel（日清数据）",
                 variable=self.daily_workbook,
-                command=lambda: self.choose_excel(self.daily_workbook),
+                command=lambda: self.choose_excel("daily_workbook"),
             ),
             _add_path_row(
                 form,
@@ -438,25 +441,27 @@ class ReportPage(ToolPage):
                 parent=self,
             )
 
-    def choose_excel(self, variable: tk.StringVar) -> None:
+    def choose_excel(self, field: str) -> None:
+        variable = getattr(self, field)
+        key = f"report.{field}"
         selected = filedialog.askopenfilename(
             title="选择 Excel 文件",
             initialdir=str(
-                self.file_dialogs.initial_directory("report_excel", variable.get())
+                self.file_dialogs.initial_directory(key, variable.get())
             ),
             filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
             parent=self,
         )
         if selected:
             variable.set(selected)
-            self.file_dialogs.remember_file("report_excel", selected)
+            self.file_dialogs.remember_file(key, selected)
 
     def choose_template(self) -> None:
         selected = filedialog.askopenfilename(
             title="选择 Word 模板",
             initialdir=str(
                 self.file_dialogs.initial_directory(
-                    "report_template", self.template_report.get()
+                    "report.template_report", self.template_report.get()
                 )
             ),
             filetypes=[("Word 文件", "*.docx"), ("所有文件", "*.*")],
@@ -464,7 +469,7 @@ class ReportPage(ToolPage):
         )
         if selected:
             self.template_report.set(selected)
-            self.file_dialogs.remember_file("report_template", selected)
+            self.file_dialogs.remember_file("report.template_report", selected)
 
     def _execute_command(self, command: list[str], token: CancellationToken) -> None:
         self.append_log(f"> {' '.join(command)}")
@@ -599,7 +604,14 @@ class GroupUploadPage(ToolPage):
         self.register_busy_widgets(
             self.choose_button, self.upload_button
         )
-        self.auto_select_energy_file(today or date.today())
+        saved = [Path(path) for path in self.file_dialogs.last_files("group-upload.files")]
+        if saved:
+            try:
+                self.apply_selected_paths(saved)
+            except Exception as exc:
+                self.append_log(f"上次选择的文件校验失败：{exc}")
+        else:
+            self.auto_select_energy_file(today or date.today())
 
     @staticmethod
     def find_latest_energy_file_for_date(
@@ -653,7 +665,7 @@ class GroupUploadPage(ToolPage):
         selected = filedialog.askopenfilename(
             title="选择能销数据（省内数据自动生成）",
             initialdir=str(
-                self.file_dialogs.initial_directory("group_upload_input")
+                self.file_dialogs.initial_directory("group-upload.files")
             ),
             filetypes=[("Excel 文件", "*.xlsx *.xls"), ("所有文件", "*.*")],
             parent=self,
@@ -666,7 +678,7 @@ class GroupUploadPage(ToolPage):
         except Exception as exc:
             messagebox.showerror("文件校验失败", str(exc), parent=self)
             return
-        self.file_dialogs.remember_file("group_upload_input", selected)
+        self.file_dialogs.remember_file("group-upload.files", selected)
 
     def confirm_upload(self) -> None:
         if not self.selected_paths:
@@ -747,11 +759,9 @@ class MarketTableUpdatePage(ToolPage):
         self.end_date = tk.StringVar(master=self, value=default_date)
         self.workbook = tk.StringVar(
             master=self,
-            value=str(
-                Path.home()
-                / "Desktop"
-                / "日常工作"
-                / "现货统调市场出清、结算数据2026.xlsx"
+            value=self.file_dialogs.last_file(
+                "market-table.workbook",
+                Path.home() / "Desktop" / "日常工作" / "现货统调市场出清、结算数据2026.xlsx",
             ),
         )
         self.overwrite = tk.BooleanVar(master=self, value=True)
@@ -831,14 +841,14 @@ class MarketTableUpdatePage(ToolPage):
         selected = filedialog.askopenfilename(
             title="选择市场 Excel",
             initialdir=str(
-                self.file_dialogs.initial_directory("market_workbook", self.workbook.get())
+                self.file_dialogs.initial_directory("market-table.workbook", self.workbook.get())
             ),
             filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
             parent=self,
         )
         if selected:
             self.workbook.set(selected)
-            self.file_dialogs.remember_file("market_workbook", selected)
+            self.file_dialogs.remember_file("market-table.workbook", selected)
 
     def start_update(self) -> None:
         try:

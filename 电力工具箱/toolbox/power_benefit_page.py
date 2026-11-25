@@ -16,6 +16,7 @@ from .widgets import ToolPage
 
 
 DEFAULT_DIRECTORY = Path.home() / "Desktop" / "日常工作"
+WORKBOOK_FIELDS = ("guihu_workbook", "tuolian_workbook", "haifeng_workbook")
 DEFAULT_NAMES = ("功率预测调整收益统计-归湖.xlsx", "功率预测调整收益统计-鮀莲(2)(2).xlsx", "海风博弈收益统计-新.xlsx")
 
 
@@ -26,8 +27,10 @@ class PowerBenefitUpdatePage(ToolPage):
         super().__init__(parent, registry=registry, title="功率调整收益统计表更新")
         self.paths = paths
         self.file_dialogs = FileDialogState(paths.file_dialog_settings)
-        self.workbooks = [tk.StringVar(master=self, value=str(DEFAULT_DIRECTORY / name))
-                          for name in DEFAULT_NAMES]
+        self.workbooks = [
+            tk.StringVar(master=self, value=self.file_dialogs.last_file(f"power-benefit.{field}", DEFAULT_DIRECTORY / name))
+            for field, name in zip(WORKBOOK_FIELDS, DEFAULT_NAMES)
+        ]
         self.selected = [tk.BooleanVar(master=self, value=False) for _ in DEFAULT_NAMES]
         self.start_date = tk.StringVar(master=self, value="")
         self.end_date = tk.StringVar(master=self, value=(today or date.today()).isoformat())
@@ -79,7 +82,7 @@ class PowerBenefitUpdatePage(ToolPage):
         self.register_busy_widgets(*buttons, *self.station_checkbuttons, self.update_button)
 
     def choose_workbook(self, index: int) -> None:
-        key = f"power_benefit_{index}"
+        key = f"power-benefit.{WORKBOOK_FIELDS[index]}"
         selected = filedialog.askopenfilename(
             title="选择功率预测调整收益统计工作簿", parent=self,
             initialdir=str(self.file_dialogs.initial_directory(key, self.workbooks[index].get())),

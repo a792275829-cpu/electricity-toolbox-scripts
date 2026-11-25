@@ -12,6 +12,7 @@ from toolbox_shared.dates import normalize_date_input, parse_date_input
 from toolbox_shared.storage import data_path
 from .runtime import load_module
 from .file_dialogs import FileDialogState
+from .file_rules import default_output_for_pdf
 
 
 class WebUI:
@@ -31,11 +32,33 @@ class WebUI:
                 "summary-upload": {"mode":"summary", "input_dir":str(Path.home()/"Desktop/日常工作/复盘"/f"{(date.today()+timedelta(days=1)).month}-{(date.today()+timedelta(days=1)).day}")},
                 "guangdong-price": {"master_workbook":str(self.paths.guangdong_price_master_workbook),"prediction_output_dir":str(self.paths.guangdong_prediction_output_dir)},
             }
+            initial = {}
             for tool in catalog:
+                tool_id = tool["id"]
+                values = initial.setdefault(tool_id, {})
                 for field in tool["fields"]:
-                    if field["key"] in overrides.get(tool["id"], {}): field["default"] = overrides[tool["id"]][field["key"]]
+                    key = field["key"]
+                    if key in overrides.get(tool_id, {}):
+                        field["default"] = overrides[tool_id][key]
+                    if tool_id == "private-batch-upload":
+                        continue
+                    preference = f"{tool_id}.{key}"
+                    if field["kind"] == "file":
+                        values[key] = self.dialogs.last_file(preference, field["default"])
+                    elif field["kind"] == "files":
+                        values[key] = self.dialogs.last_files(preference)
+                    elif field["kind"] == "save":
+                        values[key] = self.dialogs.last_file(preference, field["default"], save=True)
+            daily = initial["daily-pdf-parser"]
+            if daily["pdf_path"] and not daily["output_path"]:
+                daily["output_path"] = str(default_output_for_pdf(daily["pdf_path"]))
+            group = initial["group-upload"]
+            initial["group-upload"] = self.call(
+                "ui.group.inspect", group if group["files"] else
+                self.service.call("auto_match", {"tool_id": "group-upload"}),
+            )
             directories = {"online-energy":self.service.call("online_energy.settings",{})["output_dir"],"wind-forecast":self.paths.wind_forecast_output_dir,"market-report":self.paths.market_report_output_dir,"report":data_path(self.paths.report_root/"输出")}
-            return dict(catalog=catalog, initial={"group-upload":self.call("ui.group.inspect",self.service.call("auto_match",{"tool_id":"group-upload"}))}, directories={key:str(value) for key,value in directories.items()}, version=os.environ.get("TOOLBOX_APP_VERSION","0.1.35"))
+            return dict(catalog=catalog, initial=initial, directories={key:str(value) for key,value in directories.items()}, version=os.environ.get("TOOLBOX_APP_VERSION","0.1.35"))
         if method == "ui.credentials.load":
             saved = self.store.load()
             return dict(username=saved.get("username",""),password=saved.get("password",""))
@@ -54,8 +77,20 @@ class WebUI:
         if method == "ui.dialog.directory":
             return str(self.dialogs.initial_directory(str(params["key"]),params.get("current")))
         if method == "ui.dialog.remember":
-            function = self.dialogs.remember_directory if params.get("directory") else self.dialogs.remember_file
-            function(str(params["key"]),str(params["path"]))
+            key = str(params["key"])
+            path = params.get("path")
+            if params.get("directory"):
+                self.dialogs.remember_directory(key, path)
+            elif params.get("directory_only") or key.startswith("private-batch-upload."):
+                if path:
+                    self.dialogs.remember_file(key, path, directory_only=True)
+            elif "paths" in params:
+                self.dialogs.remember_files(key, params["paths"], chosen=path)
+            else:
+                self.dialogs.remember_file(
+                    key, path,
+                    reset_key="daily-pdf-parser.output_path" if key == "daily-pdf-parser.pdf_path" else None,
+                )
             return True
         if method == "ui.diagnostics":
             from .diagnostics import diagnose_environment, diagnose_path
@@ -71,7 +106,6 @@ class WebUI:
             except Exception as exc:
                 return dict(files=[str(path) for path in paths],_summary=f"文件校验失败：{exc}")
         if method == "ui.daily.output":
-            from .file_rules import default_output_for_pdf
             return str(default_output_for_pdf(params["path"]))
         if method == "ui.business.directory":
             text = str(params["path"]).strip()
@@ -98,7 +132,6 @@ class WebUI:
                 if not text: raise ValueError("请先选择输出目录")
                 return str(Path(text).expanduser().resolve())
             if tool == "daily-pdf-parser":
-                from .file_rules import default_output_for_pdf
                 text = values.get("output_path") or (default_output_for_pdf(values["pdf_path"]) if values.get("pdf_path") else "")
             elif tool in {"transaction-info", "market-table"}:
                 text = values.get("workbook", "")
@@ -139,6 +172,8 @@ class WebUI:
             while True:
                 try: applied = str(self.browser.applied.get_nowait())
                 except queue.Empty: break
+            if applied:
+                self.dialogs.remember_file("section-analysis.topology_path", applied)
             return dict(dirty=self.browser.dirty,closed=self.browser.closed,applied=applied)
         if method == "ui.logs.save":
             from toolbox_shared.redaction import redact

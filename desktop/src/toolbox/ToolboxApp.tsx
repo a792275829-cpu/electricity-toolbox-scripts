@@ -602,6 +602,26 @@ export function ToolboxApp({
             ]),
           ),
         );
+        const restoredDayReport = data.initial?.["market-report"]?.day_report;
+        if (restoredDayReport)
+          void call<string>("ui.market.report_date", {
+            path: restoredDayReport,
+          })
+            .then((day) =>
+              setForms((previous) => {
+                const report = previous["market-report"];
+                if (
+                  report.day_report !== restoredDayReport ||
+                  report._report_date
+                )
+                  return previous;
+                return {
+                  ...previous,
+                  "market-report": { ...report, _report_date: day },
+                };
+              }),
+            )
+            .catch(() => {}); // The report action can show a file-specific error.
         setTasks(history);
         history.filter(terminal).forEach((task) => ended.current.add(task.id));
         setWps(config);

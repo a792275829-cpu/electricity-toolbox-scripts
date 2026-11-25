@@ -42,7 +42,10 @@ class SectionAnalysisPage(ToolPage):
         )
         self.topology_path = tk.StringVar(
             master=self,
-            value=str(applied_path() if applied_path().exists() else paths.section_analysis_topology),
+            value=self.file_dialogs.last_file(
+                "section-analysis.topology_path",
+                applied_path() if applied_path().exists() else paths.section_analysis_topology,
+            ),
         )
 
         self.add_button = FileSelectButton(self.actions, text="添加电价文件", command=self.add_files)
@@ -74,6 +77,7 @@ class SectionAnalysisPage(ToolPage):
         scrollbar = ttk.Scrollbar(files_frame, orient="vertical", command=self.listbox.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.listbox.configure(yscrollcommand=scrollbar.set)
+        self.set_files([Path(path) for path in self.file_dialogs.last_files("section-analysis.files")])
 
         settings = ttk.LabelFrame(self.content, text="分析设置", padding=12)
         settings.grid(row=1, column=0, sticky="ew", pady=(10, 0))
@@ -136,6 +140,7 @@ class SectionAnalysisPage(ToolPage):
             except queue.Empty:
                 break
             self.topology_path.set(str(path))
+            self.file_dialogs.remember_file("section-analysis.topology_path", path)
             self.append_log('浏览器编辑的拓扑已应用，后续分析使用该快照。')
         self._browser_poll_id = self.after(250, self._poll_browser_editor)
 
@@ -157,7 +162,7 @@ class SectionAnalysisPage(ToolPage):
     def add_files(self) -> None:
         selected = filedialog.askopenfilenames(
             title="选择节点电价 Excel",
-            initialdir=str(self.file_dialogs.initial_directory("section_analysis_input")),
+            initialdir=str(self.file_dialogs.initial_directory("section-analysis.files")),
             filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
             parent=self,
         )
@@ -169,16 +174,18 @@ class SectionAnalysisPage(ToolPage):
                 self.listbox.insert("end", str(path))
                 existing.add(path.resolve())
         if selected:
-            self.file_dialogs.remember_file("section_analysis_input", selected[0])
+            self.file_dialogs.remember_files("section-analysis.files", self.files, chosen=selected[0])
 
     def remove_selected(self) -> None:
         for index in reversed(self.listbox.curselection()):
             del self.files[index]
             self.listbox.delete(index)
+        self.file_dialogs.remember_files("section-analysis.files", self.files)
 
     def clear_files(self) -> None:
         self.files.clear()
         self.listbox.delete(0, "end")
+        self.file_dialogs.remember_files("section-analysis.files", self.files)
 
     def choose_topology(self) -> None:
         selected = filedialog.askopenfilename(
@@ -189,6 +196,7 @@ class SectionAnalysisPage(ToolPage):
         )
         if selected:
             self.topology_path.set(selected)
+            self.file_dialogs.remember_file("section-analysis.topology_path", selected)
 
     def choose_output_root(self) -> None:
         selected = filedialog.askdirectory(

@@ -55,6 +55,65 @@ class WebUITests(unittest.TestCase):
         self.service.call('ui.dialog.remember', {'key':'test','path':str(path)})
         self.assertEqual(self.service.call('ui.dialog.directory', {'key':'test'}), str(self.data))
         path.unlink()  # workbook handle was closed
+
+    def test_bootstrap_restores_file_fields_and_excludes_private_upload(self):
+        def choose(key, **selection):
+            self.service.call('ui.dialog.remember', {'key': key, **selection})
+
+        boot = self.service.call('ui.bootstrap', {})
+        expected = {}
+        for tool in boot['catalog']:
+            for field in tool['fields']:
+                kind = field['kind']
+                if kind not in ('file', 'files', 'save'):
+                    continue
+                tool_id, field_key = tool['id'], field['key']
+                key = f'{tool_id}.{field_key}'
+                if tool_id == 'group-upload':
+                    path = self.data / '广东-能销数据-20261023.xlsx'
+                else:
+                    path = self.data / f'{key}.{field["extensions"][0]}'
+                if kind != 'save':
+                    path.touch()
+                if kind == 'files':
+                    second = self.data / f'{key}-2.xlsx'
+                    second.touch()
+                    paths = [str(path)] if tool_id == 'group-upload' else [str(path), str(second)]
+                    choose(key, path=str(path), paths=paths)
+                    if tool_id == 'private-batch-upload':
+                        self.assertEqual(self.service.call('ui.dialog.directory', {'key': key}), str(self.data))
+                        continue
+                    value = paths
+                else:
+                    choose(key, path=str(path))
+                    value = str(path)
+                if key == 'daily-pdf-parser.output_path':
+                    self.assertFalse(path.exists())
+                expected.setdefault(tool_id, {})[field_key] = value
+
+        restarted = ToolboxService(ROOT)
+        try:
+            restored = restarted.call('ui.bootstrap', {})['initial']
+        finally:
+            restarted.call('shutdown', {'cancel': True})
+        for tool_id, fields in expected.items():
+            for key, value in fields.items():
+                self.assertEqual(restored[tool_id][key], value)
+        self.assertEqual(restored['private-batch-upload'], {})
+        self.assertIn('2026-10-23', restored['group-upload']['_summary'])
+
+        trade = expected['trade-analysis']['files']
+        Path(trade[0]).unlink()
+        restored = self.service.call('ui.bootstrap', {})['initial']
+        self.assertEqual(restored['trade-analysis']['files'], trade[1:])
+        choose('trade-analysis.files', paths=[])
+        source = self.data / '新的日报.pdf'
+        source.touch()
+        choose('daily-pdf-parser.pdf_path', path=str(source))
+        restored = self.service.call('ui.bootstrap', {})['initial']
+        self.assertEqual(restored['trade-analysis']['files'], [])
+        self.assertEqual(restored['daily-pdf-parser']['output_path'],
+                         str(self.data / '现货运行日报报价容量区间新的日报.xlsx'))
     def test_shared_contracts_and_manual_fields(self):
         self.assertFalse(self.service.call('ui.requires_credentials', {'tool_id':'trade-analysis'}))
         self.assertTrue(self.service.call('ui.requires_credentials', {'tool_id':'online-energy'}))

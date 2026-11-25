@@ -43,9 +43,9 @@ class SpotPriceUpdatePage(ToolPage):
             master=self, value=(current_date - timedelta(days=1)).isoformat()
         )
         self.end_date = tk.StringVar(master=self, value=current_date.isoformat())
-        self.guihu_workbook = tk.StringVar(master=self, value=str(DEFAULT_GUIHU_WORKBOOK))
-        self.tuolian_workbook = tk.StringVar(master=self, value=str(DEFAULT_TUOLIAN_WORKBOOK))
-        self.haifeng_workbook = tk.StringVar(master=self, value=str(DEFAULT_HAIFENG_WORKBOOK))
+        self.guihu_workbook = tk.StringVar(master=self, value=self.file_dialogs.last_file("spot-price.guihu_workbook", DEFAULT_GUIHU_WORKBOOK))
+        self.tuolian_workbook = tk.StringVar(master=self, value=self.file_dialogs.last_file("spot-price.tuolian_workbook", DEFAULT_TUOLIAN_WORKBOOK))
+        self.haifeng_workbook = tk.StringVar(master=self, value=self.file_dialogs.last_file("spot-price.haifeng_workbook", DEFAULT_HAIFENG_WORKBOOK))
         self.station_workbooks = {
             "归湖": self.guihu_workbook,
             "鮀莲": self.tuolian_workbook,
@@ -70,7 +70,7 @@ class SpotPriceUpdatePage(ToolPage):
             row=1,
             label="归湖工作簿",
             variable=self.guihu_workbook,
-            command=lambda: self.choose_workbook("归湖", self.guihu_workbook, "spot_price_guihu"),
+            command=lambda: self.choose_workbook("归湖", self.guihu_workbook, "spot-price.guihu_workbook"),
             button_text="选择文件",
         )
         self.tuolian_button = add_path_row(
@@ -78,7 +78,7 @@ class SpotPriceUpdatePage(ToolPage):
             row=2,
             label="鮀莲工作簿",
             variable=self.tuolian_workbook,
-            command=lambda: self.choose_workbook("鮀莲", self.tuolian_workbook, "spot_price_tuolian"),
+            command=lambda: self.choose_workbook("鮀莲", self.tuolian_workbook, "spot-price.tuolian_workbook"),
             button_text="选择文件",
         )
         self.haifeng_button = add_path_row(
@@ -86,7 +86,7 @@ class SpotPriceUpdatePage(ToolPage):
             row=3,
             label="海风工作簿",
             variable=self.haifeng_workbook,
-            command=lambda: self.choose_workbook("海风", self.haifeng_workbook, "spot_price_haifeng"),
+            command=lambda: self.choose_workbook("海风", self.haifeng_workbook, "spot-price.haifeng_workbook"),
             button_text="选择文件",
         )
 

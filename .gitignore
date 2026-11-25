@@ -7,6 +7,7 @@
 **/upload.config.json
 **/wps_excel_to_kdocs_config.json
 **/file_dialog_settings.json
+**/file_dialog_settings.lock
 **/.browser-profile/
 南方分公司电力市场日报/.state/
 **/.browser-profile-uploader/

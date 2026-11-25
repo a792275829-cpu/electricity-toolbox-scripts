@@ -38,7 +38,7 @@ class TransactionInfoUpdatePage(ToolPage):
         )
         self.paths = paths
         self.file_dialogs = FileDialogState(paths.file_dialog_settings)
-        self.workbook = tk.StringVar(master=self, value=str(DEFAULT_WORKBOOK))
+        self.workbook = tk.StringVar(master=self, value=self.file_dialogs.last_file("transaction-info.workbook", DEFAULT_WORKBOOK))
         self.start_date = tk.StringVar(master=self, value="")
         self.end_date = tk.StringVar(
             master=self, value=(today or date.today()).isoformat()
@@ -108,7 +108,7 @@ class TransactionInfoUpdatePage(ToolPage):
             title="选择交易系统信息收集工作簿",
             initialdir=str(
                 self.file_dialogs.initial_directory(
-                    "transaction_info_workbook", self.workbook.get()
+                    "transaction-info.workbook", self.workbook.get()
                 )
             ),
             filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
@@ -116,7 +116,7 @@ class TransactionInfoUpdatePage(ToolPage):
         )
         if selected:
             self.workbook.set(selected)
-            self.file_dialogs.remember_file("transaction_info_workbook", selected)
+            self.file_dialogs.remember_file("transaction-info.workbook", selected)
 
     def build_update_command(
         self,

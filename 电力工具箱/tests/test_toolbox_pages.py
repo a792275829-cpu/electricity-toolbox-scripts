@@ -50,6 +50,43 @@ class PageAdapterTests(unittest.TestCase):
             destroy_tk(self.root)
             gc.collect()  # Tk variables must be finalized on the main thread.
 
+    def test_file_selection_is_restored_per_field_when_pages_reopen(self) -> None:
+        from toolbox.pages import ReportPage, TradeAnalysisPage
+        from toolbox.runtime import ToolPaths
+
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            first, second = folder / "前一日.xlsx", folder / "报告日.xlsx"
+            first.touch()
+            second.touch()
+            with mock.patch.object(ToolPaths, "file_dialog_settings", folder / "dialogs.json"):
+                report = ReportPage(self.root, self.paths, self.registry)
+                with mock.patch("toolbox.pages.filedialog.askopenfilename", side_effect=[str(first), str(second), ""]):
+                    report.choose_excel("online_workbook")
+                    report.choose_excel("day_ahead_workbook")
+                    report.choose_excel("online_workbook")
+                report.destroy()
+                report = ReportPage(self.root, self.paths, self.registry)
+                self.assertEqual(report.online_workbook.get(), str(first))
+                self.assertEqual(report.day_ahead_workbook.get(), str(second))
+                self.assertEqual(report.daily_workbook.get(), "")
+
+                trade = TradeAnalysisPage(self.root, self.paths, self.registry)
+                with mock.patch("toolbox.pages.filedialog.askopenfilenames", return_value=(str(first), str(second))):
+                    trade.add_files()
+                trade.destroy()
+                trade = TradeAnalysisPage(self.root, self.paths, self.registry)
+                self.assertEqual(trade.listbox.get(0, "end"), (str(first), str(second)))
+                trade.listbox.selection_set(0)
+                trade.remove_selected()
+                trade.destroy()
+                trade = TradeAnalysisPage(self.root, self.paths, self.registry)
+                self.assertEqual(trade.files, [second])
+                trade.clear_files()
+                trade.destroy()
+                trade = TradeAnalysisPage(self.root, self.paths, self.registry)
+                self.assertEqual(trade.files, [])
+
     def test_core_pages_build_expected_paths_and_commands(self) -> None:
         from toolbox.pages import (
             OnlineEnergyPage,
