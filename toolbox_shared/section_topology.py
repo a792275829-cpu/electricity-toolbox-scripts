@@ -15,14 +15,17 @@ import math
 import os
 from pathlib import Path
 import re
+import subprocess
 import tempfile
 import unicodedata
+import warnings
 from uuid import uuid4
 
 from toolbox_shared.section_schema import (
     _column_map, normalize_price_node_name, parse_topology_edges, price_node_voltage,
 )
 from toolbox_shared.storage import WORKSPACE_ROOT, data_path
+from toolbox_shared.workbook_commit import workbook_identity
 
 MODULE = WORKSPACE_ROOT / '500kV断面分析'
 
@@ -60,28 +63,68 @@ def _number(value):
     return value
 
 
+def _catalog_rows(book, path, source_identity):
+    # The editor imports this module on startup, before a workbook is selected.
+    from toolbox_shared.native_excel import native_binary, price_backend_mode, read_price_sheets
+
+    mode = price_backend_mode()
+    binary = native_binary() if mode != 'python' else None
+    if binary is None and mode == 'rust':
+        raise RuntimeError('未安装 500kV Rust Excel 后端，请先运行 native/price-xlsx/build.py')
+    if binary is not None:
+        try:
+            native = read_price_sheets(binary, path, topology=True)
+            if workbook_identity(path.stat()) != source_identity:
+                raise RuntimeError(f'读取期间节点电价表已修改：{path}')
+            sheets = {sheet['name']: sheet for sheet in native}
+            if any(sheet.title not in sheets for sheet in book.worksheets):
+                raise ValueError('Rust 工作表列表不完整')
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            if mode == 'rust':
+                raise
+            detail = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+            warnings.warn(f'500kV Rust 拓扑读取不可用，改用 Python: {detail}', RuntimeWarning)
+        else:
+            for sheet in book.worksheets:
+                data = sheets[sheet.title]
+                first_row = data['row_offset'] + 1
+                # Respect the same declared dimensions as the read-only Python reader.
+                max_row, max_col = sheet.max_row, sheet.max_column
+                rows = (
+                    (number, row[:max_col] if max_col and len(row) > max_col else row)
+                    for number, row in enumerate(data['rows'], first_row)
+                    if max_row is None or number <= max_row
+                )
+                yield sheet.title, rows
+            return
+    for sheet in book.worksheets:
+        yield sheet.title, enumerate(sheet.iter_rows(values_only=True), 1)
+
+
 def read_catalog(path: Path) -> dict:
     """Read every eligible sheet; deduplicate by station, voltage and full curve."""
     # 界面启动会导入本模块取 applied_path()；Excel 读取只在真正导入
     # 拓扑工作簿时加载 openpyxl，避免在 UI 线程拉起重依赖。
     from openpyxl import load_workbook
 
+    path = Path(path)
+    source_identity = workbook_identity(path.stat())
     book = load_workbook(path, read_only=True, data_only=True)
     headers = None
     unique = {}
     rows_read = 0
     ignored = 0
     try:
-        for sheet in book.worksheets:
+        for sheet_name, rows in _catalog_rows(book, path, source_identity):
             columns = None
-            for row_number, row in enumerate(sheet.iter_rows(values_only=True), 1):
+            for row_number, row in rows:
                 if columns is None:
                     columns = _column_map(row)
                     if columns:
                         pairs = sorted(zip(columns['time_headers'], columns['time_columns']))
                         current = [t for t, _ in pairs]
                         if len(set(current)) != len(current):
-                            raise ValueError(f'{sheet.title} 存在重复时点')
+                            raise ValueError(f'{sheet_name} 存在重复时点')
                         if headers is not None and headers != current:
                             raise ValueError('各工作表的分时时点不一致，无法同步')
                         headers = current
@@ -95,11 +138,11 @@ def read_catalog(path: Path) -> dict:
                     continue
                 station = station_name(raw)
                 if not station:
-                    raise ValueError(f'{sheet.title} 第 {row_number} 行无法识别站名')
+                    raise ValueError(f'{sheet_name} 第 {row_number} 行无法识别站名')
                 try:
                     curve = [_number(row[i] if i < len(row) else None) for _, i in pairs]
                 except ValueError as exc:
-                    raise ValueError(f'{sheet.title} 第 {row_number} 行：{exc}') from exc
+                    raise ValueError(f'{sheet_name} 第 {row_number} 行：{exc}') from exc
                 key = (station, voltage, tuple(curve))
                 # Keep identity fingerprints, never a list of source names.
                 fingerprint = hashlib.sha256(unicodedata.normalize('NFKC', raw).encode()).hexdigest()
@@ -117,7 +160,7 @@ def read_catalog(path: Path) -> dict:
         n['keys'].sort()
         n['curve_headers'] = headers
     return dict(headers=headers, entries=entries, rows=rows_read,
-                duplicates=rows_read-len(entries), ignored=ignored, source=Path(path).name)
+                duplicates=rows_read-len(entries), ignored=ignored, source=path.name)
 
 
 def seed_catalog() -> dict:

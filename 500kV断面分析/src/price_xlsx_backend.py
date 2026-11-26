@@ -17,17 +17,12 @@ from openpyxl.cell.cell import ERROR_CODES
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def backend_mode() -> str:
-    mode = os.environ.get("TOOLBOX_500KV_BACKEND", "auto")
-    if mode not in {"auto", "python", "rust"}:
-        raise ValueError(f"未知 500kV Excel 后端: {mode}")
-    return mode
-
-
 # Shared transport also serves summary and market-report readers.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from toolbox_shared.native_excel import native_binary, call as _call
+from toolbox_shared.native_excel import (
+    call as _call, native_binary, price_backend_mode as backend_mode, read_price_sheets,
+)
 
 
 def _fallback_warning(operation, exc):
@@ -113,15 +108,8 @@ def open_price_workbooks(path: Path):
         raise RuntimeError("未安装 500kV Rust Excel 后端，请先运行 native/price-xlsx/build.py")
     if binary is not None:
         try:
-            response = _call(binary, "read", path)
-            if not isinstance(response.get("sheets"), list) or any(
-                not isinstance(s, dict) or not isinstance(s.get("name"), str)
-                or not isinstance(s.get("rows"), list)
-                or any(not isinstance(row, list) for row in s["rows"])
-                for s in response["sheets"]
-            ):
-                raise ValueError("500kV Rust Excel 返回格式不正确")
-            source = PriceWorkbook(binary, [PriceSheet(s["name"], s["rows"]) for s in response["sheets"]])
+            sheets = read_price_sheets(binary, path)
+            source = PriceWorkbook(binary, [PriceSheet(s["name"], s["rows"]) for s in sheets])
             return source, PriceWorkbook(binary)
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             if mode == "rust":

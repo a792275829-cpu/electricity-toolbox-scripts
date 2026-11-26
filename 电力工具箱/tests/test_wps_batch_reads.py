@@ -1,5 +1,7 @@
 from __future__ import annotations
 import importlib
+import os
+import zipfile
 
 import tempfile
 import unittest
@@ -10,11 +12,11 @@ from unittest import mock
 from openpyxl import Workbook
 
 from toolbox.runtime import load_module
+from toolbox_shared import native_excel
 
 
 class WpsBatchReadTests(unittest.TestCase):
     def test_uncached_formula_stops_but_cached_zero_and_empty_string_are_valid(self):
-        import zipfile
         module = importlib.import_module('toolbox_shared.wps_service')
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / 'formula.xlsx'
@@ -35,6 +37,91 @@ class WpsBatchReadTests(unittest.TestCase):
                 with zipfile.ZipFile(source, 'w') as archive:
                     for name, data in files.items(): archive.writestr(name, data)
                 self.assertEqual(module.read_excel_range(source, 'Sheet', 'A1')[0], [[expected]])
+
+    @unittest.skipUnless(native_excel.native_binary(), "build native/price-xlsx first")
+    def test_native_checks_multiple_worksheet_parts_and_shared_formula_anchors(self):
+        from toolbox_shared import wps_service as service
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "source.xlsx"
+            book = Workbook()
+            first = book.active
+            first.title = "首张"
+            first.append(["=1-1", '=""', 42])
+            second = book.create_sheet("第二张")
+            second["B2"] = "=1+2"
+            book.save(path)
+            book.close()
+
+            with zipfile.ZipFile(path) as archive:
+                files = {name: archive.read(name) for name in archive.namelist()}
+            first = "xl/worksheets/sheet1.xml"
+            second = "xl/worksheets/sheet2.xml"
+            files[first] = files[first].replace(b'<f>1-1</f><v></v>', b'<f>1-1</f><v>0</v>')
+            files[first] = files[first].replace(b'<c r="B1">', b'<c r="B1" t="str">')
+            files[second] = files[second].replace(
+                b'<f>1+2</f>', b'<f t="shared" si="0" ref="$B$2:$C$4">1+2</f>',
+            )
+            with zipfile.ZipFile(path, "w") as archive:
+                for name, data in files.items():
+                    archive.writestr(name, data)
+
+            requests = [("首张", "C1"), ("第二张", "A1"), ("首张", "A1:B1")]
+            with mock.patch.dict(os.environ, TOOLBOX_WPS_FORMULA_BACKEND="python"):
+                reference = service.read_excel_ranges(path, requests)
+            with mock.patch.dict(os.environ, TOOLBOX_WPS_FORMULA_BACKEND="auto"), \
+                 mock.patch.object(service, "WPS_FORMULA_NATIVE_MIN_BYTES", 1), \
+                 mock.patch.object(native_excel, "call", wraps=native_excel.call) as call:
+                self.assertEqual(service.read_excel_ranges(path, requests), reference)
+                call.assert_called_once()
+                self.assertEqual([item["part"] for item in call.call_args.kwargs["payload"]], [first, second])
+            self.assertEqual([item[0] for item in reference], [[[42]], [[""]], [[0, ""]]])
+            for mode in ("python", "rust"):
+                with mock.patch.dict(os.environ, TOOLBOX_WPS_FORMULA_BACKEND=mode):
+                    with self.assertRaisesRegex(ValueError, "第二张!B2"):
+                        service.read_excel_ranges(path, [*requests, ("第二张", "C4")])
+
+    def test_auto_small_sheets_skip_native_and_large_native_failures_recheck_in_python(self):
+        from toolbox_shared import wps_service as service
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "source.xlsx"
+            book = Workbook()
+            book.active["A1"] = "=1+2"
+            book.save(path)
+            book.close()
+            with mock.patch.dict(os.environ, TOOLBOX_WPS_FORMULA_BACKEND="auto"), \
+                 mock.patch.object(native_excel, "native_binary", return_value=Path("mock-rust")), \
+                 mock.patch.object(native_excel, "call", side_effect=ValueError("unknown operation")) as call:
+                with self.assertRaisesRegex(ValueError, "Sheet!A1"):
+                    service.read_excel_range(path, "Sheet", "A1")
+                call.assert_not_called()
+                with mock.patch.object(service, "WPS_FORMULA_NATIVE_MIN_BYTES", 1):
+                    with self.assertRaisesRegex(ValueError, "Sheet!A1"):
+                        service.read_excel_range(path, "Sheet", "A1")
+                call.assert_called_once()
+
+    def test_replaced_source_during_range_read_stops(self):
+        from toolbox_shared import wps_service as service
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "source.xlsx"
+            replacement = Path(folder) / "replacement.xlsx"
+            book = Workbook()
+            book.active["A1"] = 42
+            book.save(path)
+            book.active["A1"] = "=1+2"
+            book.save(replacement)
+            book.close()
+            validate = service.validate_formula_caches
+
+            def replace_after_validation(path, requests, **kwargs):
+                validate(path, requests, **kwargs)
+                replacement.replace(path)
+
+            with mock.patch.object(service, "validate_formula_caches", side_effect=replace_after_validation):
+                with self.assertRaisesRegex(RuntimeError, "来源工作簿已修改"):
+                    service.read_excel_range(path, "Sheet", "A1")
 
     def test_multiple_ranges_share_formula_and_value_readers_and_keep_mapping_order(self) -> None:
         root = Path(__file__).resolve().parents[2]
@@ -74,7 +161,7 @@ class WpsBatchReadTests(unittest.TestCase):
             ) as opened:
                 prepared = module.prepare_mappings(mappings)
 
-            self.assertEqual(2, opened.call_count)
+            opened.assert_called_once()
             self.assertEqual([1, 2, 3], [item.index for item in prepared])
             self.assertEqual([["2026-09-24 08:30:00", 0.125]], prepared[0].values)
             self.assertEqual([["完成"]], prepared[1].values)

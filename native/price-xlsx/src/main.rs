@@ -7,8 +7,9 @@ use std::io::{self, BufReader, BufWriter, Write};
 mod cells;
 mod compute;
 mod frame;
-mod wps;
 mod market;
+mod wps;
+mod wps_formula;
 
 #[derive(Deserialize)]
 struct Request {
@@ -29,6 +30,8 @@ struct Request {
 struct Sheet {
     name: String,
     rows: Vec<Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    row_offset: Option<u32>,
 }
 
 fn cell_value(cell: &Data) -> Result<Value, String> {
@@ -49,10 +52,11 @@ fn execute(request: Request) -> Result<Value, Box<dyn std::error::Error>> {
     }
     match request.operation.as_str() {
         "capabilities" => Ok(
-            serde_json::json!({"protocol":1,"stream":true,"operations":["unmix","sheet_data","read_frame","write_frame","wps_url_choices","market_manual"]}),
+            serde_json::json!({"protocol":1,"stream":true,"operations":["unmix","sheet_data","read_frame","write_frame","wps_url_choices","market_manual","read_topology","wps_formula_caches"]}),
         ),
         "market_manual" => market::execute(&request.payload).map_err(Into::into),
         "wps_url_choices" => wps::url_choices(&request.payload),
+        "wps_formula_caches" => wps_formula::inspect(&request.path, &request.payload),
         "unmix" => compute::unmix(&request.payload),
         "sheet_data" => compute::sheet_data(&request.payload),
         "write_frame" => frame::write(&request.payload),
@@ -69,16 +73,18 @@ fn execute(request: Request) -> Result<Value, Box<dyn std::error::Error>> {
                 .collect();
             Ok(serde_json::json!({"protocol":1, "books":books}))
         }
-        "read" => {
+        "read" | "read_topology" => {
+            let topology = request.operation == "read_topology";
             let mut book: Xlsx<_> = open_workbook(&request.path)?;
             let mut sheets = Vec::new();
             for name in book.sheet_names().to_vec() {
                 let range = book.worksheet_range(&name)?;
                 let mut rows = Vec::new();
-                if let Some((row_offset, col_offset)) = range.start() {
-                    // The Python parser requires headers on row 1, even when
-                    // a worksheet's actual used range starts below it.
-                    if row_offset > 0 {
+                let start = range.start();
+                if let Some((row_offset, col_offset)) = start {
+                    // Price cleaning requires a header on row 1. Catalog import
+                    // can find a header anywhere and needs the original row numbers.
+                    if row_offset > 0 && !topology {
                         rows.push(Vec::new());
                     } else {
                         for row in range.rows() {
@@ -90,7 +96,11 @@ fn execute(request: Request) -> Result<Value, Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                sheets.push(Sheet { name, rows });
+                sheets.push(Sheet {
+                    name,
+                    rows,
+                    row_offset: topology.then(|| start.map_or(0, |(row, _)| row)),
+                });
             }
             Ok(serde_json::json!({"protocol": 1, "sheets": sheets}))
         }

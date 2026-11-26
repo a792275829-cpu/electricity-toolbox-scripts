@@ -103,7 +103,7 @@
 
 ## Rust Excel 加速
 
-节点电价清洗的 XLSX 读取与写出支持 Rust 后端，节点匹配、跨表去重与 Decimal 均值仍用 Python。源码环境构建（需要 Rust/Cargo，仅构建时需要）：
+节点电价清洗的 XLSX 读取与写出、拓扑编辑导入及使用 JSON 拓扑分析时的 XLSX 读取，均支持 Rust 后端。节点匹配、跨表去重、Decimal 均值及拓扑关联规则由 Python 执行。拓扑导入逐表查找表头并保留错误的工作表名和实际行号。源码环境构建（需要 Rust/Cargo，仅构建时需要）：
 
 ```bash
 .venv/bin/python native/price-xlsx/build.py

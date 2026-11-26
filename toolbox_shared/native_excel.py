@@ -163,6 +163,30 @@ def call(binary, operation, path, **params):
     return _oneshot_call(binary, operation, path, **params)
 
 
+def price_backend_mode():
+    mode = os.environ.get("TOOLBOX_500KV_BACKEND", "auto")
+    if mode not in {"auto", "python", "rust"}:
+        raise ValueError(f"未知 500kV Excel 后端: {mode}")
+    return mode
+
+
+def read_price_sheets(binary, path, *, topology=False):
+    operation = "read_topology" if topology else "read"
+    sheets = call(binary, operation, path).get("sheets")
+    if not isinstance(sheets, list) or any(
+        not isinstance(sheet, dict) or not isinstance(sheet.get("name"), str)
+        or not isinstance(sheet.get("rows"), list)
+        or any(not isinstance(row, list) for row in sheet["rows"])
+        or (topology and (
+            type(sheet.get("row_offset")) is not int
+            or not 0 <= sheet["row_offset"] < 1_048_576
+        ))
+        for sheet in sheets
+    ):
+        raise ValueError("500kV Rust Excel 返回格式不正确")
+    return sheets
+
+
 def backend_mode():
     mode = os.environ.get("TOOLBOX_XLSX_BACKEND", "auto")
     if mode not in {"auto", "python", "rust"}:

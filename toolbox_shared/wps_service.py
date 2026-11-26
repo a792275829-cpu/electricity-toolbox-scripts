@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .task_cancellation import cancellation_checkpoint
+from .workbook_commit import workbook_identity
 import json
 import os
 import signal
@@ -12,6 +13,7 @@ import time as time_module
 import urllib.parse
 import urllib.request
 import zipfile
+from contextlib import closing, nullcontext
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from pathlib import Path
@@ -271,35 +273,90 @@ def read_excel_range(workbook_path: Path, sheet_name: str, source_range: str) ->
 
 
 
-def validate_formula_caches(workbook_path: Path, requests: list[tuple[str, str]]) -> None:
+# Use the ZIP member's expanded size, since that's what ElementTree would parse.
+WPS_FORMULA_NATIVE_MIN_BYTES = 8 * 1024 * 1024
+
+
+def _native_formula_caches(workbook_path, archive, parts, grouped):
+    from . import native_excel
+
+    mode = os.environ.get("TOOLBOX_WPS_FORMULA_BACKEND", "auto")
+    if mode not in {"auto", "python", "rust"}:
+        raise ValueError(f"未知 WPS 公式缓存检查后端: {mode}")
+    if mode == "python":
+        return {}
+    selected = {
+        name: {"part": parts[name], "regions": regions}
+        for name, regions in grouped.items()
+        if name in parts and (
+            mode == "rust" or archive.getinfo(parts[name]).file_size >= WPS_FORMULA_NATIVE_MIN_BYTES
+        )
+    }
+    if not selected:
+        return {}
+    binary = native_excel.native_binary()
+    if binary is None:
+        if mode == "rust":
+            raise RuntimeError("未安装 Rust 公式缓存检查后端")
+        return {}
+    try:
+        response = native_excel.call(
+            binary, "wps_formula_caches", workbook_path, payload=list(selected.values()),
+        )
+        missing = response.get("missing_cells")
+        if not isinstance(missing, list) or len(missing) != len(selected) or any(
+            cell is not None and (not isinstance(cell, str) or not cell) for cell in missing
+        ):
+            raise ValueError("Rust 公式缓存检查返回格式不正确")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        if mode == "rust":
+            raise
+        return {}
+    return dict(zip(selected, missing))
+
+
+def _missing_formula_cache(root, regions):
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    for cell in root.iterfind("./m:sheetData/m:row/m:c", ns):
+        formula = cell.find("m:f", ns)
+        if formula is None:
+            continue
+        left, top, right, bottom = range_boundaries(formula.get("ref", cell.attrib["r"]))
+        if not any(left <= max_col and min_col <= right and top <= max_row and min_row <= bottom
+                   for min_col, min_row, max_col, max_row in regions):
+            continue
+        cached = cell.find("m:v", ns)
+        if cached is None or (cached.text is None and cell.get("t") != "str"):
+            return cell.attrib["r"]
+    return None
+
+
+def validate_formula_caches(workbook_path: Path, requests: list[tuple[str, str]], *, workbook=None) -> None:
     """Inspect OOXML before normalizing blanks; an uncached formula isn't blank."""
     from xml.etree import ElementTree as ET
-    ns = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
-    metadata = load_excel_workbook(workbook_path, read_only=True, data_only=False)
-    try:
-        with zipfile.ZipFile(workbook_path) as archive:
-            parts = {sheet.title: sheet._worksheet_path for sheet in metadata.worksheets}
-            grouped = {}
-            for sheet_name, region in requests:
-                grouped.setdefault(sheet_name, []).append(range_boundaries(region))
-            for sheet_name, regions in grouped.items():
-                if sheet_name not in parts:
-                    continue  # The normal reader reports the missing sheet.
-                root = ET.fromstring(archive.read(parts[sheet_name]))
-                for cell in root.findall('.//m:sheetData/m:row/m:c', ns):
-                    formula = cell.find('m:f', ns)
-                    if formula is None:
-                        continue
-                    left, top, right, bottom = range_boundaries(formula.get('ref', cell.attrib['r']))
-                    if not any(left <= max_col and min_col <= right and top <= max_row and min_row <= bottom
-                               for min_col, min_row, max_col, max_row in regions):
-                        continue
-                    cached = cell.find('m:v', ns)
-                    if cached is None or (cached.text is None and cell.get('t') != 'str'):
-                        raise ValueError(f'来源公式缺少计算缓存，停止写入：{sheet_name}!{cell.attrib["r"]}；请用表格软件重新计算并保存。')
-    finally:
-        metadata.close()
 
+    context = nullcontext(workbook) if workbook is not None else closing(
+        load_excel_workbook(workbook_path, read_only=True, data_only=False)
+    )
+    with context as metadata:
+        archive = metadata._archive
+        parts = {sheet.title: sheet._worksheet_path for sheet in metadata.worksheets}
+        grouped = {}
+        for sheet_name, region in requests:
+            grouped.setdefault(sheet_name, []).append(range_boundaries(region))
+        missing = _native_formula_caches(workbook_path, archive, parts, grouped)
+        for sheet_name, regions in grouped.items():
+            if sheet_name not in parts:
+                continue  # The normal reader reports the missing sheet.
+            if sheet_name in missing:
+                cell_ref = missing[sheet_name]
+            else:
+                root = ET.fromstring(archive.read(parts[sheet_name]))
+                cell_ref = _missing_formula_cache(root, regions)
+            if cell_ref is not None:
+                raise ValueError(
+                    f"来源公式缺少计算缓存，停止写入：{sheet_name}!{cell_ref}；请用表格软件重新计算并保存。"
+                )
 
 
 def read_excel_ranges(
@@ -313,9 +370,10 @@ def read_excel_ranges(
     if not requests:
         return []
 
-    validate_formula_caches(workbook_path, requests)
+    source_identity = workbook_identity(workbook_path.stat())
     wb = load_excel_workbook(workbook_path, data_only=True, read_only=True)
     try:
+        validate_formula_caches(workbook_path, requests, workbook=wb)
         grouped: dict[str, list[tuple[int, tuple[int, int, int, int]]]] = {}
         for index, (sheet_name, source_range) in enumerate(requests):
             if sheet_name not in wb.sheetnames:
@@ -351,6 +409,9 @@ def read_excel_ranges(
                 )
         if any(result is None for result in results):
             raise RuntimeError("未能完整读取来源区域，请检查表格文件后重试。")
+        # A replacement between the cache scan and value read invalidates the preflight.
+        if workbook_identity(workbook_path.stat()) != source_identity:
+            raise RuntimeError(f"读取期间来源工作簿已修改，停止写入：{workbook_path}")
         return [result for result in results if result is not None]
     finally:
         wb.close()

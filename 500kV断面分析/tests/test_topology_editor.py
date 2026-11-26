@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from openpyxl import Workbook, load_workbook
 from toolbox_shared import section_topology as m
+from toolbox_shared.native_excel import native_binary
 
 
 class CatalogTests(unittest.TestCase):
@@ -63,6 +64,48 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(imported['duplicates'], 1)
         self.assertNotIn('某站500kV#1', json.dumps(imported))
         self.assertNotIn('某站500kV#2', json.dumps(imported))
+
+    @unittest.skipUnless(native_binary(), "build native/price-xlsx first")
+    def test_native_catalog_preserves_late_headers_and_physical_row_numbers(self):
+        path = self.workbook([['甲站500kV', 1, 2, 3, 4, 5]])
+        with path.open('rb') as source:
+            book = load_workbook(source)
+        sheet = book.create_sheet('表头不在首行')
+        for col, value in enumerate(('节点名称', '00:00', '00:15', '00:30', '00:45', '01:00'), 3):
+            sheet.cell(4, col, value)
+        for col, value in enumerate(('乙站220kV', 5, 4, 3, 2, 1), 3):
+            sheet.cell(7, col, value)
+        book.save(path)
+        with patch.dict(os.environ, TOOLBOX_500KV_BACKEND='python'):
+            reference = m.read_catalog(path)
+        with patch.dict(os.environ, TOOLBOX_500KV_BACKEND='rust'):
+            self.assertEqual(m.read_catalog(path), reference)
+        self.assertEqual(reference['rows'], 2)
+        self.assertEqual({item['station'] for item in reference['entries']}, {'甲', '乙'})
+
+        sheet['D7'] = '异常'
+        book.save(path)
+        book.close()
+        for mode in ('python', 'rust'):
+            with patch.dict(os.environ, TOOLBOX_500KV_BACKEND=mode):
+                with self.assertRaisesRegex(ValueError, '表头不在首行 第 7 行：电价存在非数值内容'):
+                    m.read_catalog(path)
+
+    @unittest.skipUnless(native_binary(), "build native/price-xlsx first")
+    def test_native_catalog_falls_back_for_unsupported_cell_types(self):
+        from datetime import date
+
+        path = self.workbook([['甲站500kV', 1, 2, 3, 4, 5]])
+        with path.open('rb') as source:
+            book = load_workbook(source)
+        book.active['B2'] = date(2026, 11, 26)  # Business parser ignores this column.
+        book.save(path)
+        book.close()
+        with patch.dict(os.environ, TOOLBOX_500KV_BACKEND='python'):
+            reference = m.read_catalog(path)
+        with patch.dict(os.environ, TOOLBOX_500KV_BACKEND='auto'):
+            with self.assertWarnsRegex(RuntimeWarning, '改用 Python'):
+                self.assertEqual(m.read_catalog(path), reference)
 
     def test_different_prices_voltage_and_missing_values_remain_separate(self):
         imported = self.imported([

@@ -52,7 +52,7 @@ fn tags(text: &str, mut visit: impl FnMut(&str, Attrs) -> Result<(), Error>) -> 
     Ok(())
 }
 
-fn coordinate(text: &str) -> Result<(u32, u32), Error> {
+pub(crate) fn coordinate(text: &str) -> Result<(u32, u32), Error> {
     let mut col = 0_u32;
     let mut digits = String::new();
     for c in text.chars().filter(|c| *c != '$') {

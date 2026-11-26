@@ -17,15 +17,16 @@ from toolbox_shared.task_cancellation import cancellation_checkpoint
 FileFingerprint = tuple[int, int, int, int, int, str]
 
 
+def workbook_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
 def workbook_fingerprint(path: Path) -> FileFingerprint:
     """Identify the exact input, rejecting a file changed while it is hashed."""
-    def identity(info):
-        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
-
     with path.open("rb") as source:
-        before = identity(os.fstat(source.fileno()))
+        before = workbook_identity(os.fstat(source.fileno()))
         digest = hashlib.file_digest(source, "sha256").hexdigest()
-        if before != identity(os.fstat(source.fileno())) or before != identity(path.stat()):
+        if before != workbook_identity(os.fstat(source.fileno())) or before != workbook_identity(path.stat()):
             raise RuntimeError(f"读取期间工作簿被修改，停止写入：{path}")
     return (*before, digest)
 
